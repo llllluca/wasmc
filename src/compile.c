@@ -92,7 +92,8 @@ static void compile_instr_local_get(FILE *f, func_compile_ctx_t *ctx) {
         if (index < func->type->num_params) {
             wasm_type = func->type->params_type[index];
             index = ctx->ssa_params[index];
-        } else if (index < func->num_locals) {
+        } else if (index - func->type->num_params < func->num_locals) {
+            index -= func->type->num_params;
             wasm_type = func->locals_type[index];
             index = ctx->ssa_locals[index];
         } else panic();
@@ -103,6 +104,32 @@ static void compile_instr_local_get(FILE *f, func_compile_ctx_t *ctx) {
         item->type = wasm_type;
         da_push(ctx->stack, item);
         fprintf(f, "\t%%t%d =%c load%c %%t%d\n", var, qbe_type, qbe_type, index);
+}
+
+static void compile_instr_local_set(FILE *f, func_compile_ctx_t *ctx) {
+
+        unsigned int index;
+        unsigned char wasm_type;
+        wasm_func_t *func = ctx->func;
+        dalist_t *stack = ctx->stack;
+
+        readULEB128_u32(&func->body, &index);
+        if (index < func->type->num_params) {
+            wasm_type = func->type->params_type[index];
+            index = ctx->ssa_params[index];
+        } else if (index - func->type->num_params < func->num_locals) {
+            index -= func->type->num_params;
+            wasm_type = func->locals_type[index];
+            index = ctx->ssa_locals[index];
+        } else panic();
+
+        stack_item_t *item = da_pop(stack);
+        if (item == NULL || item->type != wasm_type) {
+            panic();
+        }
+        unsigned int qbe_type = to_qbe_simple_types(wasm_type);
+        fprintf(f, "\tstore%c %%t%d, %%t%d\n", qbe_type, item->ssa_var, index);
+        free(item);
 }
 
 static void compile_instr_i32_const(FILE *f, func_compile_ctx_t *ctx) {
@@ -230,6 +257,7 @@ static void compile_instr_if(FILE *f, func_compile_ctx_t *ctx) {
     if (new_stack.size != 0) {
         panic();
     }
+    fprintf(f, "\tjmp @l%d\n", end_label);
     fprintf(f, "@l%d\n", else_label);
     if (opcode == ELSE_OPCODE) {
         read_u8(r, &opcode);
@@ -269,8 +297,11 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
             break;
         case NOP_OPCODE:
             break;
-        case LOCAL_GET_OPCODE: 
+        case LOCAL_GET_OPCODE:
             compile_instr_local_get(f, ctx);
+            break;
+        case LOCAL_SET_OPCODE:
+            compile_instr_local_set(f, ctx);
             break;
         case I32_ADD_OPCODE:
         case I32_SUB_OPCODE:
