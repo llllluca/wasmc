@@ -1,0 +1,7 @@
+wasm3/
+iwasm3
+.ccls-cache/
+c2wasm.sh
+endianess.c
+main
+qbe
