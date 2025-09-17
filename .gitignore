@@ -5,3 +5,5 @@ c2wasm.sh
 endianess.c
 main
 qbe
+compile.sh
+test/*.ssa

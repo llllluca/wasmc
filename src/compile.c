@@ -1,7 +1,10 @@
 #include "all.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "dalist.h"
+
+static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode);
 
 char to_qbe_simple_types(unsigned char wasm_type) {
     switch (wasm_type) {
@@ -43,7 +46,7 @@ static unsigned int fresh_var() {
     return count++;
 }
 
-static void compile_instr_i32_add(FILE *f, func_compile_ctx_t *ctx) {
+static void compile_instr_i32_binop(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
 
     unsigned int var;
     dalist_t *stack = ctx->stack;
@@ -51,9 +54,9 @@ static void compile_instr_i32_add(FILE *f, func_compile_ctx_t *ctx) {
     if (stack->size < 2) {
         panic();
     }
-    stack_item_t *left = da_pop(stack);
-    stack_item_t *right = da_pop(stack);
-    if (left->type != I32_VALTYPE || right->type != I32_VALTYPE) {
+    stack_item_t *snd = da_pop(stack);
+    stack_item_t *fst = da_pop(stack);
+    if (snd->type != I32_VALTYPE || fst->type != I32_VALTYPE) {
         panic();
     }
     var = fresh_var();
@@ -61,9 +64,20 @@ static void compile_instr_i32_add(FILE *f, func_compile_ctx_t *ctx) {
     item->ssa_var = var;
     item->type = I32_VALTYPE;
     da_push(stack, item);
-    fprintf(f, "\t%%t%d =w add %%t%d, %%t%d\n", var, left->ssa_var, right->ssa_var);
-    free(left);
-    free(right);
+    fprintf(f, "\t%%t%d =w ", var);
+    switch (opcode) {
+        case I32_ADD_OPCODE:
+            fprintf(f, "add");
+            break;
+        case I32_SUB_OPCODE:
+            fprintf(f, "sub");
+            break;
+        default:
+            panic();
+    }
+    fprintf(f, " %%t%d, %%t%d\n", fst->ssa_var, snd->ssa_var);
+    free(snd);
+    free(fst);
 }
 
 
@@ -105,7 +119,7 @@ static void compile_instr_i32_const(FILE *f, func_compile_ctx_t *ctx) {
             /* Constants in QBE IR are always parsed as 64-bit blobs.
              * Depending on the context surrounding a constant,
              * only some of its bits are used. */
-            fprintf(f, "\t%%t%d =w add %d, 0\n", var, n);
+            fprintf(f, "\t%%t%d =w copy %d\n", var, n);
 }
 
 
@@ -151,18 +165,23 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         } else {
             fprintf(f, "\t%%t%d =%c call $f%d(", var, qbe_return_type, funcidx);
         }
+
+        stack_item_t **args = calloc_or_panic(type->num_params, sizeof(stack_item_t *));
         for (unsigned int i = 0; i < type->num_params; i++) {
-            stack_item_t *arg = da_pop(ctx->stack);
-            if (arg->type != type->params_type[i]) {
+            args[type->num_params - i - 1] = da_pop(ctx->stack);
+        }
+        for (unsigned int i = 0; i < type->num_params; i++) {
+            if (args[i]->type != type->params_type[i]) {
                 panic();
             }
             qbe_param_type = to_qbe_simple_types(type->params_type[i]);
-            fprintf(f, "%c %%t%d", qbe_param_type,  arg->ssa_var);
+            fprintf(f, "%c %%t%d", qbe_param_type,  args[i]->ssa_var);
             if (i < type->num_params-1) {
                 fprintf(f, ", ");
             }
-            free(arg);
+            free(args[i]);
         }
+        free(args);
         fprintf(f, ")\n");
         if (type->return_type != NO_TYPE) {
             stack_item_t *item = malloc_or_panic(sizeof(stack_item_t));
@@ -172,21 +191,90 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         }
 }
 
-static void compile_instr(FILE *f, func_compile_ctx_t *ctx) {
-
+static void compile_instr_if(FILE *f, func_compile_ctx_t *ctx) {
+    dalist_t *stack = ctx->stack;
     read_struct_t *r = &ctx->func->body;
-    unsigned char opcode;
+    stack_item_t *item;
+    unsigned char opcode, block_type;
+    unsigned int then_label, else_label, end_label, result_var;
+    dalist_t new_stack = {0};
 
+    item = da_pop(stack);
+    if (item == NULL || item->type != I32_VALTYPE) {
+        panic();
+    }
+    read_u8(r, &block_type);
+    then_label = ctx->label_count++;
+    else_label = ctx->label_count++;
+    end_label = ctx->label_count++;
+    result_var = fresh_var();
+    fprintf(f, "\tjnz %%t%d, @l%d, @l%d\n", item->ssa_var, then_label, else_label);
+    free(item);
+    fprintf(f, "@l%d\n", then_label);
+
+    ctx->stack = &new_stack;
     read_u8(r, &opcode);
+    while (opcode != ELSE_OPCODE && opcode != END_CODE) {
+        compile_instr(f, ctx, opcode);
+        read_u8(r, &opcode);
+    }
+    if (block_type != 0x40) {
+        item = da_pop(&new_stack);
+        if (item == NULL || item->type != block_type) {
+            panic();
+        }
+        unsigned int qbe_type = to_qbe_simple_types(block_type);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, item->ssa_var);
+        free(item);
+    }
+    if (new_stack.size != 0) {
+        panic();
+    }
+    fprintf(f, "@l%d\n", else_label);
+    if (opcode == ELSE_OPCODE) {
+        read_u8(r, &opcode);
+        while (opcode != END_CODE) {
+            compile_instr(f, ctx, opcode);
+            read_u8(r, &opcode);
+        }
+    }
+    if (block_type != 0x40) {
+        item = da_pop(&new_stack);
+        if (item == NULL || item->type != block_type) {
+            panic();
+        }
+        unsigned int qbe_type = to_qbe_simple_types(block_type);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, item->ssa_var);
+        free(item);
+    }
+    if (new_stack.size != 0) {
+        panic();
+    }
+    ctx->stack = stack;
+    da_free(&new_stack);
+    if (block_type != 0x40) {
+        item = malloc_or_panic(sizeof(stack_item_t));
+        item->ssa_var = result_var;
+        item->type = block_type;
+        da_push(stack, item);
+    }
+    fprintf(f, "@l%d\n", end_label);
+}
+
+static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
     switch (opcode) {
         case UNREACHABLE_OPCODE:
+            fprintf(f, "\thlt\n");
+            break;
         case NOP_OPCODE:
             break;
         case LOCAL_GET_OPCODE: 
             compile_instr_local_get(f, ctx);
             break;
         case I32_ADD_OPCODE:
-            compile_instr_i32_add(f, ctx);
+        case I32_SUB_OPCODE:
+            compile_instr_i32_binop(f, ctx, opcode);
             break;
         case I32_CONST_OPCODE:
             compile_instr_i32_const(f, ctx);
@@ -194,7 +282,11 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx) {
         case CALL_OPCODE:
             compile_instr_call(f, ctx);
             break;
+        case IF_OPCODE:
+            compile_instr_if(f, ctx);
+            break;
         default:
+            printf("PANIC: opcode = 0x%02X\n", opcode);
             panic();
     }
 }
@@ -255,9 +347,13 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
         .stack = &stack,
         .ssa_params = ssa_params,
         .ssa_locals = ssa_locals,
+        .label_count = 0,
     };
+
+    unsigned char opcode;
     while (func->body.offset != func->body.end) {
-        compile_instr(f, &ctx);
+        read_u8(&func->body, &opcode);
+        compile_instr(f, &ctx, opcode);
     }
 
     stack_item_t *item = da_pop(&stack);

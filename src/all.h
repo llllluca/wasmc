@@ -68,6 +68,7 @@ typedef struct {
     wasm_module_t *m;
     wasm_func_t *func;
     dalist_t *stack;
+    unsigned int label_count;
     unsigned int *ssa_params;
     unsigned int *ssa_locals;
 } func_compile_ctx_t;
@@ -117,6 +118,7 @@ typedef int err_t;
 
 // Numeric instruction opcodes
 #define I32_ADD_OPCODE   0x6A
+#define I32_SUB_OPCODE   0x6B
 #define I32_CONST_OPCODE 0x41
 
 #define FUNCTION_START_CODE 0x60

@@ -4,7 +4,7 @@
   (func (;0;) (type 0) (result i32)
     i32.const 0 (; param 0 ;)
     i32.const 50 (; param 1 ;)
-    i32.const 100 (; param 2 ;)
+    i32.const 101 (; param 2 ;)
     call 1)
   (func (;1;) (type 1) (param i32 i32 i32) (result i32)
     local.get 0
@@ -15,9 +15,9 @@
         i32.add (; param 1 + param 2 ;)
       )
       (else 
-        local.get 1
         local.get 2
-        i32.sub (; param 1 - param 2 ;)
+        local.get 1
+        i32.sub (; param 2 - param 1 ;)
       )
     )
   )
