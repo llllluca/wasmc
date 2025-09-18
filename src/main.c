@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     fclose(input);
 
     wasm_module_t *m = parse(wasm_buf, wasm_len);
-    print_wasm_module(m);
+    //print_wasm_module(m);
 
     unsigned int len = strlen(argv[1]) + 4 + 1;
     char *output_path = calloc(len, sizeof(char));

@@ -59,10 +59,29 @@ typedef struct {
      * the same type they share the same wasm_func_type_t struct. */
 } wasm_module_t;
 
+enum stack_entry_kind {
+    STACK_ENTRY_LABEL,
+    STACK_ENTRY_VALUE,
+};
+
 typedef struct {
-    unsigned int ssa_var;
-    unsigned char type;
-} stack_item_t;
+    unsigned int qbe_labelidx;
+} stack_label_t;
+
+typedef struct {
+    unsigned int qbe_varidx;
+    unsigned char wasm_type;
+} stack_value_t;
+
+union stack_value_or_label {
+    stack_value_t value;
+    stack_label_t label;
+};
+
+typedef struct {
+    enum stack_entry_kind kind;
+    union stack_value_or_label as;
+} stack_entry_t;
 
 typedef struct {
     wasm_module_t *m;

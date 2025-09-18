@@ -230,7 +230,6 @@ static void parse_code_section_if_exists(wasm_module_t *m) {
             func->num_locals = num_locals;
             for (uint32_t j = 0; j < num_locals; j++) {
                 readULEB128_u32(&m->module, &n);
-                printf("local variable count: %d\n", n);
                 read_value_type(m, &func->locals_type[j]);
             }
         }

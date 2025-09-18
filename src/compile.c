@@ -46,6 +46,23 @@ static unsigned int fresh_var() {
     return count++;
 }
 
+static stack_entry_t *alloc_stack_entry_value(
+    unsigned int qbe_varidx, unsigned int wasm_type) {
+
+    stack_entry_t *entry = malloc_or_panic(sizeof(stack_entry_t));
+    entry->kind = STACK_ENTRY_VALUE;
+    entry->as.value.qbe_varidx = qbe_varidx;
+    entry->as.value.wasm_type = wasm_type;
+    return entry;
+}
+static stack_entry_t *alloc_stack_entry_label(unsigned int qbe_labelidx) {
+    stack_entry_t *entry = malloc_or_panic(sizeof(stack_entry_t));
+    entry->kind = STACK_ENTRY_LABEL;
+    entry->as.label.qbe_labelidx = qbe_labelidx;
+    return entry;
+
+}
+
 static void compile_instr_i32_binop(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
 
     unsigned int var;
@@ -54,16 +71,19 @@ static void compile_instr_i32_binop(FILE *f, func_compile_ctx_t *ctx, unsigned c
     if (stack->size < 2) {
         panic();
     }
-    stack_item_t *snd = da_pop(stack);
-    stack_item_t *fst = da_pop(stack);
-    if (snd->type != I32_VALTYPE || fst->type != I32_VALTYPE) {
+    stack_entry_t *snd = da_pop(stack);
+    stack_entry_t *fst = da_pop(stack);
+    if (snd->kind != STACK_ENTRY_VALUE || fst->kind != STACK_ENTRY_VALUE) {
+        panic();
+    }
+    stack_value_t *snd_val = &snd->as.value;
+    stack_value_t *fst_val = &fst->as.value;
+    if (snd_val->wasm_type != I32_VALTYPE || fst_val->wasm_type != I32_VALTYPE) {
         panic();
     }
     var = fresh_var();
-    stack_item_t *item = malloc_or_panic(sizeof(stack_item_t));
-    item->ssa_var = var;
-    item->type = I32_VALTYPE;
-    da_push(stack, item);
+    stack_entry_t *entry = alloc_stack_entry_value(var, I32_VALTYPE);
+    da_push(stack, entry);
     fprintf(f, "\t%%t%d =w ", var);
     switch (opcode) {
         case I32_ADD_OPCODE:
@@ -75,7 +95,7 @@ static void compile_instr_i32_binop(FILE *f, func_compile_ctx_t *ctx, unsigned c
         default:
             panic();
     }
-    fprintf(f, " %%t%d, %%t%d\n", fst->ssa_var, snd->ssa_var);
+    fprintf(f, " %%t%d, %%t%d\n", fst_val->qbe_varidx, snd_val->qbe_varidx);
     free(snd);
     free(fst);
 }
@@ -99,10 +119,8 @@ static void compile_instr_local_get(FILE *f, func_compile_ctx_t *ctx) {
         } else panic();
 
         qbe_type = to_qbe_simple_types(wasm_type);
-        stack_item_t *item = malloc_or_panic(sizeof(stack_item_t));
-        item->ssa_var = var;
-        item->type = wasm_type;
-        da_push(ctx->stack, item);
+        stack_entry_t *entry = alloc_stack_entry_value(var, wasm_type);
+        da_push(ctx->stack, entry);
         fprintf(f, "\t%%t%d =%c load%c %%t%d\n", var, qbe_type, qbe_type, index);
 }
 
@@ -123,29 +141,31 @@ static void compile_instr_local_set(FILE *f, func_compile_ctx_t *ctx) {
             index = ctx->ssa_locals[index];
         } else panic();
 
-        stack_item_t *item = da_pop(stack);
-        if (item == NULL || item->type != wasm_type) {
+        stack_entry_t *entry = da_pop(stack);
+        if (entry == NULL || entry->kind != STACK_ENTRY_VALUE) {
+            panic();
+        }
+        stack_value_t *val = &entry->as.value;
+        if (val->wasm_type != wasm_type) {
             panic();
         }
         unsigned int qbe_type = to_qbe_simple_types(wasm_type);
-        fprintf(f, "\tstore%c %%t%d, %%t%d\n", qbe_type, item->ssa_var, index);
-        free(item);
+        fprintf(f, "\tstore%c %%t%d, %%t%d\n", qbe_type, val->qbe_varidx, index);
+        free(entry);
 }
 
 static void compile_instr_i32_const(FILE *f, func_compile_ctx_t *ctx) {
-            int32_t n;
-            wasm_func_t *func = ctx->func;
-            unsigned int var;
+        int32_t n;
+        wasm_func_t *func = ctx->func;
+        unsigned int var;
 
-            readULEB128_i32(&func->body, &n);
-            var = fresh_var();
-            stack_item_t *item = malloc_or_panic(sizeof(stack_item_t));
-            item->ssa_var = var;
-            item->type = I32_VALTYPE;
-            da_push(ctx->stack, item);
-            /* Constants in QBE IR are always parsed as 64-bit blobs.
-             * Depending on the context surrounding a constant,
-             * only some of its bits are used. */
+        readULEB128_i32(&func->body, &n);
+        var = fresh_var();
+        stack_entry_t *entry = alloc_stack_entry_value(var, I32_VALTYPE);
+        da_push(ctx->stack, entry);
+        /* Constants in QBE IR are always parsed as 64-bit blobs.
+         * Depending on the context surrounding a constant,
+         * only some of its bits are used. */
             fprintf(f, "\t%%t%d =w copy %d\n", var, n);
 }
 
@@ -193,16 +213,21 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
             fprintf(f, "\t%%t%d =%c call $f%d(", var, qbe_return_type, funcidx);
         }
 
-        stack_item_t **args = calloc_or_panic(type->num_params, sizeof(stack_item_t *));
+        stack_entry_t **args = calloc_or_panic(type->num_params, sizeof(stack_entry_t *));
         for (unsigned int i = 0; i < type->num_params; i++) {
-            args[type->num_params - i - 1] = da_pop(ctx->stack);
+             stack_entry_t *entry = da_pop(ctx->stack);
+            if (entry == NULL) {
+                panic();
+            }
+            args[type->num_params - i - 1] = entry;
         }
         for (unsigned int i = 0; i < type->num_params; i++) {
-            if (args[i]->type != type->params_type[i]) {
+            if (args[i]->kind != STACK_ENTRY_VALUE || 
+                args[i]->as.value.wasm_type != type->params_type[i]) {
                 panic();
             }
             qbe_param_type = to_qbe_simple_types(type->params_type[i]);
-            fprintf(f, "%c %%t%d", qbe_param_type,  args[i]->ssa_var);
+            fprintf(f, "%c %%t%d", qbe_param_type, args[i]->as.value.qbe_varidx);
             if (i < type->num_params-1) {
                 fprintf(f, ", ");
             }
@@ -211,23 +236,23 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         free(args);
         fprintf(f, ")\n");
         if (type->return_type != NO_TYPE) {
-            stack_item_t *item = malloc_or_panic(sizeof(stack_item_t));
-            item->ssa_var = var;
-            item->type = type->return_type;
-            da_push(ctx->stack, item);
+            stack_entry_t *entry = alloc_stack_entry_value(var, type->return_type);
+            da_push(ctx->stack, entry);
         }
 }
 
 static void compile_instr_if(FILE *f, func_compile_ctx_t *ctx) {
     dalist_t *stack = ctx->stack;
     read_struct_t *r = &ctx->func->body;
-    stack_item_t *item;
     unsigned char opcode, block_type;
     unsigned int then_label, else_label, end_label, result_var;
-    dalist_t new_stack = {0};
 
-    item = da_pop(stack);
-    if (item == NULL || item->type != I32_VALTYPE) {
+    stack_entry_t *entry = da_pop(stack);
+    if (entry == NULL || entry->kind != STACK_ENTRY_VALUE) {
+        panic();
+    }
+    stack_value_t *val = &entry->as.value;
+    if (val->wasm_type != I32_VALTYPE) {
         panic();
     }
     read_u8(r, &block_type);
@@ -235,56 +260,85 @@ static void compile_instr_if(FILE *f, func_compile_ctx_t *ctx) {
     else_label = ctx->label_count++;
     end_label = ctx->label_count++;
     result_var = fresh_var();
-    fprintf(f, "\tjnz %%t%d, @l%d, @l%d\n", item->ssa_var, then_label, else_label);
-    free(item);
-    fprintf(f, "@l%d\n", then_label);
+    fprintf(f, "\tjnz %%t%d, @l%d, @l%d\n", val->qbe_varidx, then_label, else_label);
+    free(entry);
+    entry = NULL;
+    val = NULL;
 
-    ctx->stack = &new_stack;
+    fprintf(f, "@l%d\n", then_label);
+    stack_entry_t *label_entry = alloc_stack_entry_label(end_label);
+    da_push(stack, label_entry);
     read_u8(r, &opcode);
     while (opcode != ELSE_OPCODE && opcode != END_CODE) {
         compile_instr(f, ctx, opcode);
         read_u8(r, &opcode);
     }
+
     if (block_type != 0x40) {
-        item = da_pop(&new_stack);
-        if (item == NULL || item->type != block_type) {
+        entry = da_pop(stack);
+        if (entry == NULL || entry->kind != STACK_ENTRY_VALUE) {
+            panic();
+        }
+        val = &entry->as.value;
+        if (val->wasm_type != block_type) {
             panic();
         }
         unsigned int qbe_type = to_qbe_simple_types(block_type);
-        fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, item->ssa_var);
-        free(item);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, val->qbe_varidx);
+        free(entry);
+        entry = NULL;
+        val = NULL;
     }
-    if (new_stack.size != 0) {
+    entry = da_pop(stack);
+    if (entry == NULL || entry->kind != STACK_ENTRY_LABEL) {
         panic();
     }
+    stack_label_t *label = &entry->as.label;
+    if (label->qbe_labelidx != end_label) {
+        panic();
+    }
+    if (opcode == ELSE_OPCODE) da_push(stack, entry);
+    else free(entry);
+    entry = NULL;
+    label = NULL;
     fprintf(f, "\tjmp @l%d\n", end_label);
     fprintf(f, "@l%d\n", else_label);
     if (opcode == ELSE_OPCODE) {
-        read_u8(r, &opcode);
-        while (opcode != END_CODE) {
-            compile_instr(f, ctx, opcode);
             read_u8(r, &opcode);
+            while (opcode != END_CODE) {
+                compile_instr(f, ctx, opcode);
+                read_u8(r, &opcode);
+            }
+        if (block_type != 0x40) {
+            entry = da_pop(stack);
+            if (entry == NULL || entry->kind != STACK_ENTRY_VALUE) {
+                panic();
+            }
+            val = &entry->as.value;
+            if (val->wasm_type != block_type) {
+                panic();
+            }
+            unsigned int qbe_type = to_qbe_simple_types(block_type);
+            fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, val->qbe_varidx);
+            free(entry);
+            entry = NULL;
+            val = NULL;
         }
-    }
-    if (block_type != 0x40) {
-        item = da_pop(&new_stack);
-        if (item == NULL || item->type != block_type) {
+        entry = da_pop(stack);
+        if (entry == NULL || entry->kind != STACK_ENTRY_LABEL) {
             panic();
         }
-        unsigned int qbe_type = to_qbe_simple_types(block_type);
-        fprintf(f, "\t%%t%d =%c copy %%t%d\n", result_var, qbe_type, item->ssa_var);
-        free(item);
+        stack_label_t *label = &entry->as.label;
+        if (label->qbe_labelidx != end_label) {
+            panic();
+        }
+        free(entry);
+        entry = NULL;
+        label = NULL;
     }
-    if (new_stack.size != 0) {
-        panic();
-    }
-    ctx->stack = stack;
-    da_free(&new_stack);
     if (block_type != 0x40) {
-        item = malloc_or_panic(sizeof(stack_item_t));
-        item->ssa_var = result_var;
-        item->type = block_type;
-        da_push(stack, item);
+        entry = alloc_stack_entry_value(result_var, block_type);
+        da_push(stack, entry);
     }
     fprintf(f, "@l%d\n", end_label);
 }
@@ -387,13 +441,22 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
         compile_instr(f, &ctx, opcode);
     }
 
-    stack_item_t *item = da_pop(&stack);
-    if (item == NULL || item->type != func->type->return_type || stack.size != 0) {
-        panic();
+    if (func->type->return_type != NO_TYPE) {
+        stack_entry_t *entry = da_pop(&stack);
+        if (entry == NULL || entry->kind != STACK_ENTRY_VALUE ||
+            entry->as.value.wasm_type != func->type->return_type ||
+            stack.size != 0) {
+            panic();
+        }
+        fprintf(f, "\tret %%t%d\n", entry->as.value.qbe_varidx);
+        free(entry);
+    } else {
+        if (stack.size != 0) {
+            panic();
+        }
+        fprintf(f, "\tret\n");
     }
-    fprintf(f, "\tret %%t%d\n", item->ssa_var);
     fprintf(f, "}\n");
-    free(item);
     if (ssa_params != NULL) free(ssa_params);
     if (ssa_locals != NULL) free(ssa_locals);
     da_free(&stack);
