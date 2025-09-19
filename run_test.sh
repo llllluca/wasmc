@@ -73,5 +73,11 @@ run_test "if13.wat" 2
 run_test "if14.wat" 22
 run_test "if15.wat" 5
 run_test "if16.wat" 10
+run_test "if17.wat" 72
+run_test "block1.wat" 10
+run_test "block1.wat" 10
+run_test "block2.wat" 29
+run_test "block3.wat" 72
+run_test "block4.wat" 55
 
 

@@ -222,15 +222,27 @@ static void parse_code_section_if_exists(wasm_module_t *m) {
         func = &m->funcs[i];
         readULEB128_u32(&m->module, &code_len);
 
-        // parse locals (ERROR, TODO)
         locals_start = m->module.offset;
-        readULEB128_u32(&m->module, &num_locals);
+        num_locals = 0;
+        unsigned int len;
+        readULEB128_u32(&m->module, &len);
+        unsigned char *start_vec_locals = m->module.offset;
+        for (uint32_t j = 0; j < len; j++) {
+            readULEB128_u32(&m->module, &n);
+            num_locals += n;
+        }
         if (num_locals > 0) {
+            m->module.offset = start_vec_locals;
             func->locals_type = calloc_or_panic(num_locals, sizeof(unsigned char));
             func->num_locals = num_locals;
-            for (uint32_t j = 0; j < num_locals; j++) {
+            unsigned int count = 0;
+            for (uint32_t j = 0; j < len; j++) {
                 readULEB128_u32(&m->module, &n);
-                read_value_type(m, &func->locals_type[j]);
+                unsigned char type;
+                read_value_type(m, &type);
+                for (unsigned int h = 0; h < n; h++) {
+                    func->locals_type[count++] = type;
+                }
             }
         }
 

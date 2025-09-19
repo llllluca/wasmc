@@ -174,23 +174,7 @@ static void compile_instr_i32_const(FILE *f, func_compile_ctx_t *ctx) {
 }
 
 
-/*
-static void compile_instr_block(FILE *f, func_compile_ctx_t *ctx) {
-    wasm_func_t *func = ctx->func;
-    unsigned char block_result_type;
-    unsigned char opcode;
 
-    read_u8(&func->body, &block_result_type);
-    if (block_result_type != BLOCK_EMPTY_TYPE &&
-        block_result_type != I32_VALTYPE &&
-        block_result_type != I64_VALTYPE) {
-        // TODO: add support for F32_VALTYPE and F64_VALTYPE
-        panic();
-    }
-    // TODO: add support for nested block
-
-}
-*/
 
 static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         uint32_t funcidx;
@@ -284,6 +268,7 @@ static void compile_instr_if(FILE *f, func_compile_ctx_t *ctx) {
     unsigned int else_label = ctx->label_count++;
     unsigned int  end_label = ctx->label_count++;
     unsigned int result_var = fresh_var();
+    fprintf(f, "%%t%d =w copy 0\n", result_var);
 
     /* if the condition is not zero jump to then_label
      * otherwise  jump to else_label */
@@ -448,6 +433,55 @@ static void compile_instr_return(FILE *f, func_compile_ctx_t *ctx) {
     ctx->branch_flag = 1;
 }
 
+static void compile_instr_block(FILE *f, func_compile_ctx_t *ctx) {
+    dalist_t *value_stack = ctx->value_stack;
+    dalist_t *label_stack = ctx->label_stack;
+    read_struct_t *r = &ctx->func->body;
+    unsigned char opcode, branch;
+
+    unsigned char block_type;
+    read_u8(r, &block_type);
+    //assert_block_type(block_type);
+
+    unsigned int  end_label = ctx->label_count++;
+    unsigned int result_var = fresh_var();
+    fprintf(f, "\t%%t%d =w copy 0\n", result_var);
+
+    da_push(value_stack, &bottom_block_stack);
+    label_t *label = alloc_label(end_label, block_type, result_var);
+    da_push(label_stack, label);
+
+    read_u8(r, &opcode);
+    while (opcode != END_CODE) {
+        compile_instr(f, ctx, opcode);
+        read_u8(r, &opcode);
+    }
+     branch = ctx->branch_flag;
+    /* reset branch_flag to false, there is no more need to skip
+     * instructions between a br and the end of the closest block */
+    ctx->branch_flag = 0;
+
+    if (block_type != BLOCK_TYPE_NONE && !branch) {
+        stack_entry_t *block_result = da_pop(value_stack);
+        assert_stack_entry_value(block_result, block_type);
+        unsigned int qbe_type = to_qbe_simple_types(block_type);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n",
+                result_var, qbe_type, block_result->as.value.qbe_varidx);
+        free(block_result);
+    }
+    /* check that the value stack is empty at the end of then branch */
+    stack_entry_t *bottom = da_pop(value_stack);
+    assert_stack_entry_block_end(bottom);
+
+    if (block_type != BLOCK_TYPE_NONE) {
+        stack_entry_t *result = alloc_stack_entry_value(result_var, block_type);
+        da_push(value_stack, result);
+    }
+    label = da_pop(label_stack);
+    free(label);
+    fprintf(f, "@l%d\n", end_label);
+}
+
 static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
 
     if (ctx->branch_flag) return;
@@ -484,6 +518,9 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
             break;
         case RETURN_OPCODE:
             compile_instr_return(f, ctx);
+            break;
+        case BLOCK_OPCODE:
+            compile_instr_block(f, ctx);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
