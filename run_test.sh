@@ -79,5 +79,7 @@ run_test "block1.wat" 10
 run_test "block2.wat" 29
 run_test "block3.wat" 72
 run_test "block4.wat" 55
+run_test "loop1.wat" 30
+run_test "loop2.wat" 101
 
 

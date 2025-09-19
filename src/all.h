@@ -85,8 +85,8 @@ typedef struct {
 
 typedef struct {
     unsigned int qbe_labelidx;
-    unsigned int wasm_type;
     unsigned int qbe_result_varidx;
+    unsigned char wasm_type;
 } label_t;
 
 typedef struct {
