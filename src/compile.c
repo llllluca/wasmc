@@ -418,6 +418,36 @@ static void compile_instr_br_if(FILE *f, func_compile_ctx_t *ctx) {
 
 }
 
+static void compile_instr_return(FILE *f, func_compile_ctx_t *ctx) {
+    dalist_t *value_stack = ctx->value_stack;
+    dalist_t *label_stack = ctx->label_stack;
+    stack_entry_t *result;
+
+    label_t *label = label_stack->items[0];
+
+    if (label->wasm_type != BLOCK_TYPE_NONE) {
+        result = da_pop(value_stack);
+        assert_stack_entry_value(result, label->wasm_type);
+        char qbe_type = to_qbe_simple_types(label->wasm_type);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n",
+                label->qbe_result_varidx, qbe_type,
+                result->as.value.qbe_varidx);
+        free(result);
+    }
+
+    stack_entry_t *entry = NULL;
+    do {
+        free(entry);
+        entry = da_pop(value_stack);
+        if (entry == NULL) panic();
+    } while(entry->kind != STACK_ENTRY_BLOCK_END);
+    da_push(value_stack, entry);
+
+    fprintf(f, "\tjmp @l%d\n", label->qbe_labelidx);
+    fprintf(f, "@l%d\n", ctx->label_count++);
+    ctx->branch_flag = 1;
+}
+
 static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
 
     if (ctx->branch_flag) return;
@@ -451,6 +481,9 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
             break;
         case BRANCH_IF_OPCODE:
             compile_instr_br_if(f, ctx);
+            break;
+        case RETURN_OPCODE:
+            compile_instr_return(f, ctx);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
