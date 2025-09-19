@@ -66,5 +66,11 @@ run_test "if6.wat" 20
 run_test "if7.wat" 5
 run_test "if8.wat" 10
 run_test "if9.wat" 20
+run_test "if10.wat" 151
+run_test "if11.wat" 156
+run_test "if12.wat" 99
+run_test "if13.wat" 2
+run_test "if14.wat" 22
+run_test "if15.wat" 5
 
 

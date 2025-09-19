@@ -386,6 +386,38 @@ static void compile_instr_br(FILE *f, func_compile_ctx_t *ctx) {
     ctx->branch_flag = 1;
 }
 
+static void compile_instr_br_if(FILE *f, func_compile_ctx_t *ctx) {
+    uint32_t labelidx;
+    dalist_t *value_stack = ctx->value_stack;
+    dalist_t *label_stack = ctx->label_stack;
+    read_struct_t *r = &ctx->func->body;
+
+    stack_entry_t *ifcond = da_pop(value_stack);
+    assert_stack_entry_value(ifcond, I32_VALTYPE);
+    unsigned int qbe_varidx = ifcond->as.value.qbe_varidx;
+    free(ifcond);
+
+    readULEB128_u32(r, &labelidx);
+    unsigned int size = label_stack->size;
+    if (size <= labelidx) panic();
+    label_t *label = label_stack->items[size - 1 - labelidx];
+
+    if (label->wasm_type != BLOCK_TYPE_NONE) {
+        stack_entry_t *result = da_peak_last(value_stack);
+        assert_stack_entry_value(result, label->wasm_type);
+        char qbe_type = to_qbe_simple_types(label->wasm_type);
+        fprintf(f, "\t%%t%d =%c copy %%t%d\n",
+                label->qbe_result_varidx, qbe_type,
+                result->as.value.qbe_varidx);
+    }
+
+    unsigned int continue_label = ctx->label_count++;
+    fprintf(f, "\tjnz %%t%d, @l%d, @l%d\n", 
+            qbe_varidx, label->qbe_labelidx, continue_label);
+    fprintf(f, "@l%d\n", continue_label);
+
+}
+
 static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
 
     if (ctx->branch_flag) return;
@@ -416,6 +448,9 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
             break;
         case BRANCH_OPCODE:
             compile_instr_br(f, ctx);
+            break;
+        case BRANCH_IF_OPCODE:
+            compile_instr_br_if(f, ctx);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
