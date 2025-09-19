@@ -60,36 +60,44 @@ typedef struct {
 } wasm_module_t;
 
 enum stack_entry_kind {
-    STACK_ENTRY_LABEL,
     STACK_ENTRY_VALUE,
+    STACK_ENTRY_BLOCK_END,
 };
-
-typedef struct {
-    unsigned int qbe_labelidx;
-} stack_label_t;
 
 typedef struct {
     unsigned int qbe_varidx;
     unsigned char wasm_type;
-} stack_value_t;
+} value_t;
 
-union stack_value_or_label {
-    stack_value_t value;
-    stack_label_t label;
+typedef struct {
+    unsigned int dummy;
+} block_end_t;
+
+union value_or_block_end {
+    value_t value;
+    block_end_t block_end;
 };
 
 typedef struct {
     enum stack_entry_kind kind;
-    union stack_value_or_label as;
+    union value_or_block_end as;
 } stack_entry_t;
+
+typedef struct {
+    unsigned int qbe_labelidx;
+    unsigned int wasm_type;
+    unsigned int qbe_result_varidx;
+} label_t;
 
 typedef struct {
     wasm_module_t *m;
     wasm_func_t *func;
-    dalist_t *stack;
+    dalist_t *value_stack;
+    dalist_t *label_stack;
     unsigned int label_count;
     unsigned int *ssa_params;
     unsigned int *ssa_locals;
+    unsigned char branch_flag;
 } func_compile_ctx_t;
 
 typedef int err_t;
@@ -155,10 +163,16 @@ typedef int err_t;
 #define F32_VALTYPE 0x7D
 #define F64_VALTYPE 0x7C
 
+#define BLOCK_TYPE_NONE 0x40
+#define BLOCK_TYPE_I32 I32_VALTYPE
+#define BLOCK_TYPE_I64 I64_VALTYPE
+#define BLOCK_TYPE_F32 F32_VALTYPE 
+#define BLOCK_TYPE_F64 F64_VALTYPE 
+
 void read_u8(read_struct_t *r, unsigned char *out);
 void read_u32(read_struct_t *r, uint32_t *out);
 unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
-unsigned int readULEB128_i32(read_struct_t *r, int32_t *out);
+unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
 wasm_module_t* parse(unsigned char *start, unsigned int len);
 void free_wasm_module(wasm_module_t *m);
 void panic(void);
