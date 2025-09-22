@@ -86,5 +86,7 @@ run_test "eq.wat" 110
 run_test "ne.wat" 90
 run_test "lt_s.wat" 110
 run_test "lt_u.wat" 90
+run_test "drop.wat" 90
+run_test "select.wat" 44
 
 

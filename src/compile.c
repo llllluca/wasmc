@@ -588,6 +588,62 @@ static void compile_control_instr(
             panic();
     }
 }
+static void compile_parametric_instr(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
+    switch (opcode) {
+        case DROP_OPCODE: {
+            stack_entry_t *entry = da_pop(ctx->value_stack);
+            if (entry == NULL || entry->kind != STACK_ENTRY_VALUE) {
+                panic();
+            }
+            free(entry);
+        } break;
+        case SELECT_OPCODE: {
+            // TODO: missing check on select_cond, snd_operand, fst_operand
+            stack_entry_t *select_cond = da_pop(ctx->value_stack);
+            assert_stack_entry_value(select_cond, I32_VALTYPE);
+            stack_entry_t *snd_operand = da_pop(ctx->value_stack);
+            stack_entry_t *fst_operand = da_pop(ctx->value_stack);
+            if (snd_operand == NULL || snd_operand->kind != STACK_ENTRY_VALUE ||
+                fst_operand == NULL || fst_operand->kind != STACK_ENTRY_VALUE) {
+                panic();
+            }
+            if (snd_operand->as.value.wasm_type != fst_operand->as.value.wasm_type) {
+                panic();
+            }
+            unsigned char wasm_type = snd_operand->as.value.wasm_type;
+            unsigned int select_snd = ctx->label_count++;
+            unsigned int select_fst = ctx->label_count++;
+            unsigned int end = ctx->label_count++;
+            unsigned int result_var = fresh_var();
+
+            fprintf(f, "\tjnz %%t%d, @l%d, @l%d\n",
+                    select_cond->as.value.qbe_varidx,
+                    select_fst, select_snd);
+            fprintf(f, "@l%d\n", select_fst);
+            fprintf(f, "\tjmp @l%d\n", end);
+            fprintf(f, "@l%d\n", select_snd);
+            fprintf(f, "\tjmp @l%d\n", end);
+            fprintf(f, "@l%d\n", end);
+            fprintf(f, "\t%%t%d =w phi @l%d %%t%d, @l%d %%t%d\n",
+                    result_var,
+                    select_fst,
+                    fst_operand->as.value.qbe_varidx,
+                    select_snd,
+                    snd_operand->as.value.qbe_varidx);
+           stack_entry_t *result = alloc_stack_entry_value(result_var, wasm_type);
+            da_push(ctx->value_stack, result);
+            free(select_cond);
+            free(snd_operand);
+            free(fst_operand);
+        } break;
+        default:
+            printf("PANIC: opcode = 0x%02X\n", opcode);
+            panic();
+
+    }
+}
 
 static void compile_variable_instr(
     FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
@@ -656,6 +712,9 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
     if (ctx->branch_flag) return;
     else if (opcode <= 0x11) {
         compile_control_instr(f, ctx, opcode);
+    }
+    else if (0x1A <= opcode && opcode <= 0x1B) {
+        compile_parametric_instr(f, ctx, opcode);
     }
     else if (0x20 <= opcode && opcode <= 0x24) {
         compile_variable_instr(f, ctx, opcode);

@@ -121,6 +121,9 @@ typedef int err_t;
 #define CODE_SECTION_ID     10
 #define DATA_SECTION_ID     10
 
+// Parametric instruction
+#define DROP_OPCODE   0x1A
+#define SELECT_OPCODE 0x1B
 
 // Variable instructions
 #define LOCAL_GET_OPCODE  0x20
