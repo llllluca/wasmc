@@ -88,5 +88,6 @@ run_test "lt_s.wat" 110
 run_test "lt_u.wat" 90
 run_test "drop.wat" 90
 run_test "select.wat" 44
+run_test "memory.wat" 250
 
 

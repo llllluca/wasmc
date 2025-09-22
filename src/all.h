@@ -89,6 +89,12 @@ typedef struct {
     unsigned char wasm_type;
 } label_t;
 
+enum br_or_return_flag {
+    NONE,
+    RETURN_FLAG,
+    BRANCH_FLAG
+};
+
 typedef struct {
     wasm_module_t *m;
     wasm_func_t *func;
@@ -97,7 +103,7 @@ typedef struct {
     unsigned int label_count;
     unsigned int *ssa_params;
     unsigned int *ssa_locals;
-    unsigned char branch_flag;
+    enum br_or_return_flag br_or_return_flag;
 } func_compile_ctx_t;
 
 typedef int err_t;
@@ -121,17 +127,6 @@ typedef int err_t;
 #define CODE_SECTION_ID     10
 #define DATA_SECTION_ID     10
 
-// Parametric instruction
-#define DROP_OPCODE   0x1A
-#define SELECT_OPCODE 0x1B
-
-// Variable instructions
-#define LOCAL_GET_OPCODE  0x20
-#define LOCAL_SET_OPCODE  0x21
-#define LOCAL_TEE_OPCODE  0x22 //not implemented
-#define GLOBAL_GET_OPCODE 0x23 //not implemented
-#define GLOBAL_SET_OPCODE 0x25 //not implemented
-
 // Control instructions
 #define UNREACHABLE_OPCODE   0x00
 #define NOP_OPCODE           0x01
@@ -146,19 +141,34 @@ typedef int err_t;
 #define CALL_OPCODE          0x10
 #define CALL_INDIRECT_OPCODE 0x11 //not implemented
 
+// Parametric instruction
+#define DROP_OPCODE   0x1A
+#define SELECT_OPCODE 0x1B
+
+// Variable instructions
+#define LOCAL_GET_OPCODE  0x20
+#define LOCAL_SET_OPCODE  0x21
+#define LOCAL_TEE_OPCODE  0x22 //not implemented
+#define GLOBAL_GET_OPCODE 0x23 //not implemented
+#define GLOBAL_SET_OPCODE 0x25 //not implemented
+
+// Memory instructions
+#define I32_LOAD_OPCODE  0x28
+#define I32_STORE_OPCODE 0x36
+
 // Numeric instruction opcodes
-#define I32_CONST_OPCODE 0x41
-#define I32_EQZ_OPCODE   0x45
-#define I32_EQ_OPCODE    0x46
-#define I32_NE_OPCODE    0x47
-#define I32_LT_S_OPCODE  0x48
-#define I32_LT_U_OPCODE  0x49
-#define I32_GT_S_OPCODE  0x4A
-#define I32_GT_U_OPCODE  0x4B
-#define I32_LE_S_OPCODE  0x4C
-#define I32_LE_U_OPCODE  0x4D
-#define I32_GE_S_OPCODE  0x4E
-#define I32_GE_U_OPCODE  0x4F
+#define I32_CONST_OPCODE  0x41
+#define I32_EQZ_OPCODE    0x45
+#define I32_EQ_OPCODE     0x46
+#define I32_NE_OPCODE     0x47
+#define I32_LT_S_OPCODE   0x48
+#define I32_LT_U_OPCODE   0x49
+#define I32_GT_S_OPCODE   0x4A
+#define I32_GT_U_OPCODE   0x4B
+#define I32_LE_S_OPCODE   0x4C
+#define I32_LE_U_OPCODE   0x4D
+#define I32_GE_S_OPCODE   0x4E
+#define I32_GE_U_OPCODE   0x4F
 #define I32_CLZ_OPCODE    0x67 //not implemented
 #define I32_CTZ_OPCODE    0x68 //not implemented
 #define I32_POPCNT_OPCODE 0x69 //not implemented

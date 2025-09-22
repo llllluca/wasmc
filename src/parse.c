@@ -99,20 +99,22 @@ static void parse_table_section_if_exists(wasm_module_t *m) {
 }
 
 static void parse_memory_section_if_exists(wasm_module_t *m) {
-    uint32_t size, num_mems;
-    unsigned char id, flag;
+    unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
     read_u8(&m->module, &id);
-    if (id != TABLE_SECTION_ID) {
+    if (id != MEMORY_SECTION_ID) {
         m->module.offset--;
         return;
     }
+
+    uint32_t size, num_mems;
     readULEB128_u32(&m->module, &size);
     readULEB128_u32(&m->module, &num_mems);
     if (num_mems != 1) {
         panic();
     }
+    unsigned char flag;
     read_u8(&m->module, &flag);
     switch (flag) {
         case ONLY_MIN_MEMORY_LIMIT:
