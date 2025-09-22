@@ -81,5 +81,10 @@ run_test "block3.wat" 72
 run_test "block4.wat" 55
 run_test "loop1.wat" 30
 run_test "loop2.wat" 101
+run_test "eqz.wat" 90
+run_test "eq.wat" 110
+run_test "ne.wat" 90
+run_test "lt_s.wat" 110
+run_test "lt_u.wat" 90
 
 

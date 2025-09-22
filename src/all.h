@@ -125,9 +125,9 @@ typedef int err_t;
 // Variable instructions
 #define LOCAL_GET_OPCODE  0x20
 #define LOCAL_SET_OPCODE  0x21
-#define LOCAL_TEE_OPCODE  0x22
-#define GLOBAL_GET_OPCODE 0x23
-#define GLOBAL_SET_OPCODE 0x24
+#define LOCAL_TEE_OPCODE  0x22 //not implemented
+#define GLOBAL_GET_OPCODE 0x23 //not implemented
+#define GLOBAL_SET_OPCODE 0x25 //not implemented
 
 // Control instructions
 #define UNREACHABLE_OPCODE   0x00
@@ -138,15 +138,43 @@ typedef int err_t;
 #define ELSE_OPCODE          0x05
 #define BRANCH_OPCODE        0x0C
 #define BRANCH_IF_OPCODE     0x0D
-#define BRANCH_TABLE_OPCODE  0x0E
+#define BRANCH_TABLE_OPCODE  0x0E //not implemented
 #define RETURN_OPCODE        0x0F
 #define CALL_OPCODE          0x10
-#define CALL_INDIRECT_OPCODE 0x11
+#define CALL_INDIRECT_OPCODE 0x11 //not implemented
 
 // Numeric instruction opcodes
-#define I32_ADD_OPCODE   0x6A
-#define I32_SUB_OPCODE   0x6B
 #define I32_CONST_OPCODE 0x41
+#define I32_EQZ_OPCODE   0x45
+#define I32_EQ_OPCODE    0x46
+#define I32_NE_OPCODE    0x47
+#define I32_LT_S_OPCODE  0x48
+#define I32_LT_U_OPCODE  0x49
+#define I32_GT_S_OPCODE  0x4A
+#define I32_GT_U_OPCODE  0x4B
+#define I32_LE_S_OPCODE  0x4C
+#define I32_LE_U_OPCODE  0x4D
+#define I32_GE_S_OPCODE  0x4E
+#define I32_GE_U_OPCODE  0x4F
+#define I32_CLZ_OPCODE    0x67 //not implemented
+#define I32_CTZ_OPCODE    0x68 //not implemented
+#define I32_POPCNT_OPCODE 0x69 //not implemented
+#define I32_ADD_OPCODE    0x6A
+#define I32_SUB_OPCODE    0x6B
+#define I32_MUL_OPCODE    0x6C
+#define I32_DIV_S_UPCODE  0x6D
+#define I32_DIV_U_OPCODE  0x6E
+#define I32_REM_S_OPCODE  0x6F
+#define I32_REM_U_OPCODE  0x70
+#define I32_AND_OPCODE    0x71
+#define I32_OR_OPCODE     0x72
+#define I32_XOR_OPCODE    0x73
+#define I32_SHL_OPCODE    0x74
+#define I32_SHR_S_OPCODE  0x75
+#define I32_SHR_U_OPCODE  0x76
+#define I32_ROTL_OPCODE   0x77
+#define I32_ROTR_OPCODE   0x78
+
 
 #define FUNCTION_START_CODE 0x60
 #define FUNCTION_END_CODE   0x0B

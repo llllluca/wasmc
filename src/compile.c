@@ -114,6 +114,110 @@ static void compile_instr_i32_binop(
         case I32_SUB_OPCODE:
             fprintf(f, "sub");
             break;
+        case I32_MUL_OPCODE:
+            fprintf(f, "mul");
+            break;
+        case I32_DIV_S_UPCODE:
+            fprintf(f, "div");
+            break;
+        case I32_DIV_U_OPCODE:
+            fprintf(f, "udiv");
+            break;
+        case I32_REM_S_OPCODE:
+            fprintf(f, "rem");
+            break;
+        case I32_REM_U_OPCODE:
+            fprintf(f, "urem");
+            break;
+        case I32_AND_OPCODE:
+            fprintf(f, "and");
+            break;
+        case I32_OR_OPCODE:
+            fprintf(f, "or");
+            break;
+        case I32_XOR_OPCODE:
+            fprintf(f, "xor");
+            break;
+        case I32_SHL_OPCODE:
+            fprintf(f, "shl");
+            break;
+        case I32_SHR_S_OPCODE:
+            fprintf(f, "sar");
+            break;
+        case I32_SHR_U_OPCODE:
+            fprintf(f, "shr");
+            break;
+        default:
+            panic();
+    }
+    fprintf(f, " %%t%d, %%t%d\n",
+            fst_operand->as.value.qbe_varidx,
+            snd_operand->as.value.qbe_varidx);
+    free(snd_operand);
+    free(fst_operand);
+}
+
+static void compile_instr_i32_tests(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
+    stack_entry_t *test_cond = da_pop(ctx->value_stack);
+    assert_stack_entry_value(test_cond, I32_VALTYPE);
+    unsigned int result_varidx = fresh_var();
+    stack_entry_t *entry = alloc_stack_entry_value(result_varidx, I32_VALTYPE);
+    da_push(ctx->value_stack, entry);
+    switch (opcode) {
+        case I32_EQZ_OPCODE:
+            fprintf(f, "\t%%t%d =w ceqw %%t%d, 0\n",
+                    result_varidx, test_cond->as.value.qbe_varidx);
+            break;
+        default:
+            panic();
+    }
+    free(test_cond);
+}
+
+static void compile_instr_i32_comparisons(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
+    stack_entry_t *snd_operand = da_pop(ctx->value_stack);
+    stack_entry_t *fst_operand = da_pop(ctx->value_stack);
+    assert_stack_entry_value(snd_operand, I32_VALTYPE);
+    assert_stack_entry_value(fst_operand, I32_VALTYPE);
+    unsigned int result_varidx = fresh_var();
+    stack_entry_t *entry = alloc_stack_entry_value(result_varidx, I32_VALTYPE);
+    da_push(ctx->value_stack, entry);
+    fprintf(f, "\t%%t%d =w ", result_varidx);
+    switch (opcode) {
+        case I32_EQ_OPCODE:
+            fprintf(f, "ceqw");
+            break;
+        case I32_NE_OPCODE:
+            fprintf(f, "cnew");
+            break;
+        case I32_LT_S_OPCODE:
+            fprintf(f, "csltw");
+            break;
+        case I32_LT_U_OPCODE:
+            fprintf(f, "cultw");
+            break;
+        case I32_GT_S_OPCODE:
+            fprintf(f, "csgtw");
+            break;
+        case I32_GT_U_OPCODE:
+            fprintf(f, "cugtw");
+            break;
+        case I32_LE_S_OPCODE:
+            fprintf(f, "cslew");
+            break;
+        case I32_LE_U_OPCODE:
+            fprintf(f, "culew");
+            break;
+        case I32_GE_S_OPCODE:
+            fprintf(f, "csgew");
+            break;
+        case I32_GE_U_OPCODE:
+            fprintf(f, "cugew");
+            break;
         default:
             panic();
     }
@@ -449,29 +553,20 @@ static void compile_instr_loop(FILE *f, func_compile_ctx_t *ctx) {
     return_from_blocks(ctx, l);
 }
 
-static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
-    if (ctx->branch_flag) return;
+static void compile_control_instr(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
     switch (opcode) {
         case UNREACHABLE_OPCODE:
             fprintf(f, "\thlt\n");
             break;
         case NOP_OPCODE:
             break;
-        case LOCAL_GET_OPCODE:
-            compile_instr_local_get(f, ctx);
+        case BLOCK_OPCODE:
+            compile_instr_block(f, ctx);
             break;
-        case LOCAL_SET_OPCODE:
-            compile_instr_local_set(f, ctx);
-            break;
-        case I32_ADD_OPCODE:
-        case I32_SUB_OPCODE:
-            compile_instr_i32_binop(f, ctx, opcode);
-            break;
-        case I32_CONST_OPCODE:
-            compile_instr_i32_const(f, ctx);
-            break;
-        case CALL_OPCODE:
-            compile_instr_call(f, ctx);
+        case LOOP_OPCODE:
+            compile_instr_loop(f, ctx);
             break;
         case IF_OPCODE:
             compile_instr_if(f, ctx);
@@ -485,15 +580,92 @@ static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode
         case RETURN_OPCODE:
             compile_instr_return(f, ctx);
             break;
-        case BLOCK_OPCODE:
-            compile_instr_block(f, ctx);
-            break;
-        case LOOP_OPCODE:
-            compile_instr_loop(f, ctx);
+        case CALL_OPCODE:
+            compile_instr_call(f, ctx);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
             panic();
+    }
+}
+
+static void compile_variable_instr(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
+    switch (opcode) {
+        case LOCAL_GET_OPCODE:
+            compile_instr_local_get(f, ctx);
+            break;
+        case LOCAL_SET_OPCODE:
+            compile_instr_local_set(f, ctx);
+            break;
+        default: 
+            printf("PANIC: opcode = 0x%02X\n", opcode);
+            panic();
+    }
+}
+
+static void compile_numeric_instr(
+    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+
+    switch (opcode) {
+        case I32_CONST_OPCODE:
+            compile_instr_i32_const(f, ctx);
+            break;
+        case I32_EQZ_OPCODE:
+            compile_instr_i32_tests(f, ctx, opcode);
+            break;
+        case I32_EQ_OPCODE:
+        case I32_NE_OPCODE:
+        case I32_LT_S_OPCODE:
+        case I32_LT_U_OPCODE:
+        case I32_GT_S_OPCODE:
+        case I32_GT_U_OPCODE:
+        case I32_LE_S_OPCODE:
+        case I32_LE_U_OPCODE:
+        case I32_GE_S_OPCODE:
+        case I32_GE_U_OPCODE:
+            compile_instr_i32_comparisons(f, ctx, opcode);
+            break;
+        case I32_ADD_OPCODE:
+        case I32_SUB_OPCODE:
+        case I32_MUL_OPCODE:
+        case I32_DIV_S_UPCODE:
+        case I32_DIV_U_OPCODE:
+        case I32_REM_S_OPCODE:
+        case I32_REM_U_OPCODE:
+        case I32_AND_OPCODE:
+        case I32_OR_OPCODE:
+        case I32_XOR_OPCODE:
+        case I32_SHL_OPCODE:
+        case I32_SHR_S_OPCODE:
+        case I32_SHR_U_OPCODE:
+            compile_instr_i32_binop(f, ctx, opcode);
+            break;
+                default:
+            printf("PANIC: opcode = 0x%02X\n", opcode);
+            panic();
+    }
+}
+
+
+
+static void compile_instr(FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+    /* if the branch_flag is true, we are trying to compile an instruction
+     * between a br and the end of the closest block, so skip it */
+    if (ctx->branch_flag) return;
+    else if (opcode <= 0x11) {
+        compile_control_instr(f, ctx, opcode);
+    }
+    else if (0x20 <= opcode && opcode <= 0x24) {
+        compile_variable_instr(f, ctx, opcode);
+    }
+    else if (0x41 <= opcode && opcode <= 0xBF) {
+        compile_numeric_instr(f, ctx, opcode);
+    }
+    else {
+        printf("PANIC: opcode = 0x%02X\n", opcode);
+        panic();
     }
 }
 
