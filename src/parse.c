@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static void read_value_type(wasm_module_t *m, unsigned char *out) {
+static void read_value_type(wasm_module_t *m, enum wasm_valtype *out) {
     read_u8(&m->module, out);
     if (*out != I32_VALTYPE && *out != I64_VALTYPE &&
         *out != F32_VALTYPE && *out != F64_VALTYPE) {
@@ -11,40 +11,49 @@ static void read_value_type(wasm_module_t *m, unsigned char *out) {
 }
 
 static void parse_type_section_if_exists(wasm_module_t *m) {
-    uint32_t size, types_len, params_len, return_len;
-    unsigned char id, fun_start_code;
-    wasm_func_type_t *type;
 
     if (m->module.offset >= m->module.end) return;
+    unsigned char id;
     read_u8(&m->module, &id);
     if (id != TYPE_SECTION_ID) {
         m->module.offset--;
         return;
     }
+    uint32_t size, types_len;
+    /* read section size in bytes */
     readULEB128_u32(&m->module, &size);
+    /* read the length of the vector of function types */
     readULEB128_u32(&m->module, &types_len);
-    if (types_len > 0) {
-        m->types = calloc_or_panic(types_len, sizeof(wasm_func_type_t));
-        m->types_len = types_len;
-    }
-
+    if (types_len == 0) return;
+    m->types = calloc_or_panic(types_len, sizeof(wasm_func_type_t));
+    m->types_len = types_len;
+    unsigned char fun_start_code;
+    uint32_t params_len, return_len;
     for (uint32_t i = 0; i < types_len; i++) {
+        /* each function type start with the byte 0x60 */
         read_u8(&m->module, &fun_start_code);
         if (fun_start_code != FUNCTION_START_CODE) {
             panic();
         }
-        type = &m->types[i];
+        /* read the length of the vector of parameter types */
         readULEB128_u32(&m->module, &params_len);
-        type->params_type = calloc_or_panic(params_len, sizeof(unsigned char));
-        type->num_params = params_len;
-        for (uint32_t j = 0; j < params_len; j++) {
-            read_value_type(m, &type->params_type[j]);
+        if (params_len > 0) {
+            m->types[i].params_type =
+                calloc_or_panic(params_len, sizeof(enum wasm_valtype));
+            m->types[i].num_params = params_len;
+            for (uint32_t j = 0; j < params_len; j++) {
+                /* read the actual parameter types */
+                read_value_type(m, &m->types[i].params_type[j]);
+            }
         }
+        /* read the length of the vector of result types */
         readULEB128_u32(&m->module, &return_len);
-        if (return_len != 1) {
-            panic();
-        }
-        read_value_type(m, &type->return_type);
+        if (return_len == 1) {
+            /* read the actual result types */
+            read_value_type(m, &m->types[i].return_type);
+        } else if (return_len == 0) {
+            m->types[i].return_type = NO_VALTYPE;
+        } else panic();
     }
 }
 
@@ -94,8 +103,11 @@ static void parse_table_section_if_exists(wasm_module_t *m) {
         m->module.offset--;
         return;
     }
-    printf("TODO: parse_table_section_if_exists() is unimplemented!\n");
-    panic();
+    uint32_t size;
+    /* read section size in bytes */
+    readULEB128_u32(&m->module, &size);
+    /* skip the whole table section */
+    m->module.offset += size;
 }
 
 static void parse_memory_section_if_exists(wasm_module_t *m) {
@@ -131,21 +143,50 @@ static void parse_memory_section_if_exists(wasm_module_t *m) {
 }
 
 static void parse_global_section_if_exists(wasm_module_t *m) {
-    unsigned char id;
-
+    read_struct_t *r = &m->module;
     if (m->module.offset >= m->module.end) return;
+    unsigned char id;
     read_u8(&m->module, &id);
     if (id != GLOBAL_SECTION_ID) {
         m->module.offset--;
         return;
     }
-    printf("TODO: parse_global_section_if_exists() is unimplemented!\n");
-    panic();
+    uint32_t size;
+    /* read section size in bytes */
+    readULEB128_u32(r, &size);
+    /* read the length of the vector of globals */
+    readULEB128_u32(r, &m->globals_len);
+    if (m->globals_len > 0) {
+         m->globals = calloc_or_panic(m->globals_len, sizeof(global_t));
+    }
+    for (uint32_t i = 0; i < m->globals_len; i++) {
+        global_t *g = &m->globals[i];
+        read_value_type(m, &g->type);
+        read_u8(r, &g->is_mutable);
+        if (g->is_mutable != 0 && g->is_mutable != 1) {
+            panic();
+        }
+        // parse a constant expression
+        unsigned char opcode;
+        read_u8(r, &opcode);
+        switch (opcode) {
+            case I32_CONST_OPCODE:
+                readILEB128_i32(r, &g->const_expr.i32);
+                break;
+            case I64_CONST_OPCODE:
+            case F32_CONST_OPCODE:
+            case F64_CONST_OPCODE:
+            default:
+                panic();
+        }
+        read_u8(r, &opcode);
+        if (opcode != END_CODE) panic();
+    }
 }
 
 static void parse_export_section_if_exists(wasm_module_t *m) {
-    unsigned char id, *name, export_desc;
-    unsigned int size, num_exports, name_len, index;
+    unsigned char id;
+    unsigned int size, num_exports;
 
     if (m->module.offset >= m->module.end) return;
     read_u8(&m->module, &id);
@@ -157,24 +198,43 @@ static void parse_export_section_if_exists(wasm_module_t *m) {
     readULEB128_u32(&m->module, &size);
     readULEB128_u32(&m->module, &num_exports);
     for (unsigned int i = 0; i < num_exports; i++) {
+        uint32_t name_len;
         readULEB128_u32(&m->module, &name_len);
-        name = m->module.offset;
+        unsigned char *name = m->module.offset;
         m->module.offset += name_len;
+        unsigned char export_desc;
         read_u8(&m->module, &export_desc);
         // only functions export are implemented
-        if (export_desc != 0x00) {
-            panic();
-        }
-        readULEB128_u32(&m->module, &index);
-        if (index >= m->funcs_len) {
-            panic();
-        }
-        m->funcs[index].export_name = calloc_or_panic(name_len+1, sizeof(char));
-        memcpy(m->funcs[i].export_name, name, name_len);
-        m->funcs[i].export_name[name_len] = '\0';
-        // temporary hack
-        if (strcmp(m->funcs[i].export_name, "_start") == 0) {
-            memcpy(m->funcs[i].export_name, "main", 4+1);
+        switch (export_desc) {
+            case 0x00: {
+                uint32_t funcidx;
+                readULEB128_u32(&m->module, &funcidx);
+                if (funcidx >= m->funcs_len) {
+                    panic();
+                }
+                m->funcs[funcidx].export_name =
+                    calloc_or_panic(name_len+1, sizeof(char));
+                memcpy(m->funcs[funcidx].export_name, name, name_len);
+                m->funcs[funcidx].export_name[name_len] = '\0';
+                // temporary hack
+                if (strcmp(m->funcs[funcidx].export_name, "_start") == 0) {
+                    memcpy(m->funcs[funcidx].export_name, "main", 4+1);
+                }
+            } break;
+            case 0x01: {
+                uint32_t tableidx;
+                readULEB128_u32(&m->module, &tableidx);
+            } break;
+            case 0x02: {
+                uint32_t memidx;
+                readULEB128_u32(&m->module, &memidx);
+            } break;
+            case 0x03: {
+                uint32_t globalidx;
+                readULEB128_u32(&m->module, &globalidx);
+            } break;
+            default:
+                panic();
         }
     }
 }
@@ -205,8 +265,8 @@ static void parse_element_section_if_exists(wasm_module_t *m) {
 }
 
 static void parse_code_section_if_exists(wasm_module_t *m) { 
-    uint32_t size, funcs_len, code_len, num_locals, n;
-    unsigned char id, *locals_start, func_end;
+    uint32_t size, funcs_len, code_len;
+    unsigned char id;
     wasm_func_t *func;
 
     if (m->module.offset >= m->module.end) return;
@@ -215,47 +275,59 @@ static void parse_code_section_if_exists(wasm_module_t *m) {
         m->module.offset--;
         return;
     }
+    /* read the size of the whole section */
     readULEB128_u32(&m->module, &size);
+    /* read the length of the vector of function codes */
     readULEB128_u32(&m->module, &funcs_len);
     if (funcs_len != m->funcs_len) {
         panic();
     }
     for (uint32_t i = 0; i < funcs_len; i++) {
         func = &m->funcs[i];
+        /* read the length of the vector of function codes.
+         * Each function code, consists of – the declaration of locals,
+         * and the function body as an expression. */
         readULEB128_u32(&m->module, &code_len);
-
-        locals_start = m->module.offset;
+        unsigned char *locals_start = m->module.offset;
+        uint32_t len, num_locals;
         num_locals = 0;
-        unsigned int len;
+        /* read the length of the vector of locals */
         readULEB128_u32(&m->module, &len);
         unsigned char *start_vec_locals = m->module.offset;
         for (uint32_t j = 0; j < len; j++) {
+            uint32_t n;
+            /* read the number of variables with the same type */
             readULEB128_u32(&m->module, &n);
+            /* skip the type */
+            m->module.offset += 1;
             num_locals += n;
         }
         if (num_locals > 0) {
             m->module.offset = start_vec_locals;
-            func->locals_type = calloc_or_panic(num_locals, sizeof(unsigned char));
+            func->locals_type = calloc_or_panic(num_locals, sizeof(enum wasm_valtype));
             func->num_locals = num_locals;
             unsigned int count = 0;
             for (uint32_t j = 0; j < len; j++) {
+                uint32_t n;
+                enum wasm_valtype type;
+                /* read the number of variables with the same type */
                 readULEB128_u32(&m->module, &n);
-                unsigned char type;
+                /* read the type */
                 read_value_type(m, &type);
                 for (unsigned int h = 0; h < n; h++) {
                     func->locals_type[count++] = type;
                 }
             }
         }
-
         // parse expr (function body)
         func->body.start = m->module.offset;
         func->body.offset = func->body.start;
-        func->body.len = code_len - (func->body.start - locals_start) - 1;
-        func->body.end = func->body.start + func->body.len;
+        func->body.end = locals_start + (code_len - 1);
+        func->body.len = func->body.end - func->body.start;
         m->module.offset = func->body.end;
+        unsigned char func_end;
         read_u8(&m->module, &func_end);
-        if (func_end != FUNCTION_END_CODE) {
+        if (func_end != END_CODE) {
             panic();
         }
     }
@@ -284,6 +356,8 @@ wasm_module_t* parse(unsigned char *start, unsigned int len) {
     m->types         = NULL;
     m->funcs_len     = 0;
     m->funcs         = NULL;
+    m->globals       = NULL;
+    m->globals_len   = 0;
     m->mem.min_page_num = 0;
     m->mem.max_page_num = 0;
     

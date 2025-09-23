@@ -52,7 +52,7 @@ unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out) {
     unsigned int count = 0;
     do {
         read_u8(r, &byte);
-        result |= (byte & 0x7f << shift); /* low-order 7 bits of value */
+        result |= (byte & 0x7f) << shift; /* low-order 7 bits of value */
         shift += 7;
         count++;
     } while ((byte & 0x80) != 0); /* get high-order bit of byte */

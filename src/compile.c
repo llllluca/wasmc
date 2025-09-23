@@ -43,7 +43,7 @@ static void assert_block_type(unsigned char type) {
     }
 }
 
-char to_qbe_simple_types(unsigned char wasm_type) {
+char to_qbe_simple_types(enum wasm_valtype wasm_type) {
     switch (wasm_type) {
         case I32_VALTYPE:
             return 'w';
@@ -60,7 +60,7 @@ char to_qbe_simple_types(unsigned char wasm_type) {
             return '_'; // dead code, only to remove compiler warning
     }
 }
-static unsigned int type_size_in_bytes(unsigned char wasm_type) {
+static unsigned int type_size_in_bytes(enum wasm_valtype wasm_type) {
     switch (wasm_type) {
         case I32_VALTYPE:
             return 4;
@@ -239,7 +239,8 @@ static void compile_instr_i32_comparisons(
 static void compile_instr_local_get(FILE *f, func_compile_ctx_t *ctx) {
 
         unsigned int index, var;
-        unsigned char wasm_type, qbe_type;
+        enum wasm_valtype wasm_type;
+        char qbe_type;
         wasm_func_t *func = ctx->func;
 
         readULEB128_u32(&func->body, &index);
@@ -262,7 +263,7 @@ static void compile_instr_local_get(FILE *f, func_compile_ctx_t *ctx) {
 static void compile_instr_local_set(FILE *f, func_compile_ctx_t *ctx) {
 
         unsigned int index;
-        unsigned char wasm_type;
+        enum wasm_valtype wasm_type;
         wasm_func_t *func = ctx->func;
 
         readULEB128_u32(&func->body, &index);
@@ -307,7 +308,7 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         }
         unsigned int func_return_value = fresh_var();
         fprintf(f, "\t");
-        if (type->return_type != NO_TYPE) {
+        if (type->return_type != NO_VALTYPE) {
             char qbe_return_type = to_qbe_simple_types(type->return_type);
             fprintf(f, "%%t%d =%c ", func_return_value, qbe_return_type);
         }
@@ -336,7 +337,7 @@ static void compile_instr_call(FILE *f, func_compile_ctx_t *ctx) {
         }
         free(args);
         fprintf(f, ")\n");
-        if (type->return_type != NO_TYPE) {
+        if (type->return_type != NO_VALTYPE) {
             stack_entry_t *entry = alloc_stack_entry_value(
                 func_return_value,
                 type->return_type);
@@ -415,8 +416,8 @@ static void compile_instr_br_if(FILE *f, func_compile_ctx_t *ctx) {
 static void compile_instr_return(FILE *f, func_compile_ctx_t *ctx) {
     dalist_t *value_stack = ctx->value_stack;
     stack_entry_t *result;
-    unsigned char return_type = ctx->func->type->return_type;
-    if (return_type != NO_TYPE) {
+    enum wasm_valtype return_type = ctx->func->type->return_type;
+    if (return_type != NO_VALTYPE) {
         result = da_pop(value_stack);
         assert_stack_entry_value(result, return_type);
         fprintf(f, "\tret %%t%d\n", result->as.value.qbe_varidx);
@@ -622,7 +623,7 @@ static void compile_parametric_instr(
             if (snd_operand->as.value.wasm_type != fst_operand->as.value.wasm_type) {
                 panic();
             }
-            unsigned char wasm_type = snd_operand->as.value.wasm_type;
+            enum wasm_valtype wasm_type = snd_operand->as.value.wasm_type;
             unsigned int select_snd = ctx->label_count++;
             unsigned int select_fst = ctx->label_count++;
             unsigned int end = ctx->label_count++;
@@ -666,6 +667,21 @@ static void compile_variable_instr(
         case LOCAL_SET_OPCODE:
             compile_instr_local_set(f, ctx);
             break;
+        case GLOBAL_GET_OPCODE: {
+            uint32_t globalidx;
+            readULEB128_u32(&ctx->func->body, &globalidx);
+            unsigned int var = fresh_var();
+            if (globalidx >= ctx->m->globals_len) panic();
+            global_t *g = &ctx->m->globals[globalidx];
+            if (g->type == NO_VALTYPE) panic();
+            char qbe_type = to_qbe_simple_types(g->type);
+            stack_entry_t *entry = alloc_stack_entry_value(var, g->type);
+            da_push(ctx->value_stack, entry);
+            fprintf(f, "\t%%t%d =%c load%c $g%d\n",
+                    var, qbe_type, qbe_type, globalidx);
+
+        } break;
+        case GLOBAL_SET_OPCODE:
         default: 
             printf("PANIC: opcode = 0x%02X\n", opcode);
             panic();
@@ -676,9 +692,7 @@ static void compile_i32_load_instr(FILE *f, func_compile_ctx_t *ctx) {
     //TODO: how to properly use align?
     uint32_t align, offset;
     readULEB128_u32(&ctx->func->body, &align);
-    printf("align = %d\n", align);
     readULEB128_u32(&ctx->func->body, &offset);
-    printf("offset = %d\n", offset);
     unsigned int result_varidx = fresh_var();
     unsigned int address_plus_offset = fresh_var();
     stack_entry_t *address = da_pop(ctx->value_stack);
@@ -701,9 +715,7 @@ static void compile_i32_store_instr(FILE *f, func_compile_ctx_t *ctx) {
     //TODO: how to properly use align?
     uint32_t align, offset;
     readULEB128_u32(&ctx->func->body, &align);
-    printf("align = %d\n", align);
     readULEB128_u32(&ctx->func->body, &offset);
-    printf("offset = %d\n", offset);
     stack_entry_t *value = da_pop(ctx->value_stack);
     assert_stack_entry_value(value, I32_VALTYPE);
     stack_entry_t *address = da_pop(ctx->value_stack);
@@ -827,7 +839,7 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
     }
 
     char qbe_return_type = ' ';
-    if (type->return_type != NO_TYPE) {
+    if (type->return_type != NO_VALTYPE) {
         qbe_return_type = to_qbe_simple_types(type->return_type);
     }
     if (func->export_name != NULL) {
@@ -893,7 +905,7 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
         compile_instr(f, &ctx, opcode);
     }
     if (ctx.br_or_return_flag != RETURN_FLAG) {
-        if (func->type->return_type != NO_TYPE) {
+        if (func->type->return_type != NO_VALTYPE) {
             stack_entry_t *entry = da_pop(&value_stack);
             assert_stack_entry_value(entry, func->type->return_type);
             fprintf(f, "\tret %%t%d\n", entry->as.value.qbe_varidx);
@@ -913,7 +925,22 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
 
 void compile(wasm_module_t *m, FILE *out) {
     if (m->mem.min_page_num != 0) {
-        fprintf(out, "data $mem0 = { z %d }\n", m->mem.min_page_num * 64 * 1024);
+        fprintf(out, "data $mem0 = { z %d }\n",
+                m->mem.min_page_num * 64 * 1024);
+    }
+    for (uint32_t i = 0; i < m->globals_len; i++) {
+        global_t *g = &m->globals[i];
+        char qbe_type = to_qbe_simple_types(g->type);
+        /* How to specify align? */
+        fprintf(out, "data $g%d = { %c ", i, qbe_type);
+        switch (g->type) {
+            case I32_VALTYPE:
+                fprintf(out, "%d", g->const_expr.i32);
+                break;
+            default:
+                panic();
+        }
+        fprintf(out, " }\n");
     }
     for (unsigned int i = 0; i < m->funcs_len; i++) {
         compile_func(out, m, i);

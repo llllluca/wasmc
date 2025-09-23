@@ -17,11 +17,20 @@ typedef struct {
      * WebAssembly module dosn't use memory */
 } memory_info_t;
 
+/* wasm_valtype enum occupies 1 byte */
+enum  __attribute__ ((__packed__)) wasm_valtype {
+    NO_VALTYPE  = 0x00,
+    I32_VALTYPE = 0x7F,
+    I64_VALTYPE = 0x7E,
+    F32_VALTYPE = 0x7D,
+    F64_VALTYPE = 0x7C,
+};
+
 typedef struct {
-    unsigned char return_type;
+    enum wasm_valtype return_type;
     /* heap allocated array of length num_params. If a function has
      * no parameters params_type is NULL and num_params is 0. */
-    unsigned char *params_type;
+    enum wasm_valtype *params_type;
     unsigned int num_params;
 } wasm_func_type_t;
 
@@ -37,12 +46,23 @@ typedef struct {
     wasm_func_type_t *type; 
     /* Heap allocated array of length num_locals. If a function has
      * no locals variables locals_type is NULL and num_locals is 0.*/
-    unsigned char *locals_type;
+    enum wasm_valtype *locals_type;
     unsigned int num_locals;
     /* Heap allocated and null terminated string. If a function is not
      * exported, export_name is NULL */
     char *export_name;
 } wasm_func_t;
+
+typedef struct {
+    enum wasm_valtype type;
+    unsigned char is_mutable;
+    union {
+        int32_t i32;
+        float   f32;
+        int64_t i64;
+        double  f64;
+    } const_expr;
+} global_t;
 
 typedef struct {
     read_struct_t module;
@@ -57,6 +77,8 @@ typedef struct {
     unsigned int funcs_len;
     /* types_len is not always equal to funcs_len, if two function has
      * the same type they share the same wasm_func_type_t struct. */
+    global_t *globals;
+    uint32_t globals_len;
 } wasm_module_t;
 
 enum stack_entry_kind {
@@ -149,8 +171,8 @@ typedef int err_t;
 #define LOCAL_GET_OPCODE  0x20
 #define LOCAL_SET_OPCODE  0x21
 #define LOCAL_TEE_OPCODE  0x22 //not implemented
-#define GLOBAL_GET_OPCODE 0x23 //not implemented
-#define GLOBAL_SET_OPCODE 0x25 //not implemented
+#define GLOBAL_GET_OPCODE 0x23
+#define GLOBAL_SET_OPCODE 0x25
 
 // Memory instructions
 #define I32_LOAD_OPCODE  0x28
@@ -158,6 +180,9 @@ typedef int err_t;
 
 // Numeric instruction opcodes
 #define I32_CONST_OPCODE  0x41
+#define I64_CONST_OPCODE  0x42
+#define F32_CONST_OPCODE  0x43
+#define F64_CONST_OPCODE  0x44
 #define I32_EQZ_OPCODE    0x45
 #define I32_EQ_OPCODE     0x46
 #define I32_NE_OPCODE     0x47
@@ -190,19 +215,12 @@ typedef int err_t;
 
 
 #define FUNCTION_START_CODE 0x60
-#define FUNCTION_END_CODE   0x0B
 #define END_CODE            0x0B
 #define BLOCK_EMPTY_TYPE    0x40
 
 #define ONLY_MIN_MEMORY_LIMIT 0x00
 #define BOTH_MIN_AND_MAX_MEMORY_LIMIT 0x01
 #define UNLIMITED_MAX_PAGE_NUM 0
-
-#define NO_TYPE     0x00
-#define I32_VALTYPE 0x7F
-#define I64_VALTYPE 0x7E
-#define F32_VALTYPE 0x7D
-#define F64_VALTYPE 0x7C
 
 #define BLOCK_TYPE_NONE 0x40
 #define BLOCK_TYPE_I32 I32_VALTYPE
