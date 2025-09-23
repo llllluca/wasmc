@@ -61,6 +61,7 @@ unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out) {
     return count;
 }
 
+#pragma GCC diagnostic ignored "-Wshift-negative-value"
 unsigned int readILEB128_i32(read_struct_t *r, int32_t *out) {
     int32_t result = 0;
     uint32_t shift = 0;
