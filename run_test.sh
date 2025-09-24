@@ -91,5 +91,8 @@ run_test "select.wat" 44
 run_test "memory.wat" 250
 run_test "sum.wat" 21
 run_test "mean.wat" 4
+run_test "data1.wat" 10
+run_test "mean-even.wat" 19
+run_test "data2.wat" 10
 
 

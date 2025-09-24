@@ -673,9 +673,9 @@ static void compile_variable_instr(
             unsigned int var = fresh_var();
             if (globalidx >= ctx->m->globals_len) panic();
             global_t *g = &ctx->m->globals[globalidx];
-            if (g->type == NO_VALTYPE) panic();
-            char qbe_type = to_qbe_simple_types(g->type);
-            stack_entry_t *entry = alloc_stack_entry_value(var, g->type);
+            if (g->expr.type == NO_VALTYPE) panic();
+            char qbe_type = to_qbe_simple_types(g->expr.type);
+            stack_entry_t *entry = alloc_stack_entry_value(var, g->expr.type);
             da_push(ctx->value_stack, entry);
             fprintf(f, "\t%%t%d =%c load%c $g%d\n",
                     var, qbe_type, qbe_type, globalidx);
@@ -923,25 +923,53 @@ static void compile_func(FILE *f, wasm_module_t *m, unsigned int func_index) {
     da_free(&value_stack);
 }
 
-void compile(wasm_module_t *m, FILE *out) {
-    if (m->mem.min_page_num != 0) {
-        fprintf(out, "data $mem0 = { z %d }\n",
-                m->mem.min_page_num * 64 * 1024);
-    }
+static void compile_globals(wasm_module_t *m, FILE *out) {
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
-        char qbe_type = to_qbe_simple_types(g->type);
+        char qbe_type = to_qbe_simple_types(g->expr.type);
         /* How to specify align? */
         fprintf(out, "data $g%d = { %c ", i, qbe_type);
-        switch (g->type) {
+        switch (g->expr.type) {
             case I32_VALTYPE:
-                fprintf(out, "%d", g->const_expr.i32);
+                fprintf(out, "%d", g->expr.as.i32);
                 break;
             default:
                 panic();
         }
         fprintf(out, " }\n");
     }
+}
+
+static int compare_data_segment(const void *lhs, const void *rhs) {
+    data_segment_t *lhs_ds = (data_segment_t *) lhs;
+    data_segment_t *rhs_ds = (data_segment_t *) rhs;
+    return lhs_ds->offset - rhs_ds->offset;
+}
+
+static void compile_data_segments(wasm_module_t *m, FILE *out) {
+    if (m->mem.min_page_num == 0) return;
+    qsort( m->data_segments, m->num_data_segments, 
+          sizeof(data_segment_t), compare_data_segment);
+    unsigned int mem_size = m->mem.min_page_num * 64 * 1024;
+    fprintf(out, "data $mem0 = { ");
+    unsigned int mem_offset = 0;
+    for (uint32_t i = 0; i < m->num_data_segments; i++) {
+        data_segment_t *d = &m->data_segments[i];
+        if (d->offset < mem_offset) panic();
+        fprintf(out, "z %d, ", d->offset - mem_offset);
+            fprintf(out, "b \"");
+        for (uint32_t j = 0; j < d->init_len; j++) {
+            fprintf(out, "\\x%02x", d->init_bytes[j]);
+        }
+        fprintf(out, "\", ");
+        mem_offset = d->offset + d->init_len;
+    }
+    fprintf(out, "z %d }\n", mem_size - mem_offset);
+}
+
+void compile(wasm_module_t *m, FILE *out) {
+    compile_data_segments(m, out);
+    compile_globals(m, out);
     for (unsigned int i = 0; i < m->funcs_len; i++) {
         compile_func(out, m, i);
     }

@@ -10,6 +10,24 @@ static void read_value_type(wasm_module_t *m, enum wasm_valtype *out) {
     }
 }
 
+static void parse_const_expr(read_struct_t *r, const_expr_t *e) {
+    unsigned char opcode;
+    read_u8(r, &opcode);
+    switch (opcode) {
+        case I32_CONST_OPCODE:
+            readILEB128_i32(r, &e->as.i32);
+            e->type = I32_VALTYPE;
+            break;
+        case I64_CONST_OPCODE:
+        case F32_CONST_OPCODE:
+        case F64_CONST_OPCODE:
+        default:
+            panic();
+    }
+    read_u8(r, &opcode);
+    if (opcode != END_CODE) panic();
+}
+
 static void parse_type_section_if_exists(wasm_module_t *m) {
 
     if (m->module.offset >= m->module.end) return;
@@ -161,26 +179,14 @@ static void parse_global_section_if_exists(wasm_module_t *m) {
     }
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
-        read_value_type(m, &g->type);
+        enum wasm_valtype type;
+        read_value_type(m, &type);
         read_u8(r, &g->is_mutable);
         if (g->is_mutable != 0 && g->is_mutable != 1) {
             panic();
         }
-        // parse a constant expression
-        unsigned char opcode;
-        read_u8(r, &opcode);
-        switch (opcode) {
-            case I32_CONST_OPCODE:
-                readILEB128_i32(r, &g->const_expr.i32);
-                break;
-            case I64_CONST_OPCODE:
-            case F32_CONST_OPCODE:
-            case F64_CONST_OPCODE:
-            default:
-                panic();
-        }
-        read_u8(r, &opcode);
-        if (opcode != END_CODE) panic();
+        parse_const_expr(r, &g->expr);
+        if (g->expr.type != type) panic();
     }
 }
 
@@ -342,8 +348,27 @@ static void parse_data_section_if_exists(wasm_module_t *m) {
         m->module.offset--;
         return;
     }
-    printf("TODO: parse_data_section_if_exists() is unimplemented!\n");
-    panic();
+    uint32_t size, memidx;
+    /* read the size of the whole section */
+    readULEB128_u32(&m->module, &size);
+    /* read the length of the vector of data segments */
+    readULEB128_u32(&m->module, &m->num_data_segments);
+    m->data_segments =
+        calloc_or_panic(m->num_data_segments, sizeof(data_segment_t));
+    for (uint32_t i = 0; i < m->num_data_segments; i++) {
+        readULEB128_u32(&m->module, &memidx);
+        if (memidx != 0) {
+            panic();
+        }
+        data_segment_t *d = &m->data_segments[i];
+        const_expr_t e;
+        parse_const_expr(&m->module, &e);
+        if (e.type != I32_VALTYPE || e.as.i32 < 0) panic();
+        d->offset = (uint32_t) e.as.i32;
+        readULEB128_u32(&m->module, &d->init_len);
+        d->init_bytes = m->module.offset;
+        m->module.offset += d->init_len;
+    }
 }
 
 wasm_module_t* parse(unsigned char *start, unsigned int len) {
@@ -358,6 +383,9 @@ wasm_module_t* parse(unsigned char *start, unsigned int len) {
     m->funcs         = NULL;
     m->globals       = NULL;
     m->globals_len   = 0;
+    m->data_segments = NULL;
+    m->num_data_segments = 0;
+
     m->mem.min_page_num = 0;
     m->mem.max_page_num = 0;
     

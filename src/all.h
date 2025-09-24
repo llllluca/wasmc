@@ -6,6 +6,12 @@
 #include <stdio.h>
 #include "dalist.h"
 
+typedef int err_t;
+#define OK    0
+#define FAIL -1
+
+typedef uint8_t boolean;
+
 typedef struct {
     /* It is needed at least min_page_num page of memory
      * in order to execute the WebAssembly module.
@@ -55,14 +61,24 @@ typedef struct {
 
 typedef struct {
     enum wasm_valtype type;
-    unsigned char is_mutable;
     union {
         int32_t i32;
         float   f32;
         int64_t i64;
         double  f64;
-    } const_expr;
+    } as;
+} const_expr_t;
+
+typedef struct {
+    const_expr_t expr;
+    boolean is_mutable;
 } global_t;
+
+typedef struct {
+    uint32_t offset;
+    uint32_t init_len;
+    unsigned char *init_bytes;
+} data_segment_t;
 
 typedef struct {
     read_struct_t module;
@@ -79,6 +95,9 @@ typedef struct {
      * the same type they share the same wasm_func_type_t struct. */
     global_t *globals;
     uint32_t globals_len;
+
+    data_segment_t *data_segments;
+    uint32_t num_data_segments;
 } wasm_module_t;
 
 enum stack_entry_kind {
@@ -128,10 +147,6 @@ typedef struct {
     enum br_or_return_flag br_or_return_flag;
 } func_compile_ctx_t;
 
-typedef int err_t;
-#define OK    0
-#define FAIL -1
-
 #define WASM_MAGIC_NUMBER 0x6d736100
 #define WASM_VERSION 1
 
@@ -147,7 +162,7 @@ typedef int err_t;
 #define START_SECTION_ID     8
 #define ELEMENT_SECTION_ID   9
 #define CODE_SECTION_ID     10
-#define DATA_SECTION_ID     10
+#define DATA_SECTION_ID     11
 
 // Control instructions
 #define UNREACHABLE_OPCODE   0x00
