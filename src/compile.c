@@ -286,6 +286,37 @@ static void compile_instr_local_set(FILE *f, func_compile_ctx_t *ctx) {
         free(entry);
 }
 
+static void compile_instr_global_get(FILE *f, func_compile_ctx_t *ctx) {
+    uint32_t globalidx;
+    readULEB128_u32(&ctx->func->body, &globalidx);
+    unsigned int var = fresh_var();
+    if (globalidx >= ctx->m->globals_len) panic();
+    global_t *g = &ctx->m->globals[globalidx];
+    if (g->expr.type == NO_VALTYPE) panic();
+    char qbe_type = to_qbe_simple_types(g->expr.type);
+    stack_entry_t *entry = alloc_stack_entry_value(var, g->expr.type);
+    da_push(ctx->value_stack, entry);
+    fprintf(f, "\t%%t%d =%c load%c $g%d\n",
+            var, qbe_type, qbe_type, globalidx);
+}
+
+static void compile_instr_global_set(FILE *f, func_compile_ctx_t *ctx) {
+    uint32_t globalidx;
+    readULEB128_u32(&ctx->func->body, &globalidx);
+    if (globalidx >= ctx->m->globals_len) panic();
+    global_t *g = &ctx->m->globals[globalidx];
+    if (!g->is_mutable) panic();
+    if (g->expr.type == NO_VALTYPE) panic();
+    stack_entry_t *entry = da_pop(ctx->value_stack);
+    assert_stack_entry_value(entry, g->expr.type);
+    char qbe_type = to_qbe_simple_types(g->expr.type);
+    fprintf(f, "\tstore%c %%t%d, $g%d\n", 
+                qbe_type,
+                entry->as.value.qbe_varidx,
+                globalidx);
+    free(entry);
+}
+
 static void compile_instr_i32_const(FILE *f, func_compile_ctx_t *ctx) {
         int32_t n;
         readILEB128_i32(&ctx->func->body, &n);
@@ -667,21 +698,12 @@ static void compile_variable_instr(
         case LOCAL_SET_OPCODE:
             compile_instr_local_set(f, ctx);
             break;
-        case GLOBAL_GET_OPCODE: {
-            uint32_t globalidx;
-            readULEB128_u32(&ctx->func->body, &globalidx);
-            unsigned int var = fresh_var();
-            if (globalidx >= ctx->m->globals_len) panic();
-            global_t *g = &ctx->m->globals[globalidx];
-            if (g->expr.type == NO_VALTYPE) panic();
-            char qbe_type = to_qbe_simple_types(g->expr.type);
-            stack_entry_t *entry = alloc_stack_entry_value(var, g->expr.type);
-            da_push(ctx->value_stack, entry);
-            fprintf(f, "\t%%t%d =%c load%c $g%d\n",
-                    var, qbe_type, qbe_type, globalidx);
-
-        } break;
+        case GLOBAL_GET_OPCODE:
+            compile_instr_global_get(f, ctx);
+            break;
         case GLOBAL_SET_OPCODE:
+            compile_instr_global_set(f, ctx);
+            break;
         default: 
             printf("PANIC: opcode = 0x%02X\n", opcode);
             panic();

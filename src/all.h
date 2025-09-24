@@ -187,7 +187,7 @@ typedef struct {
 #define LOCAL_SET_OPCODE  0x21
 #define LOCAL_TEE_OPCODE  0x22 //not implemented
 #define GLOBAL_GET_OPCODE 0x23
-#define GLOBAL_SET_OPCODE 0x25
+#define GLOBAL_SET_OPCODE 0x24
 
 // Memory instructions
 #define I32_LOAD_OPCODE  0x28

@@ -94,5 +94,9 @@ run_test "mean.wat" 4
 run_test "data1.wat" 10
 run_test "mean-even.wat" 19
 run_test "data2.wat" 10
+run_test "max.wat" 255
+run_test "isort.wat" 0
+run_test "msort.wat" 21
+run_test "qsort.wat" 102
 
 
