@@ -3,4 +3,5 @@ iwasm3
 .ccls-cache/
 endianess.c
 main
+qbe-git
 qbe

@@ -13,11 +13,11 @@ sudo apt install \
 Also the `qbe` executable is required:
 ```
 cd wasmc
-git clone git://c9x.me/qbe.git
-cd qbe
+git clone git://c9x.me/qbe.git qbe-git
+cd qbe-git
 make
 cd ..
-mv qbe/qbe .
+mv qbe-git/qbe .
 ```
 
 ## Build from source
