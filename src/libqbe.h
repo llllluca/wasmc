@@ -253,6 +253,10 @@ typedef enum instr_opcode {
 #define LOADW(temp, addr) \
     instr((temp), WORD_TYPE, LOADSW_INSTR, (addr), R)
 
+/* Conversions */
+#define EXTSW(temp, ref) \
+    instr((temp), LONG_TYPE, EXTSW_INSTR, (ref), R)
+
 /* Cast and Copy */
 #define COPY(temp, kind, ref1) \
     instr((temp), (kind), COPY_INSTR, (ref1), R)
@@ -260,6 +264,11 @@ typedef enum instr_opcode {
 /* Call */
 #define FUNC_CALL(temp, kind, addrRef) \
     instr((temp), kind, CALL_INSTR, (addrRef), R)
+
+/* Data */
+#define ADD_INT32_DATA_FIELD(num) addNumDataField(DW, (num))
+#define ADD_ZEROS_DATA_FIELD(num) addNumDataField(DZ, (num))
+#define ADD_STR_DATA_FIELD(str) addStrDataField(DB, (str))
 
 #if QBE_DEBUG != 0
 void printfn(Fn *fn, FILE *f);
@@ -272,7 +281,7 @@ Blk *newBlock(void);
 Ref newTemp(Fn *func);
 Ref newIntConst(Fn *f, int64_t value);
 void newFuncCallArg(simple_type type, Ref r);
-Ref newAddrConst(Fn *f, char *funcName);
+Ref newAddrConst(Fn *f, char *addrName);
 void instr(Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);
 void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
@@ -282,5 +291,11 @@ void halt(Blk *b);
 void phi(Ref temp, simple_type type, Blk *b0, Ref r0, Blk *b1, Ref r1);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
+
+
+void newData(char *name, Lnk *lnk);
+void addNumDataField(int type, int64_t num);
+void addStrDataField(int type, char *str);
+void closeData(void);
 
 #endif 

@@ -59,7 +59,7 @@ typedef struct {
     unsigned int len;
 } read_struct_t;
 
-#define FUNC_NAME_LEN 10
+#define FUNC_NAME_LEN 32
 typedef struct {
     read_struct_t body; 
     wasm_func_type_t *type; 
@@ -72,7 +72,7 @@ typedef struct {
 } wasm_func_t;
 
 typedef struct {
-    enum wasm_valtype type;
+    wasm_valtype type;
     union {
         int32_t i32;
         float   f32;
@@ -81,9 +81,11 @@ typedef struct {
     } as;
 } const_expr_t;
 
+#define GLOBAL_NAME_LEN 16
 typedef struct {
     const_expr_t expr;
     boolean is_mutable;
+    char *name[GLOBAL_NAME_LEN];
 } global_t;
 
 typedef struct {

@@ -186,6 +186,10 @@ static void parse_global_section_if_exists(wasm_module *m) {
         }
         parse_const_expr(r, &g->expr);
         if (g->expr.type != type) panic();
+
+        int n = snprintf((char *)g->name, GLOBAL_NAME_LEN, "g%d", i);
+        if (n >= GLOBAL_NAME_LEN) panic();
+
     }
 }
 
