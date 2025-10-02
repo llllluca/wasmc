@@ -6,7 +6,6 @@ static Blk **linked_list_tail = NULL;
 static Phi *phi_list_head = NULL;
 static func_return_type rcls;
 
-extern Target T_amd64_sysv;
 Target T;
 
 #define Ke -2 // must match Ke in qbe-1.2/parse.c
@@ -317,7 +316,6 @@ void typecheck(Fn *fn) {
 void optimizeFunc(Fn *fn) {
     uint n;
 
-    T = T_amd64_sysv;
     T.abi0(fn);
     fillrpo(fn);
     fillpreds(fn);
@@ -361,6 +359,54 @@ void optimizeFunc(Fn *fn) {
             fn->rpo[n]->link = fn->rpo[n+1];
     T.emitfn(fn, stdout);
     fprintf(stdout, "/* end function %s */\n\n", fn->name);
+    freeall();
+}
+
+#define DATA_NAME_LEN 16
+static char data_name[DATA_NAME_LEN];
+static Lnk data_lnk;
+
+void newData(char *name, Lnk *lnk) {
+    strncpy(data_name, name, DATA_NAME_LEN);
+    data_lnk = *lnk;
+    Dat d;
+    d.type = DStart;
+    d.name = data_name;
+    d.lnk = &data_lnk;
+    emitdat(&d, stdout);
+}
+
+void addNumDataField(int type, int64_t num) {
+    Dat d;
+    d.name = data_name;
+    d.lnk = &data_lnk;
+    d.type = type;
+    d.isstr = 0;
+    d.isref = 0;
+    memset(&d.u, 0, sizeof(d.u));
+    d.u.num = num;
+    emitdat(&d, stdout);
+}
+
+void addStrDataField(int type, char *str) {
+    Dat d;
+    d.name = data_name;
+    d.lnk = &data_lnk;
+    d.type = type;
+    d.isstr = 1;
+    d.isref = 0;
+    memset(&d.u, 0, sizeof(d.u));
+    d.u.str = str;
+    emitdat(&d, stdout);
+}
+
+void closeData(void) {
+    Dat d;
+    d.name = data_name;
+    d.lnk = &data_lnk;
+    d.type = DEnd;
+    emitdat(&d, stdout);
+    fputs("/* end data */\n\n", stdout);
     freeall();
 }
 
@@ -496,11 +542,11 @@ void halt(Blk *b) {
     closeBlock(b);
 }
 
-Ref newAddrConst(Fn *f, char *funcName) {
+Ref newAddrConst(Fn *f, char *addrName) {
     Con c;
     memset(&c, 0, sizeof(Con));
     c.type = CAddr;
-    c.sym.id = intern(funcName);
+    c.sym.id = intern(addrName);
     return newcon(&c, f);
 }
 
@@ -538,4 +584,6 @@ void phi(Ref temp, simple_type type, Blk *b0, Ref r0, Blk *b1, Ref r1) {
         prev->link = phi;
     }
 }
+
+
 

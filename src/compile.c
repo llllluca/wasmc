@@ -115,45 +115,43 @@ static void compile_instr_i32_binop(func_compile_ctx_t *ctx, unsigned char opcod
         case I32_SUB_OPCODE:
             SUB(result_temp, WORD_TYPE, fst, snd);
             break;
-        /*
         case I32_MUL_OPCODE:
-            fprintf(f, "mul");
+            MUL(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_DIV_S_UPCODE:
-            fprintf(f, "div");
+            DIV(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_DIV_U_OPCODE:
-            fprintf(f, "udiv");
+            UDIV(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_REM_S_OPCODE:
-            fprintf(f, "rem");
+            REM(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_REM_U_OPCODE:
-            fprintf(f, "urem");
+            UREM(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_AND_OPCODE:
-            fprintf(f, "and");
+            AND(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_OR_OPCODE:
-            fprintf(f, "or");
+            OR(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_XOR_OPCODE:
-            fprintf(f, "xor");
+            XOR(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHL_OPCODE:
-            fprintf(f, "shl");
+            SHL(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHR_S_OPCODE:
-            fprintf(f, "sar");
+            SAR(result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHR_U_OPCODE:
-            fprintf(f, "shr");
+            SAR(result_temp, WORD_TYPE, fst, snd);
             break;
-        */
         default:
             panic();
     }
-                free(snd_operand);
+    free(snd_operand);
     free(fst_operand);
 }
 
@@ -273,38 +271,34 @@ static void compile_instr_local_set(func_compile_ctx_t *ctx) {
     free(entry);
 }
 
-/*
-static void compile_instr_global_get(FILE *f, func_compile_ctx_t *ctx) {
+static void compile_instr_global_get(func_compile_ctx_t *ctx) {
     uint32_t globalidx;
-    readULEB128_u32(&ctx->func->body, &globalidx);
-    unsigned int var = fresh_var();
+    readULEB128_u32(&ctx->wasm_func->body, &globalidx);
+    Ref temp = newTemp(ctx->qbe_func);
     if (globalidx >= ctx->m->globals_len) panic();
     global_t *g = &ctx->m->globals[globalidx];
     if (g->expr.type == NO_VALTYPE) panic();
-    char qbe_type = to_qbe_simple_types(g->expr.type);
-    stack_entry_t *entry = alloc_stack_entry_value(var, g->expr.type);
+    stack_entry_t *entry = alloc_stack_entry_value(temp, g->expr.type);
     da_push(ctx->value_stack, entry);
-    fprintf(f, "\t%%t%d =%c load%c $g%d\n",
-            var, qbe_type, qbe_type, globalidx);
+    if (size(g->expr.type) != 4) panic();
+    Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
+    LOADW(temp, global);
 }
 
-static void compile_instr_global_set(FILE *f, func_compile_ctx_t *ctx) {
+static void compile_instr_global_set(func_compile_ctx_t *ctx) {
     uint32_t globalidx;
-    readULEB128_u32(&ctx->func->body, &globalidx);
+    readULEB128_u32(&ctx->wasm_func->body, &globalidx);
     if (globalidx >= ctx->m->globals_len) panic();
     global_t *g = &ctx->m->globals[globalidx];
     if (!g->is_mutable) panic();
     if (g->expr.type == NO_VALTYPE) panic();
     stack_entry_t *entry = da_pop(ctx->value_stack);
     assert_stack_entry_value(entry, g->expr.type);
-    char qbe_type = to_qbe_simple_types(g->expr.type);
-    fprintf(f, "\tstore%c %%t%d, $g%d\n", 
-                qbe_type,
-                entry->as.value.qbe_varidx,
-                globalidx);
+    if (size(g->expr.type) != 4) panic();
+    Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
+    STOREW(entry->as.value.qbe_temp, global);
     free(entry);
 }
-*/
 
 static void compile_instr_i32_const(func_compile_ctx_t *ctx) {
         int32_t n;
@@ -383,6 +377,8 @@ static void compile_instr_br(func_compile_ctx_t *ctx) {
     }
     unwind_value_stack(ctx->value_stack);
     jmp(ctx->qbe_func, ctx->curr_block, label->qbe_block);
+    Blk *continue_blk = newBlock();
+    ctx->curr_block = continue_blk;
     ctx->br_or_return_flag = BRANCH_FLAG;
 }
 
@@ -570,7 +566,7 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
 
     // start the compilation of the body of the loop
     unsigned char last_read_opcode;
-    br_or_return_flag last_br_or_return_flag;
+    br_or_return_flag last_br_or_return_flag = NONE;
     common_blocks_logic(ctx, l, &last_read_opcode, &last_br_or_return_flag);
     if (last_read_opcode != END_CODE) panic();
     return_from_blocks(ctx, l);
@@ -673,12 +669,10 @@ static void compile_variable_instr(func_compile_ctx_t *ctx, unsigned char opcode
             compile_instr_local_set(ctx);
             break;
         case GLOBAL_GET_OPCODE:
-            //compile_instr_global_get(f, ctx);
-            panic();
+            compile_instr_global_get(ctx);
             break;
         case GLOBAL_SET_OPCODE:
-            //compile_instr_global_set(f, ctx);
-            panic();
+            compile_instr_global_set(ctx);
             break;
         default: 
             printf("PANIC: opcode = 0x%02X\n", opcode);
@@ -686,63 +680,64 @@ static void compile_variable_instr(func_compile_ctx_t *ctx, unsigned char opcode
     }
 }
 
-/*
-static void compile_i32_load_instr(FILE *f, func_compile_ctx_t *ctx) {
+static void compile_i32_load_instr(func_compile_ctx_t *ctx) {
     assert_memory0_exists(ctx);
     //TODO: how to properly use align?
     uint32_t align, offset;
-    readULEB128_u32(&ctx->func->body, &align);
-    readULEB128_u32(&ctx->func->body, &offset);
-    unsigned int result_varidx = fresh_var();
-    unsigned int address_plus_offset = fresh_var();
+    readULEB128_u32(&ctx->wasm_func->body, &align);
+    readULEB128_u32(&ctx->wasm_func->body, &offset);
+
+    Ref result = newTemp(ctx->qbe_func);
+    Ref address_plus_offset = newTemp(ctx->qbe_func);
+
     stack_entry_t *address = da_pop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
-    fprintf(f, "\t%%t%d =l extsw %%t%d\n",
-        address_plus_offset, address->as.value.qbe_varidx);
-    fprintf(f, "\t%%t%d =l add %%t%d, %d\n",
-            address_plus_offset, address_plus_offset, offset);
-    fprintf(f, "\t%%t%d =l add $mem0, %%t%d\n",
-            address_plus_offset, address_plus_offset);
+
+    EXTSW(address_plus_offset, address->as.value.qbe_temp);
+    Ref c = newIntConst(ctx->qbe_func, offset);
+    ADD(address_plus_offset, LONG_TYPE, address_plus_offset, c);
+    Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
+    ADD(address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
     //TODO: out of bound memory check
-    fprintf(f, "\t%%t%d =w loadw %%t%d\n", result_varidx, address_plus_offset);
-    stack_entry_t *result = alloc_stack_entry_value(result_varidx, I32_VALTYPE);
-    da_push(ctx->value_stack, result);
+    LOADW(result, address_plus_offset);
+
+    stack_entry_t *entry = alloc_stack_entry_value(result, I32_VALTYPE);
+    da_push(ctx->value_stack, entry);
     free(address);
 }
 
-static void compile_i32_store_instr(FILE *f, func_compile_ctx_t *ctx) {
+static void compile_i32_store_instr(func_compile_ctx_t *ctx) {
     assert_memory0_exists(ctx);
     //TODO: how to properly use align?
     uint32_t align, offset;
-    readULEB128_u32(&ctx->func->body, &align);
-    readULEB128_u32(&ctx->func->body, &offset);
+    readULEB128_u32(&ctx->wasm_func->body, &align);
+    readULEB128_u32(&ctx->wasm_func->body, &offset);
+
     stack_entry_t *value = da_pop(ctx->value_stack);
     assert_stack_entry_value(value, I32_VALTYPE);
     stack_entry_t *address = da_pop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
-    unsigned int address_plus_offset = fresh_var();
-    fprintf(f, "\t%%t%d =l extsw %%t%d\n",
-        address_plus_offset, address->as.value.qbe_varidx);
-    fprintf(f, "\t%%t%d =l add %%t%d, %d\n",
-            address_plus_offset, address_plus_offset, offset);
-    fprintf(f, "\t%%t%d =l add $mem0, %%t%d\n",
-            address_plus_offset, address_plus_offset);
+
+    Ref address_plus_offset = newTemp(ctx->qbe_func);
+    EXTSW(address_plus_offset, address->as.value.qbe_temp);
+    Ref c = newIntConst(ctx->qbe_func, offset);
+    ADD(address_plus_offset, LONG_TYPE, address_plus_offset, c);
+    Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
+    ADD(address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
     //TODO: out of bound memory check
-    fprintf(f, "\tstorew %%t%d, %%t%d\n",
-            value->as.value.qbe_varidx, address_plus_offset);
+    STOREW(value->as.value.qbe_temp, address_plus_offset);
     free(address);
     free(value);
 }
 
-static void compile_memory_instr(
-    FILE *f, func_compile_ctx_t *ctx, unsigned char opcode) {
+static void compile_memory_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
 
     switch (opcode) {
         case I32_LOAD_OPCODE:
-            compile_i32_load_instr(f, ctx);
+            compile_i32_load_instr(ctx);
             break;
         case I32_STORE_OPCODE:
-            compile_i32_store_instr(f, ctx);
+            compile_i32_store_instr(ctx);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
@@ -750,7 +745,6 @@ static void compile_memory_instr(
     }
 }
 
-*/
 static void compile_numeric_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
 
     switch (opcode) {
@@ -807,8 +801,7 @@ static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
         compile_variable_instr(ctx, opcode);
     }
     else if (0x28 <= opcode && opcode <= 0x40) {
-        //compile_memory_instr(f, ctx, opcode);
-        panic();
+        compile_memory_instr(ctx, opcode);
     }
     else if (0x41 <= opcode && opcode <= 0xBF) {
         compile_numeric_instr(ctx, opcode);
@@ -907,29 +900,26 @@ static void compile_func(wasm_module *m, unsigned int func_index) {
     da_free(&value_stack);
     da_free(&label_stack);
 
-    //printfn(qbe_func, stdout);
-    //printf("start typechek\n");
     typecheck(qbe_func);
-    //printf("typechek end\n");
+    //printfn(qbe_func, stdout);
     optimizeFunc(qbe_func);
-    T.emitfin(stdout);
 }
 
-/*
-static void compile_globals(wasm_module_t *m, FILE *out) {
+static void compile_globals(wasm_module *m) {
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
-        char qbe_type = to_qbe_simple_types(g->expr.type);
-        // How to specify align?
-        fprintf(out, "data $g%d = { %c ", i, qbe_type);
+        Lnk lnk = {
+            .align = 8,
+        };
+        newData((char *)g->name, &lnk);
         switch (g->expr.type) {
             case I32_VALTYPE:
-                fprintf(out, "%d", g->expr.as.i32);
+                ADD_INT32_DATA_FIELD(g->expr.as.i32);
                 break;
             default:
                 panic();
         }
-        fprintf(out, " }\n");
+        closeData();
     }
 }
 
@@ -939,32 +929,47 @@ static int compare_data_segment(const void *lhs, const void *rhs) {
     return lhs_ds->offset - rhs_ds->offset;
 }
 
-static void compile_data_segments(wasm_module_t *m, FILE *out) {
+static void compile_data_segments(wasm_module *m) {
     if (m->mem.min_page_num == 0) return;
-    qsort( m->data_segments, m->num_data_segments, 
+    qsort(m->data_segments, m->num_data_segments, 
           sizeof(data_segment_t), compare_data_segment);
     unsigned int mem_size = m->mem.min_page_num * 64 * 1024;
-    fprintf(out, "data $mem0 = { ");
+    Lnk lnk = {
+        .align = 8,
+    };
+    ;
+    newData("mem0", &lnk);
     unsigned int mem_offset = 0;
     for (uint32_t i = 0; i < m->num_data_segments; i++) {
         data_segment_t *d = &m->data_segments[i];
         if (d->offset < mem_offset) panic();
-        fprintf(out, "z %d, ", d->offset - mem_offset);
-            fprintf(out, "b \"");
+        ADD_ZEROS_DATA_FIELD(d->offset - mem_offset);
+
+        uint32_t str_len = 4*d->init_len+3;
+        char *str = xcalloc(str_len, sizeof(char));
+        str[0] = '"';
         for (uint32_t j = 0; j < d->init_len; j++) {
-            fprintf(out, "\\x%02x", d->init_bytes[j]);
+            char *offset = str+1+4*j;
+            snprintf(offset, 5, "\\x%02x", d->init_bytes[j]);
         }
-        fprintf(out, "\", ");
+        str[str_len-2] = '"';
+        str[str_len-1] = '\0';
+
+        ADD_STR_DATA_FIELD(str);
+        free(str);
         mem_offset = d->offset + d->init_len;
     }
-    fprintf(out, "z %d }\n", mem_size - mem_offset);
+    ADD_ZEROS_DATA_FIELD(mem_size - mem_offset);
+    closeData();
 }
-*/
 
+extern Target T_amd64_sysv;
 void compile(wasm_module *m) {
-    //compile_data_segments(m, out);
-    //compile_globals(m, out);
+    T = T_amd64_sysv;
+    compile_data_segments(m);
+    compile_globals(m);
     for (unsigned int i = 0; i < m->funcs_len; i++) {
         compile_func(m, i);
     }
+    T.emitfin(stdout);
 }
