@@ -7,7 +7,7 @@ void panic(void) {
     exit(EXIT_FAILURE);
 }
 
-void *calloc_or_panic(size_t nmemb, size_t size) {
+void *xcalloc(size_t nmemb, size_t size) {
     void *result = calloc(nmemb, size);
     if (result == NULL) {
         panic();
@@ -15,7 +15,7 @@ void *calloc_or_panic(size_t nmemb, size_t size) {
     return result;
 }
 
-void *malloc_or_panic(size_t size) {
+void *xmalloc(size_t size) {
     void *result = malloc(size);
     if (result == NULL) {
         panic();

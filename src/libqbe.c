@@ -3,6 +3,7 @@
 
 static uint *nblk = NULL;
 static Blk **linked_list_tail = NULL;
+static Phi *phi_list_head = NULL;
 static func_return_type rcls;
 
 extern Target T_amd64_sysv;
@@ -378,6 +379,10 @@ static void closeBlock(Blk *b) {
     curi = insb;
     *linked_list_tail = b;
     linked_list_tail = &b->link;
+    if (phi_list_head != NULL) {
+        b->phi = phi_list_head;
+        phi_list_head = NULL;
+    }
 }
 
 Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name) {
@@ -507,5 +512,30 @@ void newFuncCallArg(simple_type type, Ref r) {
         .arg = {r}
     };
     curi++;
+}
+
+void phi(Ref temp, simple_type type, Blk *b0, Ref r0, Blk *b1, Ref r1) {
+    Phi *phi = alloc(sizeof(Phi));
+    phi->to = temp;
+    phi->cls = type;
+    phi->narg = 2;
+    phi->arg = vnew(phi->narg, sizeof(Ref), PFn);
+    phi->arg[0] = r0;
+    phi->arg[1] = r1;
+    phi->blk = vnew(phi->narg, sizeof(Blk), PFn);
+    phi->blk[0] = b0;
+    phi->blk[1] = b1;
+
+    if (phi_list_head == NULL) {
+        phi_list_head = phi;
+    } else {
+        Phi *ptr = phi_list_head;
+        Phi *prev;
+        do {
+            prev = ptr;
+            ptr = ptr->link;
+        } while(ptr != NULL);
+        prev->link = phi;
+    }
 }
 

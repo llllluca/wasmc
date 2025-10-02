@@ -21,6 +21,8 @@ void print_value_type(unsigned int val) {
             printf("ERROR");
     }
 }
+
+/*
 void print_wasm_module(wasm_module_t *m) {
     // print types
     printf("types length: %d\n", m->types_len);
@@ -43,12 +45,13 @@ void print_wasm_module(wasm_module_t *m) {
         wasm_func_t *func = &m->funcs[i];
         unsigned int type_index = func->type - m->types;
         printf("function %d has type %d\n", i, type_index);
-        if (func->export_name != NULL) {
+        if (func->is_exported) {
             printf("function %d is exported with name %s\n", i, func->export_name);
         }
     }
     printf("memory limit: min %d, max %d\n", m->mem.min_page_num, m->mem.max_page_num);
 }
+*/
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -68,18 +71,10 @@ int main(int argc, char **argv) {
     fread(wasm_buf, sizeof(char), wasm_len, input);
     fclose(input);
 
-    wasm_module_t *m = parse(wasm_buf, wasm_len);
-    //print_wasm_module(m);
-
-    unsigned int len = strlen(argv[1]) + 4 + 1;
-    char *output_path = calloc(len, sizeof(char));
-    snprintf(output_path, len, "%s.ssa", argv[1]);
-    FILE *output = fopen(output_path, "w");
-    compile(m, output);
-    fclose(output);
+    wasm_module *m = parse(wasm_buf, wasm_len);
+    compile(m);
 
     free_wasm_module(m);
     free(wasm_buf);
-    free(output_path);
     return 0;
 }
