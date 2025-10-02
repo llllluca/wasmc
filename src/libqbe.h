@@ -3,7 +3,7 @@
 
 #include "qbe-1.2/all.h"
 
-#define QBE_DEBUG 0
+#define QBE_DEBUG 1
 
 typedef enum func_return_type {
     FUNC_NO_RETURN_TYPE = 9, /* must match K0 in qbe-1.2/parse.c */
@@ -212,6 +212,37 @@ typedef enum instr_opcode {
 #define SHL(temp, kind, ref1, ref2) \
     instr((temp), (kind), SHL_INSTR, (ref1), (ref2))
 
+/* Comparisons */
+#define CEQW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CEQW_INSTR, (ref1), (ref2))
+
+#define CNEW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
+
+#define CSLTW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CSLTW_INSTR, (ref1), (ref2))
+
+#define CULTW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
+
+#define CSGTW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CSGTW_INSTR, (ref1), (ref2))
+
+#define CUGTW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CUGTW_INSTR, (ref1), (ref2))
+
+#define CSLEW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CSLEW_INSTR, (ref1), (ref2))
+
+#define CULEW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CULEW_INSTR, (ref1), (ref2))
+
+#define CSGEW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CSGEW_INSTR, (ref1), (ref2))
+
+#define CUGEW(temp, ref1, ref2) \
+    instr((temp), WORD_TYPE, CUGEW_INSTR, (ref1), (ref2))
+
 /* Memory */
 #define ALLOC4(temp, kind, ref) \
     instr((temp), (kind), ALLOC4_INSTR, (ref), R)
@@ -230,6 +261,10 @@ typedef enum instr_opcode {
 #define FUNC_CALL(temp, kind, addrRef) \
     instr((temp), kind, CALL_INSTR, (addrRef), R)
 
+#if QBE_DEBUG != 0
+void printfn(Fn *fn, FILE *f);
+void printref(Ref r, Fn *fn, FILE *f);
+#endif
 
 Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name);
 Ref newFuncParam(Fn *f, simple_type type);
@@ -244,6 +279,7 @@ void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
 void ret(Blk *b);
 void retRef(Blk *b, Ref r);
 void halt(Blk *b);
+void phi(Ref temp, simple_type type, Blk *b0, Ref r0, Blk *b1, Ref r1);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
 

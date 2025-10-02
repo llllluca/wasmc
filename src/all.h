@@ -5,12 +5,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "dalist.h"
+#include "libqbe.h"
 
 typedef int err_t;
 #define OK    0
 #define FAIL -1
 
 typedef uint8_t boolean;
+#define TRUE 1
+#define FALSE 0
 
 typedef struct {
     /* It is needed at least min_page_num page of memory
@@ -24,20 +27,29 @@ typedef struct {
 } memory_info_t;
 
 /* wasm_valtype enum occupies 1 byte */
-enum  __attribute__ ((__packed__)) wasm_valtype {
+typedef enum  __attribute__ ((__packed__)) wasm_valtype {
     NO_VALTYPE  = 0x00,
     I32_VALTYPE = 0x7F,
     I64_VALTYPE = 0x7E,
     F32_VALTYPE = 0x7D,
     F64_VALTYPE = 0x7C,
-};
+} wasm_valtype;
+
+/* wasm_blocktype enum occupies 1 byte */
+typedef enum  __attribute__ ((__packed__)) wasm_blocktype {
+    BLOCK_TYPE_NONE = 0x40,
+    BLOCK_TYPE_I32 = I32_VALTYPE,
+    BLOCK_TYPE_I64 = I64_VALTYPE,
+    BLOCK_TYPE_F32 = F32_VALTYPE,
+    BLOCK_TYPE_F64 = F64_VALTYPE,
+} wasm_blocktype;
 
 typedef struct {
-    enum wasm_valtype return_type;
+    wasm_valtype return_type;
     /* heap allocated array of length num_params. If a function has
      * no parameters params_type is NULL and num_params is 0. */
-    enum wasm_valtype *params_type;
-    unsigned int num_params;
+    wasm_valtype *params_type;
+    uint32_t num_params;
 } wasm_func_type_t;
 
 typedef struct {
@@ -47,16 +59,16 @@ typedef struct {
     unsigned int len;
 } read_struct_t;
 
+#define FUNC_NAME_LEN 10
 typedef struct {
     read_struct_t body; 
     wasm_func_type_t *type; 
     /* Heap allocated array of length num_locals. If a function has
      * no locals variables locals_type is NULL and num_locals is 0.*/
-    enum wasm_valtype *locals_type;
-    unsigned int num_locals;
-    /* Heap allocated and null terminated string. If a function is not
-     * exported, export_name is NULL */
-    char *export_name;
+    wasm_valtype *locals_type;
+    uint32_t num_locals;
+    char name[FUNC_NAME_LEN];
+    boolean is_exported;
 } wasm_func_t;
 
 typedef struct {
@@ -80,25 +92,30 @@ typedef struct {
     unsigned char *init_bytes;
 } data_segment_t;
 
-typedef struct {
+typedef struct wasm_module {
     read_struct_t module;
     memory_info_t mem;
     /* Heap allocated array of length types_len. If a module has no functions
      * types in the type section, types is NULL and types_len is 0. */
     wasm_func_type_t *types;
-    unsigned int types_len;
+    uint32_t types_len;
     /* Heap allocated array of length func_len. If a module has
      * no functions funcs is NULL and funcs_len is 0. */
     wasm_func_t *funcs;
-    unsigned int funcs_len;
+    uint32_t funcs_len;
     /* types_len is not always equal to funcs_len, if two function has
      * the same type they share the same wasm_func_type_t struct. */
+
+    /* Heap allocated array of length globals_len. If a module has no globals
+     * in the global section, globals is NULL and globals_len is 0. */
     global_t *globals;
     uint32_t globals_len;
-
+    /* Heap allocated array of length data_segments. If a module has no
+     * data segment in the data section, data_segments is NULL and
+     * num_data_segments is 0. */
     data_segment_t *data_segments;
     uint32_t num_data_segments;
-} wasm_module_t;
+} wasm_module;
 
 enum stack_entry_kind {
     STACK_ENTRY_VALUE,
@@ -106,8 +123,8 @@ enum stack_entry_kind {
 };
 
 typedef struct {
-    unsigned int qbe_varidx;
-    unsigned char wasm_type;
+    Ref qbe_temp;
+    wasm_valtype wasm_type;
 } value_t;
 
 typedef struct {
@@ -125,26 +142,28 @@ typedef struct {
 } stack_entry_t;
 
 typedef struct {
-    unsigned int qbe_labelidx;
-    unsigned int qbe_result_varidx;
-    unsigned char wasm_type;
+    Blk *qbe_block;
+    Ref qbe_result_temp;
+    wasm_blocktype wasm_type;
 } label_t;
 
-enum br_or_return_flag {
+typedef enum br_or_return_flag {
     NONE,
     RETURN_FLAG,
     BRANCH_FLAG
-};
+} br_or_return_flag;
 
 typedef struct {
-    wasm_module_t *m;
-    wasm_func_t *func;
+    wasm_module *m;
+    wasm_func_t *wasm_func;
+    Fn *qbe_func;
     dalist_t *value_stack;
     dalist_t *label_stack;
     unsigned int label_count;
-    unsigned int *ssa_params;
-    unsigned int *ssa_locals;
+    Ref *qbe_params;
+    Ref *qbe_locals;
     enum br_or_return_flag br_or_return_flag;
+    Blk *curr_block;
 } func_compile_ctx_t;
 
 #define WASM_MAGIC_NUMBER 0x6d736100
@@ -237,21 +256,15 @@ typedef struct {
 #define BOTH_MIN_AND_MAX_MEMORY_LIMIT 0x01
 #define UNLIMITED_MAX_PAGE_NUM 0
 
-#define BLOCK_TYPE_NONE 0x40
-#define BLOCK_TYPE_I32 I32_VALTYPE
-#define BLOCK_TYPE_I64 I64_VALTYPE
-#define BLOCK_TYPE_F32 F32_VALTYPE 
-#define BLOCK_TYPE_F64 F64_VALTYPE 
-
 void read_u8(read_struct_t *r, unsigned char *out);
 void read_u32(read_struct_t *r, uint32_t *out);
 unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
 unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
-wasm_module_t* parse(unsigned char *start, unsigned int len);
-void free_wasm_module(wasm_module_t *m);
+wasm_module* parse(unsigned char *start, unsigned int len);
+void free_wasm_module(wasm_module *m);
 void panic(void);
-void *calloc_or_panic(size_t nmemb, size_t size);
-void *malloc_or_panic(size_t size);
-void compile(wasm_module_t *m, FILE *out);
+void *xcalloc(size_t nmemb, size_t size);
+void *xmalloc(size_t size);
+void compile(wasm_module *m);
 
 #endif

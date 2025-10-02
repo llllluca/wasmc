@@ -502,9 +502,11 @@ bshas(BSet *bs, uint elt)
 
 /* parse.c */
 extern Op optab[NOp];
-void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
+//void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
+#if QBE_DEBUG != 0
 void printfn(Fn *, FILE *);
 void printref(Ref, Fn *, FILE *);
+#endif
 void err(char *, ...) __attribute__((noreturn));
 
 /* abi.c */

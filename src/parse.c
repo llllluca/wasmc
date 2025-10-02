@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static void read_value_type(wasm_module_t *m, enum wasm_valtype *out) {
+static void read_value_type(wasm_module *m, enum wasm_valtype *out) {
     read_u8(&m->module, out);
     if (*out != I32_VALTYPE && *out != I64_VALTYPE &&
         *out != F32_VALTYPE && *out != F64_VALTYPE) {
@@ -28,7 +28,7 @@ static void parse_const_expr(read_struct_t *r, const_expr_t *e) {
     if (opcode != END_CODE) panic();
 }
 
-static void parse_type_section_if_exists(wasm_module_t *m) {
+static void parse_type_section_if_exists(wasm_module *m) {
 
     if (m->module.offset >= m->module.end) return;
     unsigned char id;
@@ -43,7 +43,7 @@ static void parse_type_section_if_exists(wasm_module_t *m) {
     /* read the length of the vector of function types */
     readULEB128_u32(&m->module, &types_len);
     if (types_len == 0) return;
-    m->types = calloc_or_panic(types_len, sizeof(wasm_func_type_t));
+    m->types = xcalloc(types_len, sizeof(wasm_func_type_t));
     m->types_len = types_len;
     unsigned char fun_start_code;
     uint32_t params_len, return_len;
@@ -56,8 +56,7 @@ static void parse_type_section_if_exists(wasm_module_t *m) {
         /* read the length of the vector of parameter types */
         readULEB128_u32(&m->module, &params_len);
         if (params_len > 0) {
-            m->types[i].params_type =
-                calloc_or_panic(params_len, sizeof(enum wasm_valtype));
+            m->types[i].params_type = xcalloc(params_len, sizeof(enum wasm_valtype));
             m->types[i].num_params = params_len;
             for (uint32_t j = 0; j < params_len; j++) {
                 /* read the actual parameter types */
@@ -75,7 +74,7 @@ static void parse_type_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_import_section_if_exists(wasm_module_t *m) {
+static void parse_import_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
@@ -88,7 +87,7 @@ static void parse_import_section_if_exists(wasm_module_t *m) {
     panic();
 }
 
-static void parse_function_section_if_exists(wasm_module_t *m) {
+static void parse_function_section_if_exists(wasm_module *m) {
     uint32_t size, indexes_len, index;
     unsigned char id;
 
@@ -100,7 +99,7 @@ static void parse_function_section_if_exists(wasm_module_t *m) {
     }
     readULEB128_u32(&m->module, &size);
     readULEB128_u32(&m->module, &indexes_len);
-    m->funcs = calloc_or_panic(indexes_len, sizeof(wasm_func_t));
+    m->funcs = xcalloc(indexes_len, sizeof(wasm_func_t));
     m->funcs_len = indexes_len;
 
     for (uint32_t i = 0; i < indexes_len; i++) {
@@ -112,7 +111,7 @@ static void parse_function_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_table_section_if_exists(wasm_module_t *m) {
+static void parse_table_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
@@ -128,7 +127,7 @@ static void parse_table_section_if_exists(wasm_module_t *m) {
     m->module.offset += size;
 }
 
-static void parse_memory_section_if_exists(wasm_module_t *m) {
+static void parse_memory_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
@@ -160,7 +159,7 @@ static void parse_memory_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_global_section_if_exists(wasm_module_t *m) {
+static void parse_global_section_if_exists(wasm_module *m) {
     read_struct_t *r = &m->module;
     if (m->module.offset >= m->module.end) return;
     unsigned char id;
@@ -175,7 +174,7 @@ static void parse_global_section_if_exists(wasm_module_t *m) {
     /* read the length of the vector of globals */
     readULEB128_u32(r, &m->globals_len);
     if (m->globals_len > 0) {
-         m->globals = calloc_or_panic(m->globals_len, sizeof(global_t));
+         m->globals = xcalloc(m->globals_len, sizeof(global_t));
     }
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
@@ -190,7 +189,7 @@ static void parse_global_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_export_section_if_exists(wasm_module_t *m) {
+static void parse_export_section_if_exists(wasm_module *m) {
     unsigned char id;
     unsigned int size, num_exports;
 
@@ -218,13 +217,13 @@ static void parse_export_section_if_exists(wasm_module_t *m) {
                 if (funcidx >= m->funcs_len) {
                     panic();
                 }
-                m->funcs[funcidx].export_name =
-                    calloc_or_panic(name_len+1, sizeof(char));
-                memcpy(m->funcs[funcidx].export_name, name, name_len);
-                m->funcs[funcidx].export_name[name_len] = '\0';
+                m->funcs[funcidx].is_exported = TRUE;
+                if (name_len >= FUNC_NAME_LEN) panic();
+                memcpy(m->funcs[funcidx].name, name, name_len);
+                m->funcs[funcidx].name[name_len] = '\0';
                 // temporary hack
-                if (strcmp(m->funcs[funcidx].export_name, "_start") == 0) {
-                    memcpy(m->funcs[funcidx].export_name, "main", 4+1);
+                if (strcmp(m->funcs[funcidx].name, "_start") == 0) {
+                    memcpy(m->funcs[funcidx].name, "main", 4+1);
                 }
             } break;
             case 0x01: {
@@ -245,7 +244,7 @@ static void parse_export_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_start_section_if_exists(wasm_module_t *m) {
+static void parse_start_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
@@ -258,7 +257,7 @@ static void parse_start_section_if_exists(wasm_module_t *m) {
     panic();
 }
 
-static void parse_element_section_if_exists(wasm_module_t *m) {
+static void parse_element_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     read_u8(&m->module, &id);
@@ -270,7 +269,7 @@ static void parse_element_section_if_exists(wasm_module_t *m) {
     panic();
 }
 
-static void parse_code_section_if_exists(wasm_module_t *m) { 
+static void parse_code_section_if_exists(wasm_module *m) { 
     uint32_t size, funcs_len, code_len;
     unsigned char id;
     wasm_func_t *func;
@@ -310,7 +309,7 @@ static void parse_code_section_if_exists(wasm_module_t *m) {
         }
         if (num_locals > 0) {
             m->module.offset = start_vec_locals;
-            func->locals_type = calloc_or_panic(num_locals, sizeof(enum wasm_valtype));
+            func->locals_type = xcalloc(num_locals, sizeof(enum wasm_valtype));
             func->num_locals = num_locals;
             unsigned int count = 0;
             for (uint32_t j = 0; j < len; j++) {
@@ -339,7 +338,7 @@ static void parse_code_section_if_exists(wasm_module_t *m) {
     }
 }
 
-static void parse_data_section_if_exists(wasm_module_t *m) {
+static void parse_data_section_if_exists(wasm_module *m) {
     unsigned char id;
 
     if (m->module.offset >= m->module.end) return;
@@ -353,8 +352,7 @@ static void parse_data_section_if_exists(wasm_module_t *m) {
     readULEB128_u32(&m->module, &size);
     /* read the length of the vector of data segments */
     readULEB128_u32(&m->module, &m->num_data_segments);
-    m->data_segments =
-        calloc_or_panic(m->num_data_segments, sizeof(data_segment_t));
+    m->data_segments = xcalloc(m->num_data_segments, sizeof(data_segment_t));
     for (uint32_t i = 0; i < m->num_data_segments; i++) {
         readULEB128_u32(&m->module, &memidx);
         if (memidx != 0) {
@@ -371,8 +369,8 @@ static void parse_data_section_if_exists(wasm_module_t *m) {
     }
 }
 
-wasm_module_t* parse(unsigned char *start, unsigned int len) {
-    wasm_module_t *m = malloc_or_panic(sizeof(wasm_module_t));
+wasm_module* parse(unsigned char *start, unsigned int len) {
+    wasm_module *m = xmalloc(sizeof(wasm_module));
     m->module.start  = start;
     m->module.end    = start + len;
     m->module.offset = start;
@@ -407,10 +405,19 @@ wasm_module_t* parse(unsigned char *start, unsigned int len) {
     parse_code_section_if_exists(m);
     parse_data_section_if_exists(m);
 
+    /* Give an explicit name to not exported functions.
+     * It is not a good solution, internal names can clash with exported name */
+    unsigned int id = 0;
+    for (uint32_t i = 0; i < m->funcs_len; i++) {
+        if (!m->funcs[i].is_exported) {
+            snprintf(m->funcs[i].name, FUNC_NAME_LEN, "_f%d", id++);
+        }
+    }
+
     return m;
 }
 
-void free_wasm_module(wasm_module_t *m) {
+void free_wasm_module(wasm_module *m) {
     wasm_func_type_t *type;
     wasm_func_t *func;
 
@@ -429,9 +436,6 @@ void free_wasm_module(wasm_module_t *m) {
         func = &m->funcs[i];
         if (func->locals_type != NULL) {
             free(func->locals_type);
-        }
-        if (func->export_name != NULL) {
-            free(func->export_name);
         }
     }
     if (m->funcs != NULL) {
