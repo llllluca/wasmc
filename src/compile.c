@@ -301,53 +301,51 @@ static void compile_instr_global_set(func_compile_ctx_t *ctx) {
 }
 
 static void compile_instr_i32_const(func_compile_ctx_t *ctx) {
-        int32_t n;
-        readILEB128_i32(&ctx->wasm_func->body, &n);
-        Ref temp = newTemp(ctx->qbe_func);
-        stack_entry_t *entry = alloc_stack_entry_value(temp, I32_VALTYPE);
-        da_push(ctx->value_stack, entry);
-        Ref c = newIntConst(ctx->qbe_func, n);
-        COPY(temp, WORD_TYPE, c);
+    int32_t n;
+    readILEB128_i32(&ctx->wasm_func->body, &n);
+    Ref temp = newTemp(ctx->qbe_func);
+    stack_entry_t *entry = alloc_stack_entry_value(temp, I32_VALTYPE);
+    da_push(ctx->value_stack, entry);
+    Ref c = newIntConst(ctx->qbe_func, n);
+    COPY(temp, WORD_TYPE, c);
 }
 
 static void compile_instr_call(func_compile_ctx_t *ctx) {
-        uint32_t funcidx;
-        readULEB128_u32(&ctx->wasm_func->body, &funcidx);
-        if (funcidx >= ctx->m->funcs_len) {
-            panic();
-        }
-        wasm_func_t *called_func = &ctx->m->funcs[funcidx];
-        wasm_func_type_t *called_type = ctx->m->funcs[funcidx].type;
-        if (ctx->value_stack->size < called_type->num_params) {
-            panic();
-        }
+    uint32_t funcidx;
+    readULEB128_u32(&ctx->wasm_func->body, &funcidx);
+    if (funcidx >= ctx->m->funcs_len) {
+        panic();
+    }
+    wasm_func_t *called_func = &ctx->m->funcs[funcidx];
+    wasm_func_type_t *called_type = ctx->m->funcs[funcidx].type;
+    if (ctx->value_stack->size < called_type->num_params) {
+        panic();
+    }
 
-        if (called_type->return_type == NO_VALTYPE) {
-            // TODO: implements call to a function without return type
-            panic();
-        }
+    Ref temp = newTemp(ctx->qbe_func);
+    Ref called_addr = newAddrConst(ctx->qbe_func, called_func->name);
 
-        stack_entry_t **args = xcalloc(called_type->num_params, sizeof(stack_entry_t *));
-        for (uint32_t i = 0; i < called_type->num_params; i++) {
-             stack_entry_t *entry = da_pop(ctx->value_stack);
-            if (entry == NULL) panic();
-            args[called_type->num_params - i - 1] = entry;
-        }
-        for (uint32_t i = 0; i < called_type->num_params; i++) {
-            wasm_valtype param_type = called_type->params_type[i];
-            assert_stack_entry_value(args[i], param_type);
-            newFuncCallArg(cast(param_type), args[i]->as.value.qbe_temp);
-            free(args[i]);
-        }
-        free(args);
-
-        Ref temp = newTemp(ctx->qbe_func);
+    stack_entry_t **args = xcalloc(called_type->num_params, sizeof(stack_entry_t *));
+    for (uint32_t i = 0; i < called_type->num_params; i++) {
+         stack_entry_t *entry = da_pop(ctx->value_stack);
+        if (entry == NULL) panic();
+        args[called_type->num_params - i - 1] = entry;
+    }
+    for (uint32_t i = 0; i < called_type->num_params; i++) {
+        wasm_valtype param_type = called_type->params_type[i];
+        assert_stack_entry_value(args[i], param_type);
+        newFuncCallArg(cast(param_type), args[i]->as.value.qbe_temp);
+        free(args[i]);
+    }
+    free(args);
+    if (called_type->return_type != NO_VALTYPE) {
         simple_type ret_type = cast(called_type->return_type);
-        Ref called_addr = newAddrConst(ctx->qbe_func, called_func->name);
         FUNC_CALL(temp, ret_type, called_addr);
-
         stack_entry_t *entry = alloc_stack_entry_value(temp, called_type->return_type);
         da_push(ctx->value_stack, entry);
+    } else {
+        VOID_FUNC_CALL(called_addr);
+    }
 }
 
 static void unwind_value_stack(dalist_t *value_stack) {
