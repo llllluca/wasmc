@@ -265,6 +265,10 @@ typedef enum instr_opcode {
 #define FUNC_CALL(temp, kind, addrRef) \
     instr((temp), kind, CALL_INSTR, (addrRef), R)
 
+#define VOID_FUNC_CALL(addrRef) \
+    instr(R, WORD_TYPE, CALL_INSTR, (addrRef), R)
+
+
 /* Data */
 #define ADD_INT32_DATA_FIELD(num) addNumDataField(DW, (num))
 #define ADD_ZEROS_DATA_FIELD(num) addNumDataField(DZ, (num))
