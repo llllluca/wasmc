@@ -83,7 +83,9 @@ alloc(size_t n)
 	if (n == 0)
 		return 0;
 	if (nptr >= NPtr) {
+        /* alloc a new pool of NPtr pointers */
 		pp = emalloc(NPtr * sizeof(void *));
+        /* the first element of the new pool is the old pool */
 		pp[0] = pool;
 		pool = pp;
 		nptr = 1;

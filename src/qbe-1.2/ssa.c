@@ -46,6 +46,8 @@ filluse(Fn *fn)
 
 	/* todo, is this the correct file? */
 	tmp = fn->tmp;
+    /* Tmp0 is the starting index of the user define tmp
+     * in the current function. */
 	for (t=Tmp0; t<fn->ntmp; t++) {
 		tmp[t].def = 0;
 		tmp[t].bid = -1u;

@@ -46,6 +46,9 @@ static void
 addpred(Blk *bp, Blk *bc)
 {
 	if (!bc->pred) {
+    /* TODO: fillpreds() is called multiple time during the optimization
+     * of a function, at each invocation of fillpreds the old bc->pred
+     * becomes useless memory and can be freed */
 		bc->pred = alloc(bc->npred * sizeof bc->pred[0]);
 		bc->visit = 0;
 	}
@@ -84,12 +87,17 @@ rporec(Blk *b, uint x)
 	if (!b || b->id != -1u)
 		return x;
 	b->id = 1;
+    /* s1 is the right link */
 	s1 = b->s1;
+    /* s2 is the left link */
 	s2 = b->s2;
 	if (s1 && s2 && s1->loop > s2->loop) {
 		s1 = b->s2;
 		s2 = b->s1;
 	}
+    /* In the Rever Post Order (RPO) we make the first recursive call
+     * on the right link, then we make a recursive call on the left
+     * link and then we visit the current block. */
 	x = rporec(s1, x);
 	x = rporec(s2, x);
 	b->id = x;
@@ -107,10 +115,17 @@ fillrpo(Fn *f)
 	for (b=f->start; b; b=b->link)
 		b->id = -1u;
 	n = 1 + rporec(f->start, f->nblk-1);
+    /* n is the number of block not reachable from f->start.
+     * n is not always zero because during optimization some block
+     * can became dead code and hence not reachable from f->start. */
 	f->nblk -= n;
+    /* TODO: fillrpo() is called multiple time during the optimization
+     * of a function, at each invocation of fillrpo the old f->rpo
+     * becomes useless memory and can be freed */
 	f->rpo = alloc(f->nblk * sizeof f->rpo[0]);
 	for (p=&f->start; (b=*p);) {
 		if (b->id == -1u) {
+            /* the block b is not reachable from f->start */
 			edgedel(b, &b->s1);
 			edgedel(b, &b->s2);
 			*p = b->link;

@@ -321,10 +321,14 @@ void typecheck(Fn *fn) {
 void optimizeFunc(Fn *fn) {
     uint n;
 
-    T.abi0(fn);
+    /* T.abi0(fn) eliminate sub-word abi op variants for targets that
+     * treat char/short/... as words. The IR obtained from the compilation
+     * of WebAssembly doesn't use sub-word abi op variants. */
+    //T.abi0(fn);
     fillrpo(fn);
     fillpreds(fn);
     filluse(fn);
+    //----------------------
     promote(fn);
     filluse(fn);
     ssa(fn);
@@ -456,7 +460,7 @@ Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name) {
     f->con[1].type = CBits;
     linked_list_tail = &f->start;
     nblk = &f->nblk;
-    f->nblk = 1;
+    f->nblk = 0;
     if (link_info != NULL) {
         f->lnk = *link_info;
     } else {
