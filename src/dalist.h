@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #ifndef DALIST_INITIAL_CAPACITY
-#define DALIST_INITIAL_CAPACITY 256
+#define DALIST_INITIAL_CAPACITY 2
 #endif
 
 typedef struct dalist {

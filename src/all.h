@@ -1,6 +1,8 @@
 #ifndef ALL_H_INCLUDED
 #define ALL_H_INCLUDED
 
+#define ESP_HEAP_DEBUG 0
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,9 +21,9 @@ typedef struct {
     /* It is needed at least min_page_num page of memory
      * in order to execute the WebAssembly module.
      * (WebAssembly currently defines a page to be 64KB) */
-    unsigned int min_page_num;
+    uint32_t min_page_num;
     /* max_page_num is optional, 0 means unlimited. */
-    unsigned int max_page_num;
+    uint32_t max_page_num;
     /* If min_page_num and max_page_num are both 0 the
      * WebAssembly module dosn't use memory */
 } memory_info_t;
@@ -45,6 +47,13 @@ typedef enum  __attribute__ ((__packed__)) wasm_blocktype {
 } wasm_blocktype;
 
 typedef struct {
+    unsigned char *start;
+    unsigned char *offset;
+    unsigned char *end;
+    unsigned int len;
+} read_struct_t;
+
+typedef struct {
     wasm_valtype return_type;
     /* heap allocated array of length num_params. If a function has
      * no parameters params_type is NULL and num_params is 0. */
@@ -52,24 +61,17 @@ typedef struct {
     uint32_t num_params;
 } wasm_func_type_t;
 
-typedef struct {
-    unsigned char *start;
-    unsigned char *offset;
-    unsigned char *end;
-    unsigned int len;
-} read_struct_t;
-
-#define FUNC_NAME_LEN 32
-typedef struct {
-    read_struct_t body; 
-    wasm_func_type_t *type; 
-    /* Heap allocated array of length num_locals. If a function has
-     * no locals variables locals_type is NULL and num_locals is 0.*/
-    wasm_valtype *locals_type;
-    uint32_t num_locals;
-    char name[FUNC_NAME_LEN];
+typedef struct wasm_func_decl {
+    wasm_func_type_t *type;
+    char *name;
     boolean is_exported;
-} wasm_func_t;
+} wasm_func_decl;
+
+typedef struct wasm_func_body {
+    read_struct_t expr;
+    uint32_t num_locals;
+    wasm_valtype locals_type[];
+} wasm_func_body;
 
 typedef struct {
     wasm_valtype type;
@@ -95,28 +97,33 @@ typedef struct {
 } data_segment_t;
 
 typedef struct wasm_module {
+
     read_struct_t module;
     memory_info_t mem;
+
     /* Heap allocated array of length types_len. If a module has no functions
      * types in the type section, types is NULL and types_len is 0. */
     wasm_func_type_t *types;
     uint32_t types_len;
-    /* Heap allocated array of length func_len. If a module has
-     * no functions funcs is NULL and funcs_len is 0. */
-    wasm_func_t *funcs;
-    uint32_t funcs_len;
-    /* types_len is not always equal to funcs_len, if two function has
-     * the same type they share the same wasm_func_type_t struct. */
+
+    uint32_t num_funcs;
+    read_struct_t next_func_body;
+
+    /* Heap allocated array of length num_funcs. If a module has no functions,
+     * decls is NULL and num_funcs is 0. */
+    wasm_func_decl *func_decls;
 
     /* Heap allocated array of length globals_len. If a module has no globals
      * in the global section, globals is NULL and globals_len is 0. */
     global_t *globals;
     uint32_t globals_len;
+
     /* Heap allocated array of length data_segments. If a module has no
      * data segment in the data section, data_segments is NULL and
      * num_data_segments is 0. */
     data_segment_t *data_segments;
     uint32_t num_data_segments;
+
 } wasm_module;
 
 enum stack_entry_kind {
@@ -157,7 +164,8 @@ typedef enum br_or_return_flag {
 
 typedef struct {
     wasm_module *m;
-    wasm_func_t *wasm_func;
+    wasm_func_decl *wasm_func_decl;
+    wasm_func_body *wasm_func_body;
     Fn *qbe_func;
     dalist_t *value_stack;
     dalist_t *label_stack;
@@ -206,7 +214,7 @@ typedef struct {
 // Variable instructions
 #define LOCAL_GET_OPCODE  0x20
 #define LOCAL_SET_OPCODE  0x21
-#define LOCAL_TEE_OPCODE  0x22 //not implemented
+#define LOCAL_TEE_OPCODE  0x22
 #define GLOBAL_GET_OPCODE 0x23
 #define GLOBAL_SET_OPCODE 0x24
 
@@ -262,6 +270,7 @@ void read_u8(read_struct_t *r, unsigned char *out);
 void read_u32(read_struct_t *r, uint32_t *out);
 unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
 unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
+wasm_func_body *parse_next_func_body(wasm_module *m);
 wasm_module* parse(unsigned char *start, unsigned int len);
 void free_wasm_module(wasm_module *m);
 void panic(void);

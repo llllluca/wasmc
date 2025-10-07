@@ -278,8 +278,9 @@ sel(Ins i, ANum *an, Fn *fn)
 		} else
 			r0 = i.arg[1];
 		if (fn->tmp[r0.val].slot != -1)
-			err("unlikely argument %%%s in %s",
-				fn->tmp[r0.val].name, optab[i.op].name);
+			err("unlikely argument");
+			//err("unlikely argument %%%s in %s",
+			//	fn->tmp[r0.val].name, optab[i.op].name);
 		if (i.op == Odiv || i.op == Orem) {
 			emit(Oxidiv, k, R, r0, R);
 			emit(Osign, k, TMP(RDX), TMP(RAX), R);
@@ -299,8 +300,9 @@ sel(Ins i, ANum *an, Fn *fn)
 		if (rtype(r0) == RCon)
 			goto Emit;
 		if (fn->tmp[r0.val].slot != -1)
-			err("unlikely argument %%%s in %s",
-				fn->tmp[r0.val].name, optab[i.op].name);
+			err("unlikely argument");
+			//err("unlikely argument %%%s in %s",
+			//	fn->tmp[r0.val].name, optab[i.op].name);
 		i.arg[1] = TMP(RCX);
 		emit(Ocopy, Kw, R, TMP(RCX), R);
 		emiti(i);
