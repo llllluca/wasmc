@@ -334,11 +334,9 @@ static void compile_instr_global_set(func_compile_ctx_t *ctx) {
 static void compile_instr_i32_const(func_compile_ctx_t *ctx) {
     int32_t n;
     readILEB128_i32(&ctx->wasm_func_body->expr, &n);
-    Ref temp = newTemp(ctx->qbe_func);
-    stack_entry_t *entry = alloc_stack_entry_value(temp, I32_VALTYPE);
-    da_push(ctx->value_stack, entry);
     Ref c = newIntConst(ctx->qbe_func, n);
-    COPY(temp, WORD_TYPE, c);
+    stack_entry_t *entry = alloc_stack_entry_value(c, I32_VALTYPE);
+    da_push(ctx->value_stack, entry);
 }
 
 static void compile_instr_call(func_compile_ctx_t *ctx) {
