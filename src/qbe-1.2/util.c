@@ -25,8 +25,10 @@ struct Bucket {
 enum {
 	VMin = 2,
 	VMag = 0xcabba9e,
-	NPtr = 256,
-	IBits = 12,
+	//NPtr = 256,
+	NPtr = 64,
+	//IBits = 12,
+	IBits = 5,
 	IMask = (1<<IBits) - 1,
 };
 
@@ -268,7 +270,7 @@ icpy(Ins *d, Ins *s, ulong n)
 	return d + n;
 }
 
-static int cmptab[][2] ={
+static const int cmptab[][2] ={
 	             /* negation    swap */
 	[Ciule]      = {Ciugt,      Ciuge},
 	[Ciult]      = {Ciuge,      Ciugt},
@@ -343,8 +345,10 @@ newtmp(char *prfx, int k,  Fn *fn)
 	t = fn->ntmp++;
 	vgrow(&fn->tmp, fn->ntmp);
 	memset(&fn->tmp[t], 0, sizeof(Tmp));
+    /*
 	if (prfx)
 		strf(fn->tmp[t].name, "%s.%d", prfx, ++n);
+    */
 	fn->tmp[t].cls = k;
 	fn->tmp[t].slot = -1;
 	fn->tmp[t].nuse = +1;
@@ -439,8 +443,9 @@ salloc(Ref rt, Ref rs, Fn *fn)
 		emit(Oand, Kl, r0, r1, getcon(-16, fn));
 		emit(Oadd, Kl, r1, rs, getcon(15, fn));
 		if (fn->tmp[rs.val].slot != -1)
-			err("unlikely alloc argument %%%s for %%%s",
-				fn->tmp[rs.val].name, fn->tmp[rt.val].name);
+			err("unlikely alloc argument");
+			//err("unlikely alloc argument %%%s for %%%s",
+			//	fn->tmp[rs.val].name, fn->tmp[rt.val].name);
 	}
 }
 
@@ -591,6 +596,6 @@ dumpts(BSet *bs, Tmp *tmp, FILE *f)
 
 	fprintf(f, "[");
 	for (t=Tmp0; bsiter(bs, &t); t++)
-		fprintf(f, " %s", tmp[t].name);
+		//fprintf(f, " %s", tmp[t].name);
 	fprintf(f, " ]\n");
 }

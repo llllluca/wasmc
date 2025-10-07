@@ -60,8 +60,9 @@ promote(Fn *fn)
 				t->ndef++;
 			} else {
 				if (k == -1)
-					err("slot %%%s is read but never stored to",
-						fn->tmp[l->arg[0].val].name);
+					err("slot is read but never stored to");
+					//err("slot %%%s is read but never stored to",
+					//	fn->tmp[l->arg[0].val].name);
 				/* try to turn loads into copies so we
 				 * can eliminate them later */
 				switch(l->op) {

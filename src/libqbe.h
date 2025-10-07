@@ -3,7 +3,7 @@
 
 #include "qbe-1.2/all.h"
 
-#define QBE_DEBUG 1
+#define QBE_DEBUG 0
 
 typedef enum func_return_type {
     FUNC_NO_RETURN_TYPE = 9, /* must match K0 in qbe-1.2/parse.c */

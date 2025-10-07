@@ -108,7 +108,8 @@ filluse(Fn *fn)
 static Ref
 refindex(int t, Fn *fn)
 {
-	return newtmp(fn->tmp[t].name, fn->tmp[t].cls, fn);
+	//return newtmp(fn->tmp[t].name, fn->tmp[t].cls, fn);
+	return newtmp(NULL, fn->tmp[t].cls, fn);
 }
 
 static void
@@ -390,8 +391,9 @@ ssacheck(Fn *fn)
 
 	for (t=&fn->tmp[Tmp0]; t-fn->tmp < fn->ntmp; t++) {
 		if (t->ndef > 1)
-			err("ssa temporary %%%s defined more than once",
-				t->name);
+			err("ssa temporary defined more than once");
+			//err("ssa temporary %%%s defined more than once",
+			//	t->name);
 		if (t->nuse > 0 && t->ndef == 0) {
 			bu = fn->rpo[t->use[0].bid];
 			goto Err;
@@ -436,8 +438,10 @@ ssacheck(Fn *fn)
 	return;
 Err:
 	if (t->visit)
-		die("%%%s violates ssa invariant", t->name);
+		die("violates ssa invariant");
+		//die("%%%s violates ssa invariant", t->name);
 	else
-		err("ssa temporary %%%s is used undefined in @%s",
-			t->name, bu->name);
+		err("ssa temporary is used undefined");
+		//err("ssa temporary %%%s is used undefined in @%s",
+		//	t->name, bu->name);
 }
