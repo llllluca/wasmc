@@ -224,15 +224,19 @@ struct Ins {
 };
 
 struct Phi {
+/* to must be a RTmp */
 	Ref to;
 	Ref *arg;
 	Blk **blk;
 	uint narg;
 	int cls;
+/* All the Phi inside a block are in a single linked list,
+ * link is a pointer to the next Phi in the list. */
 	Phi *link;
 };
 
 struct Blk {
+/* Linked list of phi instructions used inside this block */
 	Phi *phi;
 	Ins *ins;
 	uint nins;
@@ -240,8 +244,12 @@ struct Blk {
 		short type;
 		Ref arg;
 	} jmp;
+/* s1 and s2 are pointers to adjacents blocks
+ * in the control flow graph */
 	Blk *s1;
 	Blk *s2;
+/* All the blocks are in a single linked list,
+ * link is a pointer to the next Blk in the list. */
 	Blk *link;
 
 	uint id;
@@ -252,8 +260,13 @@ struct Blk {
 	Blk **fron;
 	uint nfron;
 
+/* array of pointers to the predecessors of this block,
+ * see fillpreds in cfg.c */
 	Blk **pred;
+/* number of predecessors of this block (i.e. the length of pred),
+ * see fillpreds in cfg.c */
 	uint npred;
+
 	BSet in[1], out[1], gen[1];
 	int nlive[2];
 	int loop;
@@ -313,11 +326,24 @@ struct Alias {
 struct Tmp {
 	//char name[NString];
 	Ins *def;
+/* Dynamic array that store the usage of this temporary.
+ * see filluse() in ssa.c (TODO: avoid dynamic array) */
 	Use *use;
+/* ndef is the number of time the temporary is defined
+ * (i.e. used in a left hand side of an assignment).
+ * nuse is the number of time the temporary is defined
+ * (i.e. used in a right hand side of an assignment).
+ * see filluse() in ssa.c */
 	uint ndef, nuse;
-	uint bid; /* id of a defining block */
+/* id of a block where this temporary is define, note that
+ * a temporary can be define in multiple block.
+ * see filluse() in ssa.c */
+	uint bid;
 	uint cost;
 	int slot; /* -1 for unset */
+/* Initially cls is set to Kx (NO_TYPE), the type of temporary is
+ * deducted from the assignment in which it is used.
+ * see filluse() in ssa.c */
 	short cls;
 	struct {
 		int r;  /* register or -1 */
@@ -371,6 +397,8 @@ struct Lnk {
 };
 
 struct Fn {
+/* All the blocks are in a single linked list,
+ * start is the head of the head linked list. */
 	Blk *start;
 	Tmp *tmp;
 	Con *con;
@@ -381,6 +409,7 @@ struct Fn {
 	uint nblk;
 	int retty; /* index in typ[], -1 if no aggregate return */
 	Ref retr;
+    /* see fillrpo in cfg.c */
 	Blk **rpo;
 	bits reg;
 	int slot;
