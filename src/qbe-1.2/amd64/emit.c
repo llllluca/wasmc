@@ -57,11 +57,13 @@ enum {
  *   S - single precision float
  *   D - double precision float
  */
-static struct {
+struct opmap_item {
 	short op;
 	short cls;
-	char *asm;
-} omap[] = {
+	char *asm_str;
+};
+
+static const struct opmap_item omap[] = {
 	{ Oadd,    Ka, "+add%k %1, %=" },
 	{ Osub,    Ka, "-sub%k %1, %=" },
 	{ Oand,    Ki, "+and%k %1, %=" },
@@ -393,7 +395,7 @@ emitins(Ins i, Fn *fn, FILE *f)
 			|| (omap[o].cls == Ka))
 				break;
 		}
-		emitf(omap[o].asm, &i, fn, f);
+		emitf(omap[o].asm_str, &i, fn, f);
 		break;
 	case Onop:
 		/* just do nothing for nops, they are inserted

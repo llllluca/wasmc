@@ -34,7 +34,8 @@ typedef struct Target Target;
 
 enum {
 	NString = 80,
-	NIns    = 1 << 20,
+	//NIns    = 1 << 20,
+	NIns    = 1 << 10,
 	NAlign  = 3,
 	NField  = 32,
 	NBit    = CHAR_BIT * sizeof(bits),
@@ -256,7 +257,7 @@ struct Blk {
 	BSet in[1], out[1], gen[1];
 	int nlive[2];
 	int loop;
-	char name[NString];
+	//char name[NString];
 };
 
 struct Use {
@@ -310,7 +311,7 @@ struct Alias {
 };
 
 struct Tmp {
-	char name[NString];
+	//char name[NString];
 	Ins *def;
 	Use *use;
 	uint ndef, nuse;
@@ -501,7 +502,7 @@ bshas(BSet *bs, uint elt)
 }
 
 /* parse.c */
-extern Op optab[NOp];
+extern const Op optab[NOp];
 //void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
 #if QBE_DEBUG != 0
 void printfn(Fn *, FILE *);

@@ -10,7 +10,7 @@ Target T;
 
 #define Ke -2 // must match Ke in qbe-1.2/parse.c
 #define Km Kl // must match Km in qbe-1.2/parse.c
-Op optab[NOp] = {
+const Op optab[NOp] = {
 #define O(op, t, cf) [O##op]={#op, t, cf},
     #include "qbe-1.2/ops.h"
 };
@@ -225,6 +225,10 @@ static int usecheck(Ref r, int k, Fn *fn) {
 }
 
 void typecheck(Fn *fn) {
+}
+
+/*
+void typecheck(Fn *fn) {
 	Blk *b;
 	Phi *p;
 	Ins *i;
@@ -312,6 +316,7 @@ void typecheck(Fn *fn) {
 			err("block @%s is used undefined", b->s2->name);
 	}
 }
+*/
 
 void optimizeFunc(Fn *fn) {
     uint n;
@@ -415,7 +420,7 @@ Ref newTemp(Fn *f) {
     int index = f->ntmp;
     /* f->ntmp is incremented in newtmp() */
     newtmp(NULL, NO_TYPE, f);
-    snprintf(f->tmp[index].name, NString, "t%d", index);
+    //snprintf(f->tmp[index].name, NString, "t%d", index);
     return TMP(index);
 }
 
@@ -485,7 +490,7 @@ Blk *newBlock() {
     Blk *b = newblk();
     b->id = (*nblk)++;
 
-    snprintf(b->name, NString, "l%d", b->id);
+    //snprintf(b->name, NString, "l%d", b->id);
     return b;
 }
 
