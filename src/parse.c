@@ -225,6 +225,9 @@ static void parse_export_section_if_exists(wasm_module *m) {
                     panic();
                 }
                 m->func_decls[funcidx].is_exported = TRUE;
+                if (m->func_decls[funcidx].name != NULL) {
+                    free(m->func_decls[funcidx].name);
+                }
                 m->func_decls[funcidx].name = xcalloc(name_len+1, sizeof(char));
                 memcpy(m->func_decls[funcidx].name, name, name_len);
                 m->func_decls[funcidx].name[name_len] = '\0';
@@ -442,6 +445,26 @@ void free_wasm_module(wasm_module *m) {
         m->types = NULL;
         m->types_len = 0;
     }
+    if (m->globals != NULL) {
+        free(m->globals);
+        m->globals = NULL;
+        m->globals_len = 0;
+    }
+    if (m->data_segments != NULL) {
+        free(m->data_segments);
+        m->data_segments = NULL;
+        m->num_data_segments = 0;
+    }
+    if (m->func_decls != NULL) {
+        for (uint32_t i = 0; i < m->num_funcs; i++) {
+            if (m->func_decls[i].name != NULL) {
+                free(m->func_decls[i].name);
+            }
+        }
+        free(m->func_decls);
+        m->func_decls = NULL;
+    }
+    free(m);
 }
 
 
