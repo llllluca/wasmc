@@ -1000,9 +1000,11 @@ void compile(wasm_module *m) {
     T = T_amd64_sysv;
     compile_data_segments(m);
     /* m->data_segments is not used anymore. */
-    free(m->data_segments);
-    m->data_segments = NULL;
-    m->num_data_segments = 0;
+    if (m->data_segments != NULL) {
+        free(m->data_segments);
+        m->data_segments = NULL;
+        m->num_data_segments = 0;
+    }
     compile_globals(m);
     for (unsigned int i = 0; i < m->num_funcs; i++) {
         #if ESP_HEAP_DEBUG != 0
