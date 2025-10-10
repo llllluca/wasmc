@@ -919,7 +919,6 @@ parsefn(Lnk *lnk)
 	curf->mem = vnew(0, sizeof curf->mem[0], PFn);
 	curf->nmem = 0;
 	curf->nblk = nblk;
-	curf->rpo = 0;
 	for (b=0; b; b=b->link)
 		b->dlink = 0; /* was trashed by findblk() */
 	for (i=0; i<BMask+1; ++i)

@@ -409,7 +409,7 @@ icmp(const void *pa, const void *pb)
 
 /* require rpo ssa alias */
 void
-loadopt(Fn *fn)
+loadopt(Fn *fn, Blk **rpo)
 {
 	Ins *i, *ib;
 	Blk *b;
@@ -437,7 +437,7 @@ loadopt(Fn *fn)
 	ilog[nlog].bid = fn->nblk; /* add a sentinel */
 	ib = vnew(0, sizeof(Ins), PHeap);
 	for (ist=ilog, n=0; n<fn->nblk; ++n) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		for (; ist->bid == n && ist->isphi; ++ist) {
 			ist->new.phi.p->link = b->phi;
 			b->phi = ist->new.phi.p;

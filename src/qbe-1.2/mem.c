@@ -17,6 +17,8 @@ promote(Fn *fn)
 	/* promote uniform stack slots to temporaries */
 	b = fn->start;
 	for (i=b->ins; i<&b->ins[b->nins]; i++) {
+        /* if the opcode is different from alloc4, alloc8 or alloc16
+         * go to the next instruction. (%t =x allocN m) */
 		if (Oalloc > i->op || i->op > Oalloc1)
 			continue;
 		/* specific to NAlign == 3 */
@@ -30,14 +32,21 @@ promote(Fn *fn)
 			if (u->type != UIns)
 				goto Skip;
 			l = u->u.ins;
+            /* the usage is a store operation */
 			if (isload(l->op))
+            /* all the store and and laod must have the same size */
 			if (s == -1 || s == loadsz(l)) {
 				s = loadsz(l);
 				continue;
 			}
+            /* the usage is a store operation */
 			if (isstore(l->op))
+            /*  check that the second argument of the store is %t and
+             *  the first argument of store is not %t */
 			if (req(i->to, l->arg[1]) && !req(i->to, l->arg[0]))
+            /* all the store and and laod must have the same size */
 			if (s == -1 || s == storesz(l))
+            /* all the store must have the same kind (i.e. all storew or all storel) */
 			if (k == -1 || k == optab[l->op].argcls[0][0]) {
 				s = storesz(l);
 				k = optab[l->op].argcls[0][0];
@@ -206,7 +215,7 @@ maxrpo(Blk *hd, Blk *b)
 }
 
 void
-coalesce(Fn *fn)
+coalesce(Fn *fn, Blk **rpo)
 {
 	Range r, *br;
 	Slot *s, *s0, *sl;
@@ -247,13 +256,13 @@ coalesce(Fn *fn)
 	/* one-pass liveness analysis */
 	for (b=fn->start; b; b=b->link)
 		b->loop = -1;
-	loopiter(fn, maxrpo);
+	loopiter(fn, maxrpo, rpo);
 	nbl = 0;
 	bl = vnew(0, sizeof bl[0], PHeap);
 	br = emalloc(fn->nblk * sizeof br[0]);
 	ip = INT_MAX - 1;
 	for (n=fn->nblk-1; n>=0; n--) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		succ[0] = b->s1;
 		succ[1] = b->s2;
 		succ[2] = 0;
@@ -357,7 +366,7 @@ coalesce(Fn *fn)
 		*i = (Ins){.op = Onop};
 		for (u=t->use; u<&t->use[t->nuse]; u++) {
 			if (u->type == UJmp) {
-				b = fn->rpo[u->bid];
+				b = rpo[u->bid];
 				assert(isret(b->jmp.type));
 				b->jmp.type = Jret0;
 				b->jmp.arg = R;
@@ -434,7 +443,7 @@ coalesce(Fn *fn)
 		}
 		for (u=t->use; u<&t->use[t->nuse]; u++) {
 			if (u->type == UJmp) {
-				b = fn->rpo[u->bid];
+				b = rpo[u->bid];
 				b->jmp.arg = TMP(s->s->t);
 				continue;
 			}

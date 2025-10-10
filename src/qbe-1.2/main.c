@@ -47,10 +47,21 @@ data(Dat *d)
 	}
 }
 
+static void free_pred(Fn *fn) {
+    for (Blk *b = fn->start; b != NULL; b = b->link) {
+        if (b->pred != NULL) {
+            free(b->pred);
+            b->pred = NULL;
+        }
+        b->npred = 0;
+    }
+}
+
 static void
 func(Fn *fn)
 {
 	uint n;
+    Blk **rpo = NULL;
 
 	if (dbg)
 		fprintf(stderr, "**** Function %s ****", fn->name);
@@ -58,52 +69,71 @@ func(Fn *fn)
 		fprintf(stderr, "\n> After parsing:\n");
 		printfn(fn, stderr);
 	}
+    free_pred(fn);
+
 	T.abi0(fn);
-	fillrpo(fn);
+	fillrpo(fn, &rpo);
 	fillpreds(fn);
 	filluse(fn);
 	promote(fn);
 	filluse(fn);
-	ssa(fn);
+	ssa(fn, rpo);
 	filluse(fn);
-	ssacheck(fn);
-	fillalias(fn);
-	loadopt(fn);
+	ssacheck(fn, rpo);
+	fillalias(fn, rpo);
+	loadopt(fn, rpo);
 	filluse(fn);
-	fillalias(fn);
-	coalesce(fn);
+	fillalias(fn, rpo);
+	coalesce(fn, rpo);
+
+    free_pred(fn);
+
 	filluse(fn);
-	ssacheck(fn);
-	copy(fn);
+	ssacheck(fn, rpo);
+	copy(fn, rpo);
 	filluse(fn);
-	fold(fn);
+	fold(fn, rpo);
+
+    free(rpo);
+    rpo = NULL;
+
 	T.abi1(fn);
 	simpl(fn);
 	fillpreds(fn);
 	filluse(fn);
 	T.isel(fn);
-	fillrpo(fn);
-	filllive(fn);
-	fillloop(fn);
-	fillcost(fn);
-	spill(fn);
+	fillrpo(fn, &rpo);
+	filllive(fn, rpo);
+	fillloop(fn, rpo);
+	fillcost(fn, rpo);
+	spill(fn, rpo);
+
+    free(rpo);
+    rpo = NULL;
+
 	rega(fn);
-	fillrpo(fn);
+
+    free_pred(fn);
+
+	fillrpo(fn, NULL);
 	simpljmp(fn);
 	fillpreds(fn);
-	fillrpo(fn);
-	assert(fn->rpo[0] == fn->start);
+	fillrpo(fn, &rpo);
+	assert(rpo[0] == fn->start);
 	for (n=0;; n++)
 		if (n == fn->nblk-1) {
-			fn->rpo[n]->link = 0;
+			rpo[n]->link = 0;
 			break;
 		} else
-			fn->rpo[n]->link = fn->rpo[n+1];
+			rpo[n]->link = rpo[n+1];
 	if (!dbg) {
 		T.emitfn(fn, outf);
 		fprintf(outf, "/* end function %s */\n\n", fn->name);
 	} else
 		fprintf(stderr, "\n");
+
+    free_pred(fn);
+    free(rpo);
 	freeall();
 }
 

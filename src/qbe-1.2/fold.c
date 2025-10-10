@@ -181,7 +181,7 @@ renref(Ref *r)
 
 /* require rpo, use, pred */
 void
-fold(Fn *fn)
+fold(Fn *fn, Blk **rpo)
 {
 	Edge *e, start;
 	Use *u;
@@ -201,7 +201,7 @@ fold(Fn *fn)
 	for (t=0; t<fn->ntmp; t++)
 		val[t] = Top;
 	for (n=0; n<fn->nblk; n++) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		b->visit = 0;
 		initedge(&edge[n][0], b->s1);
 		initedge(&edge[n][1], b->s2);
@@ -220,7 +220,7 @@ fold(Fn *fn)
 				continue;
 			e->dead = 0;
 			n = e->dest;
-			b = fn->rpo[n];
+			b = rpo[n];
 			for (p=b->phi; p; p=p->link)
 				visitphi(p, n, fn);
 			if (b->visit == 0) {
@@ -236,7 +236,7 @@ fold(Fn *fn)
 		else if (nuse) {
 			u = usewrk[--nuse];
 			n = u->bid;
-			b = fn->rpo[n];
+			b = rpo[n];
 			if (b->visit == 0)
 				continue;
 			switch (u->type) {
