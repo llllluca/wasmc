@@ -315,7 +315,7 @@ renblk(Blk *b, Name **stk, Fn *fn)
 
 /* require rpo and use */
 void
-ssa(Fn *fn)
+ssa(Fn *fn, Blk **rpo)
 {
 	Name **stk, *n;
     int nt;
@@ -330,7 +330,7 @@ ssa(Fn *fn)
 	d = debug['L'];
 	debug['L'] = 0;
 #endif
-	filldom(fn);
+	filldom(fn, rpo);
 #if QBE_DEBUG != 0
 	if (debug['N']) {
 		fprintf(stderr, "\n> Dominators:\n");
@@ -345,7 +345,7 @@ ssa(Fn *fn)
 	}
 #endif
 	fillfron(fn);
-	filllive(fn);
+	filllive(fn, rpo);
 	phiins(fn);
 	renblk(fn->start, stk, fn);
 	while (nt--)
@@ -382,7 +382,7 @@ phicheck(Phi *p, Blk *b, Ref t)
 
 /* require use and ssa */
 void
-ssacheck(Fn *fn)
+ssacheck(Fn *fn, Blk **rpo)
 {
 	Tmp *t;
 	Ins *i;
@@ -397,7 +397,7 @@ ssacheck(Fn *fn)
 			//err("ssa temporary %%%s defined more than once",
 			//	t->name);
 		if (t->nuse > 0 && t->ndef == 0) {
-			bu = fn->rpo[t->use[0].bid];
+			bu = rpo[t->use[0].bid];
 			goto Err;
 		}
 	}
@@ -406,7 +406,7 @@ ssacheck(Fn *fn)
 			r = p->to;
 			t = &fn->tmp[r.val];
 			for (u=t->use; u<&t->use[t->nuse]; u++) {
-				bu = fn->rpo[u->bid];
+				bu = rpo[u->bid];
 				if (u->type == UPhi) {
 					if (phicheck(u->u.phi, b, r))
 						goto Err;
@@ -421,7 +421,7 @@ ssacheck(Fn *fn)
 			r = i->to;
 			t = &fn->tmp[r.val];
 			for (u=t->use; u<&t->use[t->nuse]; u++) {
-				bu = fn->rpo[u->bid];
+				bu = rpo[u->bid];
 				if (u->type == UPhi) {
 					if (phicheck(u->u.phi, b, r))
 						goto Err;

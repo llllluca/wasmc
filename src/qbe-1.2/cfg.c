@@ -45,96 +45,93 @@ edgedel(Blk *bs, Blk **pbd)
 static void
 addpred(Blk *bp, Blk *bc)
 {
-	if (!bc->pred) {
-    /* TODO: fillpreds() is called multiple time during the optimization
-     * of a function, at each invocation of fillpreds the old bc->pred
-     * becomes useless memory and can be freed */
-		bc->pred = alloc(bc->npred * sizeof bc->pred[0]);
-		bc->visit = 0;
-	}
-	bc->pred[bc->visit++] = bp;
+    if (!bc->pred) {
+        bc->pred = calloc(bc->npred, sizeof(Blk *));
+        bc->visit = 0;
+    }
+    bc->pred[bc->visit++] = bp;
 }
 
 /* fill predecessors information in blocks */
 void
 fillpreds(Fn *f)
 {
-	Blk *b;
+    Blk *b;
 
-	for (b=f->start; b; b=b->link) {
-		b->npred = 0;
-		b->pred = 0;
-	}
-	for (b=f->start; b; b=b->link) {
-		if (b->s1)
-			b->s1->npred++;
-		if (b->s2 && b->s2 != b->s1)
-			b->s2->npred++;
-	}
-	for (b=f->start; b; b=b->link) {
-		if (b->s1)
-			addpred(b, b->s1);
-		if (b->s2 && b->s2 != b->s1)
-			addpred(b, b->s2);
-	}
+    for (b=f->start; b; b=b->link) {
+        assert(b->npred == 0);
+        assert(b->pred == 0);
+    }
+    for (b=f->start; b; b=b->link) {
+        if (b->s1)
+            b->s1->npred++;
+        if (b->s2 && b->s2 != b->s1)
+            b->s2->npred++;
+    }
+    for (b=f->start; b; b=b->link) {
+        if (b->s1)
+            addpred(b, b->s1);
+        if (b->s2 && b->s2 != b->s1)
+            addpred(b, b->s2);
+    }
 }
 
 static int
 rporec(Blk *b, uint x)
 {
-	Blk *s1, *s2;
+    Blk *s1, *s2;
 
-	if (!b || b->id != -1u)
-		return x;
-	b->id = 1;
-    /* s1 is the right link */
-	s1 = b->s1;
-    /* s2 is the left link */
-	s2 = b->s2;
-	if (s1 && s2 && s1->loop > s2->loop) {
-		s1 = b->s2;
-		s2 = b->s1;
-	}
-    /* In the Rever Post Order (RPO) we make the first recursive call
-     * on the right link, then we make a recursive call on the left
-     * link and then we visit the current block. */
-	x = rporec(s1, x);
-	x = rporec(s2, x);
-	b->id = x;
-	assert(x != -1u);
-	return x - 1;
+    if (!b || b->id != -1u)
+        return x;
+    b->id = 1;
+    s1 = b->s1;
+    s2 = b->s2;
+    if (s1 && s2 && s1->loop > s2->loop) {
+        s1 = b->s2;
+        s2 = b->s1;
+    }
+    x = rporec(s1, x);
+    x = rporec(s2, x);
+    b->id = x;
+    assert(x != -1u);
+    return x - 1;
 }
 
 /* fill the rpo information */
 void
-fillrpo(Fn *f)
+fillrpo(Fn *f, Blk ***rpo)
 {
-	uint n;
-	Blk *b, **p;
+    uint n;
+    Blk *b, **p;
 
-	for (b=f->start; b; b=b->link)
-		b->id = -1u;
-	n = 1 + rporec(f->start, f->nblk-1);
+    for (b=f->start; b; b=b->link)
+        b->id = -1u;
+    n = 1 + rporec(f->start, f->nblk-1);
     /* n is the number of block not reachable from f->start.
      * n is not always zero because during optimization some block
      * can became dead code and hence not reachable from f->start. */
-	f->nblk -= n;
-    /* TODO: fillrpo() is called multiple time during the optimization
-     * of a function, at each invocation of fillrpo the old f->rpo
-     * becomes useless memory and can be freed */
-	f->rpo = alloc(f->nblk * sizeof f->rpo[0]);
-	for (p=&f->start; (b=*p);) {
-		if (b->id == -1u) {
-            /* the block b is not reachable from f->start */
-			edgedel(b, &b->s1);
-			edgedel(b, &b->s2);
-			*p = b->link;
-		} else {
-			b->id -= n;
-			f->rpo[b->id] = b;
-			p = &b->link;
-		}
-	}
+    f->nblk -= n;
+    if (rpo != NULL) {
+        assert(*rpo == NULL);
+        *rpo = calloc(f->nblk, sizeof(Blk *));
+        if (rpo == NULL) {
+            die("out of memory");
+        }
+    }
+    for (p=&f->start; (b=*p);) {
+        if (b->id == -1u) {
+            /* TODO: the block b is not reachable from f->start, free(b) */
+            edgedel(b, &b->s1);
+            edgedel(b, &b->s2);
+            *p = b->link;
+        } else {
+            b->id -= n;
+            if (rpo != NULL) {
+                (*rpo)[b->id] = b;
+            }
+            p = &b->link;
+        }
+    }
 }
 
 /* for dominators computation, read
@@ -164,7 +161,7 @@ inter(Blk *b1, Blk *b2)
 }
 
 void
-filldom(Fn *fn)
+filldom(Fn *fn, Blk **rpo) 
 {
 	Blk *b, *d;
 	int ch;
@@ -178,7 +175,7 @@ filldom(Fn *fn)
 	do {
 		ch = 0;
 		for (n=1; n<fn->nblk; n++) {
-			b = fn->rpo[n];
+			b = rpo[n];
 			d = 0;
 			for (p=0; p<b->npred; p++)
 				if (b->pred[p]->idom
@@ -262,7 +259,7 @@ loopmark(Blk *hd, Blk *b, void f(Blk *, Blk *))
 }
 
 void
-loopiter(Fn *fn, void f(Blk *, Blk *))
+loopiter(Fn *fn, void f(Blk *, Blk *), Blk **rpo)
 {
 	uint n, p;
 	Blk *b;
@@ -270,7 +267,7 @@ loopiter(Fn *fn, void f(Blk *, Blk *))
 	for (b=fn->start; b; b=b->link)
 		b->visit = -1u;
 	for (n=0; n<fn->nblk; ++n) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		for (p=0; p<b->npred; ++p)
 			if (b->pred[p]->id >= n)
 				loopmark(b, b->pred[p], f);
@@ -285,13 +282,13 @@ multloop(Blk *hd, Blk *b)
 }
 
 void
-fillloop(Fn *fn)
+fillloop(Fn *fn, Blk **rpo)
 {
 	Blk *b;
 
 	for (b=fn->start; b; b=b->link)
 		b->loop = 1;
-	loopiter(fn, multloop);
+	loopiter(fn, multloop, rpo);
 }
 
 static void

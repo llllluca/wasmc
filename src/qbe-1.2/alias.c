@@ -130,7 +130,7 @@ store(Ref r, int sz, Fn *fn)
 }
 
 void
-fillalias(Fn *fn)
+fillalias(Fn *fn, Blk **rpo)
 {
 	uint n, m;
 	int t, sz;
@@ -144,7 +144,7 @@ fillalias(Fn *fn)
 	for (t=0; t<fn->ntmp; t++)
 		fn->tmp[t].alias.type = ABot;
 	for (n=0; n<fn->nblk; ++n) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		for (p=b->phi; p; p=p->link) {
 			for (m=0; m<p->narg; m++)
 				esc(p->arg[m], fn);

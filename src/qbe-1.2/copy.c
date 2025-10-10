@@ -127,7 +127,7 @@ subst(Ref *pr, Ref *cpy)
 
 /* requires use and dom, breaks use */
 void
-copy(Fn *fn)
+copy(Fn *fn, Blk **rpo)
 {
 	BSet ts[1], as[1];
 	Use **stk;
@@ -147,7 +147,7 @@ copy(Fn *fn)
 
 	/* 1. build the copy-of map */
 	for (n=0; n<fn->nblk; n++) {
-		b = fn->rpo[n];
+		b = rpo[n];
 		for (p=b->phi; p; p=p->link) {
 			assert(rtype(p->to) == RTmp);
 			if (!req(cpy[p->to.val], R))
@@ -164,7 +164,7 @@ copy(Fn *fn)
 				}
 			assert(!req(r, R));
 			if (rtype(r) == RTmp
-			&& !dom(fn->rpo[fn->tmp[r.val].bid], b))
+			&& !dom(rpo[fn->tmp[r.val].bid], b))
 				cpy[p->to.val] = p->to;
 			else if (eq == p->narg)
 				cpy[p->to.val] = r;

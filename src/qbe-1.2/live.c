@@ -36,7 +36,7 @@ bset(Ref r, Blk *b, int *nlv, Tmp *tmp)
  * requires rpo computation
  */
 void
-filllive(Fn *f)
+filllive(Fn *f, Blk **rpo)
 {
 	Blk *b;
 	Ins *i;
@@ -54,7 +54,7 @@ filllive(Fn *f)
 	chg = 1;
 Again:
 	for (n=f->nblk-1; n>=0; n--) {
-		b = f->rpo[n];
+		b = rpo[n];
 
 		bscopy(u, b->out);
 		if (b->s1) {
