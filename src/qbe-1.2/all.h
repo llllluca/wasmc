@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define QBE_STANDALONE 0
+
 #define MAKESURE(what, x) typedef char make_sure_##what[(x)?1:-1]
 #define die(...) die_(__FILE__, __VA_ARGS__)
 
@@ -270,7 +272,9 @@ struct Blk {
 	BSet in[1], out[1], gen[1];
 	int nlive[2];
 	int loop;
-	//char name[NString];
+#if QBE_STANDALONE != 0
+	char name[NString];
+#endif
 };
 
 struct Use {
@@ -324,7 +328,9 @@ struct Alias {
 };
 
 struct Tmp {
-	//char name[NString];
+#if QBE_STANDALONE != 0
+	char name[NString];
+#endif
 	Ins *def;
 /* Dynamic array that store the usage of this temporary.
  * see filluse() in ssa.c (TODO: avoid dynamic array) */
@@ -409,8 +415,6 @@ struct Fn {
 	uint nblk;
 	int retty; /* index in typ[], -1 if no aggregate return */
 	Ref retr;
-    /* see fillrpo in cfg.c */
-	Blk **rpo;
 	bits reg;
 	int slot;
 	char vararg;
@@ -531,11 +535,18 @@ bshas(BSet *bs, uint elt)
 }
 
 /* parse.c */
+#if QBE_STANDALONE != 0
+extern Op optab[NOp];
+void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
+void printfn(Fn *, FILE *);
+void printref(Ref, Fn *, FILE *);
+#else
 extern const Op optab[NOp];
 //void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
 #if QBE_DEBUG != 0
 void printfn(Fn *, FILE *);
 void printref(Ref, Fn *, FILE *);
+#endif
 #endif
 void err(char *, ...) __attribute__((noreturn));
 
@@ -546,21 +557,21 @@ void elimsb(Fn *);
 Blk *newblk(void);
 void edgedel(Blk *, Blk **);
 void fillpreds(Fn *);
-void fillrpo(Fn *);
-void filldom(Fn *);
+void fillrpo(Fn *, Blk ***rpo);
+void filldom(Fn *fn, Blk **rpo);
 int sdom(Blk *, Blk *);
 int dom(Blk *, Blk *);
 void fillfron(Fn *);
-void loopiter(Fn *, void (*)(Blk *, Blk *));
-void fillloop(Fn *);
+void loopiter(Fn *fn, void f(Blk *, Blk *), Blk **rpo);
+void fillloop(Fn *fn, Blk **rpo);
 void simpljmp(Fn *);
 
 /* mem.c */
 void promote(Fn *);
-void coalesce(Fn *);
+void coalesce(Fn *fn, Blk **rpo);
 
 /* alias.c */
-void fillalias(Fn *);
+void fillalias(Fn *fn, Blk **rpo);
 void getalias(Alias *, Ref, Fn *);
 int alias(Ref, int, int, Ref, int, int *, Fn *);
 int escapes(Ref, Fn *);
@@ -568,31 +579,30 @@ int escapes(Ref, Fn *);
 /* load.c */
 int loadsz(Ins *);
 int storesz(Ins *);
-void loadopt(Fn *);
+void loadopt(Fn *fn, Blk **rpo);
 
 /* ssa.c */
 void filluse(Fn *);
 void fillpreds(Fn *);
-void fillrpo(Fn *);
-void ssa(Fn *);
-void ssacheck(Fn *);
+void ssa(Fn *fn, Blk **rpo);
+void ssacheck(Fn *fn, Blk **rpo);
 
 /* copy.c */
-void copy(Fn *);
+void copy(Fn *fn, Blk **rpo);
 
 /* fold.c */
-void fold(Fn *);
+void fold(Fn *fn, Blk **rpo);
 
 /* simpl.c */
 void simpl(Fn *);
 
 /* live.c */
 void liveon(BSet *, Blk *, Blk *);
-void filllive(Fn *);
+void filllive(Fn *fn, Blk **rpo);
 
 /* spill.c */
-void fillcost(Fn *);
-void spill(Fn *);
+void fillcost(Fn *fn, Blk **rpo);
+void spill(Fn *fn, Blk **rpo);
 
 /* rega.c */
 void rega(Fn *);

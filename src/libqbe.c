@@ -318,250 +318,276 @@ void typecheck(Fn *fn) {
 }
 */
 
+static void free_pred(Fn *fn) {
+    for (Blk *b = fn->start; b != NULL; b = b->link) {
+        if (b->pred != NULL) {
+            free(b->pred);
+            b->pred = NULL;
+        }
+        b->npred = 0;
+    }
+}
+
 void optimizeFunc(Fn *fn) {
     uint n;
+    Blk **rpo = NULL;
 
     /* T.abi0(fn) eliminate sub-word abi op variants for targets that
      * treat char/short/... as words. The IR obtained from the compilation
      * of WebAssembly doesn't use sub-word abi op variants. */
     //T.abi0(fn);
-    fillrpo(fn);
-    fillpreds(fn);
-    filluse(fn);
-    //----------------------
-    promote(fn);
-    filluse(fn);
-    ssa(fn);
-    filluse(fn);
-    ssacheck(fn);
-    fillalias(fn);
-    loadopt(fn);
-    filluse(fn);
-    fillalias(fn);
-    coalesce(fn);
-    filluse(fn);
-    ssacheck(fn);
-    copy(fn);
-    filluse(fn);
-    fold(fn);
-    T.abi1(fn);
-    simpl(fn);
-    fillpreds(fn);
-    filluse(fn);
-    T.isel(fn);
-    fillrpo(fn);
-    filllive(fn);
-    fillloop(fn);
-    fillcost(fn);
-    spill(fn);
-    rega(fn);
-    fillrpo(fn);
-    simpljmp(fn);
-    fillpreds(fn);
-    fillrpo(fn);
-    assert(fn->rpo[0] == fn->start);
+	fillrpo(fn, &rpo);
+	fillpreds(fn);
+	filluse(fn);
+	promote(fn);
+	filluse(fn);
+	ssa(fn, rpo);
+	filluse(fn);
+	ssacheck(fn, rpo);
+	fillalias(fn, rpo);
+	loadopt(fn, rpo);
+	filluse(fn);
+	fillalias(fn, rpo);
+	coalesce(fn, rpo);
+
+    free_pred(fn);
+
+	filluse(fn);
+	ssacheck(fn, rpo);
+	copy(fn, rpo);
+	filluse(fn);
+	fold(fn, rpo);
+
+    free(rpo);
+    rpo = NULL;
+
+	T.abi1(fn);
+	simpl(fn);
+	fillpreds(fn);
+	filluse(fn);
+	T.isel(fn);
+	fillrpo(fn, &rpo);
+	filllive(fn, rpo);
+	fillloop(fn, rpo);
+	fillcost(fn, rpo);
+	spill(fn, rpo);
+
+    free(rpo);
+    rpo = NULL;
+
+	rega(fn);
+
+    free_pred(fn);
+
+	fillrpo(fn, NULL);
+	simpljmp(fn);
+	fillpreds(fn);
+	fillrpo(fn, &rpo);
+	assert(rpo[0] == fn->start);
     for (n=0;; n++)
         if (n == fn->nblk-1) {
-            fn->rpo[n]->link = 0;
+            rpo[n]->link = 0;
             break;
         } else
-            fn->rpo[n]->link = fn->rpo[n+1];
+            rpo[n]->link = rpo[n+1];
     T.emitfn(fn, stdout);
     fprintf(stdout, "/* end function %s */\n\n", fn->name);
+
+    free_pred(fn);
+    free(rpo);
     freeall();
-}
+    }
 
 #define DATA_NAME_LEN 16
-static char data_name[DATA_NAME_LEN];
-static Lnk data_lnk;
+    static char data_name[DATA_NAME_LEN];
+    static Lnk data_lnk;
 
-void newData(char *name, Lnk *lnk) {
-    strncpy(data_name, name, DATA_NAME_LEN);
-    data_lnk = *lnk;
-    Dat d;
-    d.type = DStart;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    emitdat(&d, stdout);
-}
-
-void addNumDataField(int type, int64_t num) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = type;
-    d.isstr = 0;
-    d.isref = 0;
-    memset(&d.u, 0, sizeof(d.u));
-    d.u.num = num;
-    emitdat(&d, stdout);
-}
-
-void addStrDataField(int type, char *str) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = type;
-    d.isstr = 1;
-    d.isref = 0;
-    memset(&d.u, 0, sizeof(d.u));
-    d.u.str = str;
-    emitdat(&d, stdout);
-}
-
-void closeData(void) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = DEnd;
-    emitdat(&d, stdout);
-    fputs("/* end data */\n\n", stdout);
-    freeall();
-}
-
-Ref newTemp(Fn *f) {
-
-    int index = f->ntmp;
-    /* f->ntmp is incremented in newtmp() */
-    newtmp(NULL, NO_TYPE, f);
-    //snprintf(f->tmp[index].name, NString, "t%d", index);
-    return TMP(index);
-}
-
-static void closeBlock(Blk *b) {
-    b->nins = curi - insb;
-    idup(&b->ins, insb, b->nins);
-    curi = insb;
-    *linked_list_tail = b;
-    linked_list_tail = &b->link;
-    if (phi_list_head != NULL) {
-        b->phi = phi_list_head;
-        phi_list_head = NULL;
+    void newData(char *name, Lnk *lnk) {
+        strncpy(data_name, name, DATA_NAME_LEN);
+        data_lnk = *lnk;
+        Dat d;
+        d.type = DStart;
+        d.name = data_name;
+        d.lnk = &data_lnk;
+        emitdat(&d, stdout);
     }
-}
 
-Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name) {
-    rcls = ret_type;
-    curi = insb; 
-    Fn *f = alloc(sizeof(Fn));
-    f->ntmp = 0;
-    f->ncon = 2;
-    f->tmp = vnew(f->ntmp, sizeof(Tmp), PFn);
-    f->con = vnew(f->ncon, sizeof(Con), PFn);
-    for (int i = 0; i < Tmp0; ++i) {
-        if (T.fpr0 <= i && i < T.fpr0 + T.nfpr) {
-            newtmp(NULL, Kd, f);
-        } else {
-            newtmp(NULL, Kl, f);
+    void addNumDataField(int type, int64_t num) {
+        Dat d;
+        d.name = data_name;
+        d.lnk = &data_lnk;
+        d.type = type;
+        d.isstr = 0;
+        d.isref = 0;
+        memset(&d.u, 0, sizeof(d.u));
+        d.u.num = num;
+        emitdat(&d, stdout);
+    }
+
+    void addStrDataField(int type, char *str) {
+        Dat d;
+        d.name = data_name;
+        d.lnk = &data_lnk;
+        d.type = type;
+        d.isstr = 1;
+        d.isref = 0;
+        memset(&d.u, 0, sizeof(d.u));
+        d.u.str = str;
+        emitdat(&d, stdout);
+    }
+
+    void closeData(void) {
+        Dat d;
+        d.name = data_name;
+        d.lnk = &data_lnk;
+        d.type = DEnd;
+        emitdat(&d, stdout);
+        fputs("/* end data */\n\n", stdout);
+        freeall();
+    }
+
+    Ref newTemp(Fn *f) {
+
+        int index = f->ntmp;
+        /* f->ntmp is incremented in newtmp() */
+        newtmp(NULL, NO_TYPE, f);
+        //snprintf(f->tmp[index].name, NString, "t%d", index);
+        return TMP(index);
+    }
+
+    static void closeBlock(Blk *b) {
+        b->nins = curi - insb;
+        idup(&b->ins, insb, b->nins);
+        curi = insb;
+        *linked_list_tail = b;
+        linked_list_tail = &b->link;
+        if (phi_list_head != NULL) {
+            b->phi = phi_list_head;
+            phi_list_head = NULL;
         }
     }
-    f->con[0].type = CBits;
-    f->con[0].bits.i = 0xdeaddead;  /* UNDEF */
-    f->con[1].type = CBits;
-    linked_list_tail = &f->start;
-    nblk = &f->nblk;
-    f->nblk = 0;
-    if (link_info != NULL) {
-        f->lnk = *link_info;
-    } else {
-        f->lnk = (Lnk) {0};
+
+    Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name) {
+        rcls = ret_type;
+        curi = insb; 
+        Fn *f = alloc(sizeof(Fn));
+        f->ntmp = 0;
+        f->ncon = 2;
+        f->tmp = vnew(f->ntmp, sizeof(Tmp), PFn);
+        f->con = vnew(f->ncon, sizeof(Con), PFn);
+        for (int i = 0; i < Tmp0; ++i) {
+            if (T.fpr0 <= i && i < T.fpr0 + T.nfpr) {
+                newtmp(NULL, Kd, f);
+            } else {
+                newtmp(NULL, Kl, f);
+            }
+        }
+        f->con[0].type = CBits;
+        f->con[0].bits.i = 0xdeaddead;  /* UNDEF */
+        f->con[1].type = CBits;
+        linked_list_tail = &f->start;
+        nblk = &f->nblk;
+        f->nblk = 0;
+        if (link_info != NULL) {
+            f->lnk = *link_info;
+        } else {
+            f->lnk = (Lnk) {0};
+        }
+        /* curf->retty is different from Kx only form custom data type */
+        f->retty = NO_TYPE;
+        if (name == NULL) {
+            err("function need a explicit name");
+        }
+        strncpy(f->name, name, NString-1);
+        f->mem = vnew(0, sizeof(Mem), PFn);
+        f->nmem = 0;
+        return f;
     }
-    /* curf->retty is different from Kx only form custom data type */
-    f->retty = NO_TYPE;
-    if (name == NULL) {
-        err("function need a explicit name");
+
+    Ref newFuncParam(Fn *f, simple_type type) {
+        Ref r = newTemp(f);
+        *curi = (Ins) {
+            .op = PAR_INSTR,
+            .cls = type,
+            .to = r,
+            .arg = {R}
+        };
+        curi++;
+        return r;
     }
-    strncpy(f->name, name, NString-1);
-    f->mem = vnew(0, sizeof(Mem), PFn);
-    f->nmem = 0;
-    f->rpo = 0;
-    return f;
-}
 
-Ref newFuncParam(Fn *f, simple_type type) {
-    Ref r = newTemp(f);
-    *curi = (Ins) {
-        .op = PAR_INSTR,
-        .cls = type,
-        .to = r,
-        .arg = {R}
-    };
-    curi++;
-    return r;
-}
+    Blk *newBlock() {
+        Blk *b = newblk();
+        b->id = (*nblk)++;
 
-Blk *newBlock() {
-    Blk *b = newblk();
-    b->id = (*nblk)++;
-
-    //snprintf(b->name, NString, "l%d", b->id);
-    return b;
-}
-
-Ref newIntConst(Fn *f, int64_t val) {
-    Con c;
-    memset(&c, 0, sizeof c);
-    c.type = CBits;
-    c.bits.i = val;
-    return newcon(&c, f);
-}
-
-void instr(Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2) {
-    curi->op = op;
-    curi->cls = type;
-    curi->to = r;
-    curi->arg[0] = arg1;
-    curi->arg[1] = arg2;
-    curi++;
-}
-
-void jmp(Fn *f, Blk *b, Blk *b0) {
-    b->jmp.type = Jjmp;
-    b->s1 = b0;
-    closeBlock(b);
-    if (f->start == b0) {
-        err("invalid jump to the start block");
+        //snprintf(b->name, NString, "l%d", b->id);
+        return b;
     }
-}
 
-void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
-    b->jmp.type = Jjnz;
-    b->jmp.arg = r;
-    b->s1 = b0;
-    b->s2 = b1;
-    closeBlock(b);
-    if (f->start == b0 || f->start == b1) {
-        err("invalid jump to the start block");
+    Ref newIntConst(Fn *f, int64_t val) {
+        Con c;
+        memset(&c, 0, sizeof c);
+        c.type = CBits;
+        c.bits.i = val;
+        return newcon(&c, f);
     }
-}
 
-void ret(Blk *b) {
-    b->jmp.type = Jret0;
-    closeBlock(b);
-}
+    void instr(Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2) {
+        curi->op = op;
+        curi->cls = type;
+        curi->to = r;
+        curi->arg[0] = arg1;
+        curi->arg[1] = arg2;
+        curi++;
+    }
 
-void retRef(Blk *b, Ref r) {
-    b->jmp.type = Jretw + rcls;
-    b->jmp.arg = r;
-    closeBlock(b);
-}
+    void jmp(Fn *f, Blk *b, Blk *b0) {
+        b->jmp.type = Jjmp;
+        b->s1 = b0;
+        closeBlock(b);
+        if (f->start == b0) {
+            err("invalid jump to the start block");
+        }
+    }
 
-void halt(Blk *b) {
-    b->jmp.type = Jhlt;
-    closeBlock(b);
-}
+    void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
+        b->jmp.type = Jjnz;
+        b->jmp.arg = r;
+        b->s1 = b0;
+        b->s2 = b1;
+        closeBlock(b);
+        if (f->start == b0 || f->start == b1) {
+            err("invalid jump to the start block");
+        }
+    }
 
-Ref newAddrConst(Fn *f, char *addrName) {
-    Con c;
-    memset(&c, 0, sizeof(Con));
-    c.type = CAddr;
-    c.sym.id = intern(addrName);
-    return newcon(&c, f);
-}
+    void ret(Blk *b) {
+        b->jmp.type = Jret0;
+        closeBlock(b);
+    }
 
-void newFuncCallArg(simple_type type, Ref r) {
-    *curi = (Ins) {
-        .op = ARG_INSTR,
+    void retRef(Blk *b, Ref r) {
+        b->jmp.type = Jretw + rcls;
+        b->jmp.arg = r;
+        closeBlock(b);
+    }
+
+    void halt(Blk *b) {
+        b->jmp.type = Jhlt;
+        closeBlock(b);
+    }
+
+    Ref newAddrConst(Fn *f, char *addrName) {
+        Con c;
+        memset(&c, 0, sizeof(Con));
+        c.type = CAddr;
+        c.sym.id = intern(addrName);
+        return newcon(&c, f);
+    }
+
+    void newFuncCallArg(simple_type type, Ref r) {
+        *curi = (Ins) {
+            .op = ARG_INSTR,
         .cls = type,
         .to = R,
         .arg = {r}

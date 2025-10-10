@@ -37,7 +37,7 @@ tmpuse(Ref r, int use, int loop, Fn *fn)
  * requires rpo, preds
  */
 void
-fillcost(Fn *fn)
+fillcost(Fn *fn, Blk **rpo)
 {
 	int n;
 	uint a;
@@ -46,7 +46,7 @@ fillcost(Fn *fn)
 	Tmp *t;
 	Phi *p;
 
-	loopiter(fn, aggreg);
+	loopiter(fn, aggreg, rpo);
 #if QBE_DEBUG != 0
 	if (debug['S']) {
 		fprintf(stderr, "\n> Loop information:\n");
@@ -327,7 +327,7 @@ merge(BSet *u, Blk *bu, BSet *v, Blk *bv)
  *   constraints
  */
 void
-spill(Fn *fn)
+spill(Fn *fn, Blk **rpo)
 {
 	Blk *b, *s1, *s2, *hd, **bp;
 	int j, l, t, k, lvarg[2];
@@ -357,7 +357,7 @@ spill(Fn *fn)
 		bsset(mask[k], t);
 	}
 
-	for (bp=&fn->rpo[fn->nblk]; bp!=fn->rpo;) {
+	for (bp=&rpo[fn->nblk]; bp!=rpo;) {
 		b = *--bp;
 		/* invariant: all blocks with bigger rpo got
 		 * their in,out updated. */
