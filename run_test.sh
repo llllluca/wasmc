@@ -25,7 +25,8 @@ run_test() {
     log_info "Starting test '${name}'."
 
     wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
-        ./wasmc "test/${name}.wasm" > "test/${name}.s" && \
+        ./wasmc "test/${name}.wasm" > "test/${name}.ssa" && \
+        ./qbe "test/${name}.ssa" > "test/${name}.s" && \
         cc "test/${name}.s" -o "test/a.out"
 
     local exit_code="$?"
@@ -43,7 +44,7 @@ run_test() {
 
     rm -f \
         "test/${name}.wasm" \
-        "test/${name}.wasm.ssa" \
+        "test/${name}.ssa" \
         "test/${name}.s" \
         "test/a.out"
 
