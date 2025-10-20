@@ -1,25 +1,149 @@
 #ifndef LIBQBE_H_INCLUDED
 #define LIBQBE_H_INCLUDED
 
-#include "qbe-1.2/all.h"
+#include <stdint.h>
+#include <stdio.h>
+#include "adlist.h"
 
-#define QBE_DEBUG 0
+#define NString 80
 
-typedef enum func_return_type {
-    FUNC_NO_RETURN_TYPE = 9, /* must match K0 in qbe-1.2/parse.c */
-    FUNC_WORD_RETURN_TYPE = Kw,
-    FUNC_LONG_RETURN_TYPE = Kl,
-    FUNC_SINGLE_PRECISION_RETURN_TYPE = Ks,
-    FUNC_DOUBLE_PRECISION_RETURN_TYPE = Kd,
-} func_return_type;
+typedef struct Phi Phi;
+typedef struct Ins Ins;
+typedef struct Use Use;
+typedef struct Addr Mem;
+typedef struct Blk Blk;
 
-typedef enum simple_type {
-    NO_TYPE = Kx,
-    WORD_TYPE = Kw,
-    LONG_TYPE = Kl,
-    SINGLE_PRECISION_TYPE = Ks,
-    DOUBLE_PRECISION_TYPE = Kd,
+typedef enum __attribute__ ((__packed__)) simple_type {
+    NO_TYPE,
+    WORD_TYPE,
+    LONG_TYPE,
+    SINGLE_PRECISION_TYPE,
+    DOUBLE_PRECISION_TYPE,
 } simple_type;
+
+typedef struct Lnk {
+    char is_exported;
+    char thread;
+    char align;
+    char *sec;
+    char *secf;
+} Lnk;
+
+typedef struct Tmp {
+    char name[NString];
+    simple_type cls;
+    list *use_list;
+} Tmp;
+
+typedef enum Con_type {
+    CInt64,
+    CDouble,
+    CSingle,
+    CAddr,
+} Con_type;
+
+typedef struct Con {
+    Con_type type;
+    union {
+        int64_t i;
+        double d;
+        float s;
+        char *addr;
+    } val;
+} Con;
+
+typedef enum Ref_type {
+    RTmp,
+    RCon,
+} Ref_type;
+
+typedef union Ref_ptr {
+    Tmp *tmp;
+    Con *con;
+} Ref_ptr;
+
+typedef struct Ref {
+    Ref_type type;
+    Ref_ptr val;
+} Ref;
+
+#define UNDEF_TMP_REF (Ref){ .type = RTmp, .val.tmp = NULL }
+
+typedef enum Jump_type {
+    NONE_JUMP_TYPE,
+    JMP_JUMP_TYPE,
+    JNZ_JUMP_TYPE,
+    RET0_JUMP_TYPE,
+    RET1_JUMP_TYPE,
+    HALT_JUMP_TYPE
+} Jump_type;
+
+typedef struct Jump {
+    Jump_type type;
+    Ref arg;
+} Jump;
+
+struct Blk {
+    list *phi_list;
+    list *ins_list;
+    Jump jmp;
+    Blk *s1;
+    Blk *s2;
+    list *preds;
+    char name[NString];
+    Ref *locals;
+    listNode **incomplete_phis;
+    unsigned char is_sealed;
+};
+
+typedef struct Phi_arg {
+    Ref r;
+    Blk *b;
+} Phi_arg;
+
+struct Phi {
+    Ref to;
+    list *phi_arg_list;
+    simple_type type;
+    Blk *block;
+};
+
+typedef struct Fn {
+    list *tmp_list;
+    list *con_list;
+    list *mem_list;
+    list *blk_list;
+    char name[NString];
+    Blk *start;
+    simple_type ret_type;
+    Lnk lnk;
+} Fn;
+
+typedef struct Dat {
+	enum {
+		DStart,
+		DEnd,
+		DB,
+		DH,
+		DW,
+		DL,
+		DZ
+	} type;
+	char *name;
+	Lnk *lnk;
+	union {
+		int64_t num;
+		double fltd;
+		float flts;
+		char *str;
+		struct {
+			char *name;
+			int64_t off;
+		} ref;
+	} u;
+	char isref;
+	char isstr;
+} Dat;
 
 typedef enum instr_opcode {
     /* Arithmetic and Bits */
@@ -169,104 +293,128 @@ typedef enum instr_opcode {
     FLAGFUO_INSTR = 137,
 } instr_opcode;
 
+struct Ins {
+    instr_opcode op;
+    simple_type type;
+    Ref to;
+    Ref arg[2];
+};
+
+typedef enum Use_type {
+        UPhi,
+        UIns,
+        UJmp,
+} Use_type;
+
+typedef union Use_ptr {
+    listNode *ins;
+    listNode *phi;
+    listNode *blk;
+} Use_ptr;
+
+struct Use {
+    Use_type type;
+    Use_ptr u;
+};
+
 /* Arithmetic and Bits */
-#define ADD(temp, kind, ref1, ref2) \
-    instr((temp), (kind), ADD_INSTR, (ref1), (ref2))
+#define ADD(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), ADD_INSTR, (ref1), (ref2))
 
-#define SUB(temp, kind, ref1, ref2) \
-    instr((temp), (kind), SUB_INSTR, (ref1), (ref2))
+#define SUB(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), SUB_INSTR, (ref1), (ref2))
 
-#define NEG(temp, kind, ref) \
-    instr((temp), (kind), NEG_INSTR, (ref1), R)
+#define NEG(b, temp, kind, ref) \
+    instr((b), (temp), (kind), NEG_INSTR, (ref1), UNDEF_TMP_REF)
 
-#define DIV(temp, kind, ref1, ref2) \
-    instr((temp), (kind), DIV_INSTR, (ref1), (ref2))
+#define DIV(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), DIV_INSTR, (ref1), (ref2))
 
-#define REM(temp, kind, ref1, ref2) \
-    instr((temp), (kind), REM_INSTR, (ref1), (ref2))
+#define REM(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), REM_INSTR, (ref1), (ref2))
 
-#define UDIV(temp, kind, ref1, ref2) \
-    instr((temp), (kind), UDIV_INSTR, (ref1), (ref2))
+#define UDIV(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), UDIV_INSTR, (ref1), (ref2))
 
-#define UREM(temp, kind, ref1, ref2) \
-    instr((temp), (kind), UREM_INSTR, (ref1), (ref2))
+#define UREM(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), UREM_INSTR, (ref1), (ref2))
 
-#define MUL(temp, kind, ref1, ref2) \
-    instr((temp), (kind), MUL_INSTR, (ref1), (ref2))
+#define MUL(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), MUL_INSTR, (ref1), (ref2))
 
-#define AND(temp, kind, ref1, ref2) \
-    instr((temp), (kind), AND_INSTR, (ref1), (ref2))
+#define AND(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), AND_INSTR, (ref1), (ref2))
 
-#define OR(temp, kind, ref1, ref2) \
-    instr((temp), (kind), OR_INSTR, (ref1), (ref2))
+#define OR(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), OR_INSTR, (ref1), (ref2))
 
-#define XOR(temp, kind, ref1, ref2) \
-    instr((temp), (kind), XOR_INSTR, (ref1), (ref2))
+#define XOR(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), XOR_INSTR, (ref1), (ref2))
 
-#define SAR(temp, kind, ref1, ref2) \
-    instr((temp), (kind), SAR_INSTR, (ref1), (ref2))
+#define SAR(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), SAR_INSTR, (ref1), (ref2))
 
-#define SHR(temp, kind, ref1, ref2) \
-    instr((temp), (kind), SHR_INSTR, (ref1), (ref2))
+#define SHR(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), SHR_INSTR, (ref1), (ref2))
 
-#define SHL(temp, kind, ref1, ref2) \
-    instr((temp), (kind), SHL_INSTR, (ref1), (ref2))
+#define SHL(b, temp, kind, ref1, ref2) \
+    instr((b), (temp), (kind), SHL_INSTR, (ref1), (ref2))
 
 /* Comparisons */
-#define CEQW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CEQW_INSTR, (ref1), (ref2))
+#define CEQW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CEQW_INSTR, (ref1), (ref2))
 
-#define CNEW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
+#define CNEW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
 
-#define CSLTW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CSLTW_INSTR, (ref1), (ref2))
+#define CSLTW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CSLTW_INSTR, (ref1), (ref2))
 
-#define CULTW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
+#define CULTW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
 
-#define CSGTW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CSGTW_INSTR, (ref1), (ref2))
+#define CSGTW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CSGTW_INSTR, (ref1), (ref2))
 
-#define CUGTW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CUGTW_INSTR, (ref1), (ref2))
+#define CUGTW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CUGTW_INSTR, (ref1), (ref2))
 
-#define CSLEW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CSLEW_INSTR, (ref1), (ref2))
+#define CSLEW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CSLEW_INSTR, (ref1), (ref2))
 
-#define CULEW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CULEW_INSTR, (ref1), (ref2))
+#define CULEW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CULEW_INSTR, (ref1), (ref2))
 
-#define CSGEW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CSGEW_INSTR, (ref1), (ref2))
+#define CSGEW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CSGEW_INSTR, (ref1), (ref2))
 
-#define CUGEW(temp, ref1, ref2) \
-    instr((temp), WORD_TYPE, CUGEW_INSTR, (ref1), (ref2))
+#define CUGEW(b, temp, ref1, ref2) \
+    instr((b), (temp), WORD_TYPE, CUGEW_INSTR, (ref1), (ref2))
 
 /* Memory */
-#define ALLOC4(temp, kind, ref) \
-    instr((temp), (kind), ALLOC4_INSTR, (ref), R)
+#define ALLOC4(b, temp, kind, ref) \
+    instr((b), (temp), (kind), ALLOC4_INSTR, (ref), UNDEF_TMP_REF)
 
-#define STOREW(fromRef, toRef) \
-    instr(R, WORD_TYPE, STOREW_INSTR, (fromRef), (toRef))
+#define STOREW(b, fromRef, toRef) \
+    instr((b), UNDEF_TMP_REF, WORD_TYPE, STOREW_INSTR, (fromRef), (toRef))
 
-#define LOADW(temp, addr) \
-    instr((temp), WORD_TYPE, LOADSW_INSTR, (addr), R)
+#define LOADW(b, temp, addr) \
+    instr((b), (temp), WORD_TYPE, LOADSW_INSTR, (addr), UNDEF_TMP_REF)
 
 /* Conversions */
-#define EXTSW(temp, ref) \
-    instr((temp), LONG_TYPE, EXTSW_INSTR, (ref), R)
+#define EXTSW(b, temp, ref) \
+    instr((b), (temp), LONG_TYPE, EXTSW_INSTR, (ref), UNDEF_TMP_REF)
 
 /* Cast and Copy */
-#define COPY(temp, kind, ref1) \
-    instr((temp), (kind), COPY_INSTR, (ref1), R)
+#define COPY(b, temp, kind, ref1) \
+    instr((b), (temp), (kind), COPY_INSTR, (ref1), UNDEF_TMP_REF)
 
 /* Call */
-#define FUNC_CALL(temp, kind, addrRef) \
-    instr((temp), kind, CALL_INSTR, (addrRef), R)
+#define FUNC_CALL(b, temp, kind, addrRef) \
+    instr((b), (temp), kind, CALL_INSTR, (addrRef), UNDEF_TMP_REF)
 
-#define VOID_FUNC_CALL(addrRef) \
-    instr(R, WORD_TYPE, CALL_INSTR, (addrRef), R)
+#define VOID_FUNC_CALL(b, addrRef) \
+    instr((b), UNDEF_TMP_REF, WORD_TYPE, CALL_INSTR, (addrRef), UNDEF_TMP_REF)
 
 
 /* Data */
@@ -274,25 +422,23 @@ typedef enum instr_opcode {
 #define ADD_ZEROS_DATA_FIELD(num) addNumDataField(DZ, (num))
 #define ADD_STR_DATA_FIELD(str) addStrDataField(DB, (str))
 
-#if QBE_DEBUG != 0
 void printfn(Fn *fn, FILE *f);
-void printref(Ref r, Fn *fn, FILE *f);
-#endif
 
-Fn *newFunc(Lnk *link_info, func_return_type ret_type, char *name);
+Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start);
 Ref newFuncParam(Fn *f, simple_type type);
-Blk *newBlock(void);
+
 Ref newTemp(Fn *func);
+Blk *newBlock(uint32_t nlocals);
 Ref newIntConst(Fn *f, int64_t value);
-void newFuncCallArg(simple_type type, Ref r);
+// TODO: usare instr e macro per newFuncCallArg
+void newFuncCallArg(Blk *b, simple_type type, Ref r);
 Ref newAddrConst(Fn *f, char *addrName);
-void instr(Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2);
+void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);
 void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
-void ret(Blk *b);
-void retRef(Blk *b, Ref r);
-void halt(Blk *b);
-void phi(Ref temp, simple_type type, Blk *b0, Ref r0, Blk *b1, Ref r1);
+void ret(Fn *f, Blk *b);
+void retRef(Fn *f, Blk *b, Ref r);
+void halt(Fn *f, Blk *b);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
 
@@ -301,5 +447,24 @@ void newData(char *name, Lnk *lnk);
 void addNumDataField(int type, int64_t num);
 void addStrDataField(int type, char *str);
 void closeData(void);
+
+Phi *newPhi(Ref temp, simple_type type);
+void phiAppendOperand(Phi *phi, Blk *b, Ref arg);
+listNode *addPhiToBlock(Blk *b, Phi *phi);
+void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
+
+/* emit.c */
+void emitfnlnk(char *, Lnk *, FILE *);
+void emitdat(Dat *, FILE *);
+void emitdbgfile(char *, FILE *);
+void emitdbgloc(unsigned int, unsigned int, FILE *);
+int stashbits(void *, int);
+void elf_emitfnfin(char *, FILE *);
+void elf_emitfin(FILE *);
+void macho_emitfin(FILE *);
+
+int req(Ref a, Ref b);
+void freePhi(Phi *phi);
+void freePhi_arg(Phi_arg *arg);
 
 #endif 

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "dalist.h"
 #include "libqbe.h"
 
@@ -145,22 +146,33 @@ union value_or_block_end {
     block_end_t block_end;
 };
 
-typedef struct {
+typedef struct stack_entry_t {
     enum stack_entry_kind kind;
     union value_or_block_end as;
 } stack_entry_t;
 
-typedef struct {
+typedef enum label_kind {
+    IF_LABEL,
+    BLOCK_LABEL,
+    LOOP_LABEL,
+} label_kind;
+
+typedef struct phi_arg {
+    Blk *label;
+    Ref result;
+} phi_arg;
+
+typedef struct label_t {
+    dalist_t results;
     Blk *qbe_block;
-    Ref qbe_result_temp;
     wasm_blocktype wasm_type;
 } label_t;
 
-typedef enum br_or_return_flag {
+typedef enum skip_flag {
     NONE,
-    RETURN_FLAG,
-    BRANCH_FLAG
-} br_or_return_flag;
+    BR_FLAG,
+    RETURN_FLAG
+} skip_flag;
 
 typedef struct {
     wasm_module *m;
@@ -169,10 +181,8 @@ typedef struct {
     Fn *qbe_func;
     dalist_t *value_stack;
     dalist_t *label_stack;
-    unsigned int label_count;
-    Ref *qbe_params;
-    Ref *qbe_locals;
-    enum br_or_return_flag br_or_return_flag;
+    uint32_t locals_len;
+    skip_flag skip_flag;
     Blk *curr_block;
 } func_compile_ctx_t;
 
@@ -266,10 +276,7 @@ typedef struct {
 #define BOTH_MIN_AND_MAX_MEMORY_LIMIT 0x01
 #define UNLIMITED_MAX_PAGE_NUM 0
 
-void read_u8(read_struct_t *r, unsigned char *out);
-void read_u32(read_struct_t *r, uint32_t *out);
-unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
-unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
+
 wasm_func_body *parse_next_func_body(wasm_module *m);
 wasm_module* parse(unsigned char *start, unsigned int len);
 void free_wasm_module(wasm_module *m);
@@ -277,5 +284,19 @@ void panic(void);
 void *xcalloc(size_t nmemb, size_t size);
 void *xmalloc(size_t size);
 void compile(wasm_module *m);
+
+
+/* ssa.c */
+void write_local(Blk *b, uint32_t index, Ref value);
+Ref read_local(func_compile_ctx_t *ctx, Blk *b, uint32_t index);
+void seal_block(func_compile_ctx_t *ctx, Blk *b);
+
+/* utils.c */
+void read_u8(read_struct_t *r, unsigned char *out);
+void read_u32(read_struct_t *r, uint32_t *out);
+unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
+unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
+wasm_valtype local_type(func_compile_ctx_t *ctx, uint32_t index);
+simple_type cast(wasm_valtype t);
 
 #endif

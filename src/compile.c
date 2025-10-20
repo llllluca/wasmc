@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include "dalist.h"
 
 #if ESP_HEAP_DEBUG != 0
@@ -45,23 +46,7 @@ static void assert_block_type(wasm_blocktype type) {
     }
 }
 
-simple_type cast(wasm_valtype t) {
-    switch(t) {
-        case I32_VALTYPE:
-            return WORD_TYPE;
-        case I64_VALTYPE:
-            return LONG_TYPE;
-        case F32_VALTYPE:
-            panic(); //TODO: add support for floating point
-            return 's';
-        case F64_VALTYPE:
-            panic(); //TODO: add support for floating point
-            return 'd';
-        default:
-            panic();
-            return '_'; // dead code, only to remove compiler warning
-    }
-}
+
 
 static uint32_t size(wasm_valtype wasm_type) {
     switch (wasm_type) {
@@ -82,18 +67,30 @@ static uint32_t size(wasm_valtype wasm_type) {
     }
 }
 
-static label_t *alloc_label(Blk *qbe_block, wasm_blocktype t, Ref qbe_result_temp) {
 
-    label_t *label = xmalloc(sizeof(label_t));
+static phi_arg *alloc_phi_arg(Blk *label, Ref result) {
+    phi_arg *pa = xmalloc(sizeof(struct phi_arg));
+    pa->label = label;
+    pa->result.type = result.type;
+    pa->result.val = result.val;
+    return pa;
+}
+
+
+static label_t *alloc_label(label_kind kind, Blk *qbe_block, wasm_blocktype t) {
+
+    label_t *label = xmalloc(sizeof(struct label_t));
     label->qbe_block = qbe_block;
     label->wasm_type = t;
-    label->qbe_result_temp = qbe_result_temp;
+    label->results.size = 0;
+    label->results.capacity = 0;
+    label->results.items = NULL;
     return label;
 }
 
 
 static stack_entry_t *alloc_stack_entry_value(Ref qbe_temp, wasm_valtype t) {
-    stack_entry_t *entry = xmalloc(sizeof(stack_entry_t));
+    stack_entry_t *entry = xmalloc(sizeof(struct stack_entry_t));
     entry->kind = STACK_ENTRY_VALUE;
     entry->as.value.qbe_temp = qbe_temp;
     entry->as.value.wasm_type = t;
@@ -106,7 +103,7 @@ static void compile_instr_i32_binop(func_compile_ctx_t *ctx, unsigned char opcod
     stack_entry_t *fst_operand = da_pop(ctx->value_stack);
     assert_stack_entry_value(snd_operand, I32_VALTYPE);
     assert_stack_entry_value(fst_operand, I32_VALTYPE);
-
+    Blk *b = ctx->curr_block;
     Ref result_temp = newTemp(ctx->qbe_func);
     stack_entry_t *entry = alloc_stack_entry_value(result_temp, I32_VALTYPE);
     da_push(ctx->value_stack, entry);
@@ -114,43 +111,43 @@ static void compile_instr_i32_binop(func_compile_ctx_t *ctx, unsigned char opcod
     Ref snd = snd_operand->as.value.qbe_temp;
     switch (opcode) {
         case I32_ADD_OPCODE:
-            ADD(result_temp, WORD_TYPE, fst, snd);
+            ADD(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SUB_OPCODE:
-            SUB(result_temp, WORD_TYPE, fst, snd);
+            SUB(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_MUL_OPCODE:
-            MUL(result_temp, WORD_TYPE, fst, snd);
+            MUL(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_DIV_S_UPCODE:
-            DIV(result_temp, WORD_TYPE, fst, snd);
+            DIV(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_DIV_U_OPCODE:
-            UDIV(result_temp, WORD_TYPE, fst, snd);
+            UDIV(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_REM_S_OPCODE:
-            REM(result_temp, WORD_TYPE, fst, snd);
+            REM(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_REM_U_OPCODE:
-            UREM(result_temp, WORD_TYPE, fst, snd);
+            UREM(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_AND_OPCODE:
-            AND(result_temp, WORD_TYPE, fst, snd);
+            AND(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_OR_OPCODE:
-            OR(result_temp, WORD_TYPE, fst, snd);
+            OR(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_XOR_OPCODE:
-            XOR(result_temp, WORD_TYPE, fst, snd);
+            XOR(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHL_OPCODE:
-            SHL(result_temp, WORD_TYPE, fst, snd);
+            SHL(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHR_S_OPCODE:
-            SAR(result_temp, WORD_TYPE, fst, snd);
+            SAR(b, result_temp, WORD_TYPE, fst, snd);
             break;
         case I32_SHR_U_OPCODE:
-            SAR(result_temp, WORD_TYPE, fst, snd);
+            SAR(b, result_temp, WORD_TYPE, fst, snd);
             break;
         default:
             panic();
@@ -169,7 +166,7 @@ static void compile_instr_i32_tests(func_compile_ctx_t *ctx, unsigned char opcod
     switch (opcode) {
         case I32_EQZ_OPCODE: {
             Ref zero = newIntConst(ctx->qbe_func, 0);
-            CEQW(result, test_cond->as.value.qbe_temp, zero);
+            CEQW(ctx->curr_block, result, test_cond->as.value.qbe_temp, zero);
         } break;
         default:
             panic();
@@ -183,6 +180,7 @@ static void compile_instr_i32_comparisons(func_compile_ctx_t *ctx, unsigned char
     stack_entry_t *fst_operand = da_pop(ctx->value_stack);
     assert_stack_entry_value(snd_operand, I32_VALTYPE);
     assert_stack_entry_value(fst_operand, I32_VALTYPE);
+    Blk *b = ctx->curr_block;
     Ref result = newTemp(ctx->qbe_func);
     stack_entry_t *entry = alloc_stack_entry_value(result, I32_VALTYPE);
     da_push(ctx->value_stack, entry);
@@ -190,34 +188,34 @@ static void compile_instr_i32_comparisons(func_compile_ctx_t *ctx, unsigned char
     value_t *snd = &snd_operand->as.value;
     switch (opcode) {
         case I32_EQ_OPCODE:
-            CEQW(result, fst->qbe_temp, snd->qbe_temp);
+            CEQW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_NE_OPCODE:
-            CNEW(result, fst->qbe_temp, snd->qbe_temp);
+            CNEW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_LT_S_OPCODE:
-            CSLTW(result, fst->qbe_temp, snd->qbe_temp);
+            CSLTW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_LT_U_OPCODE:
-            CULTW(result, fst->qbe_temp, snd->qbe_temp);
+            CULTW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_GT_S_OPCODE:
-            CSGTW(result, fst->qbe_temp, snd->qbe_temp);
+            CSGTW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_GT_U_OPCODE:
-            CUGTW(result, fst->qbe_temp, snd->qbe_temp);
+            CUGTW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_LE_S_OPCODE:
-            CSLEW(result, fst->qbe_temp, snd->qbe_temp);
+            CSLEW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_LE_U_OPCODE:
-            CULEW(result, fst->qbe_temp, snd->qbe_temp);
+            CULEW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_GE_S_OPCODE:
-            CSGEW(result, fst->qbe_temp, snd->qbe_temp);
+            CSGEW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_GE_U_OPCODE:
-            CUGEW(result, fst->qbe_temp, snd->qbe_temp);
+            CUGEW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         default:
             panic();
@@ -226,81 +224,46 @@ static void compile_instr_i32_comparisons(func_compile_ctx_t *ctx, unsigned char
     free(fst_operand);
 }
 
+
 static void compile_instr_local_get(func_compile_ctx_t *ctx) {
 
-    wasm_func_decl *decl = ctx->wasm_func_decl;
-    wasm_func_body *body = ctx->wasm_func_body;
-    wasm_valtype wasm_type = NO_VALTYPE;
     uint32_t index;
-    Ref local;
-
-    readULEB128_u32(&body->expr, &index);
-    if (index < decl->type->num_params) {
-        wasm_type = decl->type->params_type[index];
-        local = ctx->qbe_params[index];
-    } else if (index - decl->type->num_params < body->num_locals) {
-        index -= decl->type->num_params;
-        wasm_type = body->locals_type[index];
-        local = ctx->qbe_locals[index];
-    } else panic();
-
+    readULEB128_u32(&ctx->wasm_func_body->expr, &index);
+    wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
-    Ref temp = newTemp(ctx->qbe_func);
-    stack_entry_t *entry = alloc_stack_entry_value(temp, wasm_type);
+    Ref local = read_local(ctx, ctx->curr_block, index);
+    if (local.val.tmp == NULL) {
+        local = newIntConst(ctx->qbe_func, 0);
+    }
+    stack_entry_t *entry = alloc_stack_entry_value(local, wasm_type);
     da_push(ctx->value_stack, entry);
-    LOADW(temp, local);
 }
 
 static void compile_instr_local_set(func_compile_ctx_t *ctx) {
 
-    wasm_func_decl *decl = ctx->wasm_func_decl;
-    wasm_func_body *body = ctx->wasm_func_body;
-    wasm_valtype wasm_type = NO_VALTYPE;
     uint32_t index;
-    Ref local;
-
-    readULEB128_u32(&body->expr, &index);
-    if (index < decl->type->num_params) {
-        wasm_type = decl->type->params_type[index];
-        local = ctx->qbe_params[index];
-    } else if (index - decl->type->num_params < body->num_locals) {
-        index -= decl->type->num_params;
-        wasm_type = body->locals_type[index];
-        local = ctx->qbe_locals[index];
-    } else panic();
-
     stack_entry_t *entry = da_pop(ctx->value_stack);
-    assert_stack_entry_value(entry, wasm_type);
-
+    readULEB128_u32(&ctx->wasm_func_body->expr, &index);
+    wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
-    STOREW(entry->as.value.qbe_temp, local);
+    assert_stack_entry_value(entry, wasm_type);
+    write_local(ctx->curr_block, index, entry->as.value.qbe_temp);
     free(entry);
 }
 
+/*
 static void compile_instr_local_tee(func_compile_ctx_t *ctx) {
 
-    wasm_func_decl *decl = ctx->wasm_func_decl;
-    wasm_func_body *body = ctx->wasm_func_body;
-    wasm_valtype wasm_type = NO_VALTYPE;
     uint32_t index;
-    Ref local;
-
-    readULEB128_u32(&body->expr, &index);
-    if (index < decl->type->num_params) {
-        wasm_type = decl->type->params_type[index];
-        local = ctx->qbe_params[index];
-    } else if (index - decl->type->num_params < body->num_locals) {
-        index -= decl->type->num_params;
-        wasm_type = body->locals_type[index];
-        local = ctx->qbe_locals[index];
-    } else panic();
-
     stack_entry_t *entry = da_peak_last(ctx->value_stack);
-    assert_stack_entry_value(entry, wasm_type);
-
+    readULEB128_u32(&ctx->wasm_func_body->expr, &index);
+    wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
-    STOREW(entry->as.value.qbe_temp, local);
+    assert_stack_entry_value(entry, wasm_type);
+    Ref *locals = da_peak_last(ctx->locals_stack);
+    locals[index] = entry->as.value.qbe_temp;
 }
+*/
 
 static void compile_instr_global_get(func_compile_ctx_t *ctx) {
     uint32_t globalidx;
@@ -313,7 +276,7 @@ static void compile_instr_global_get(func_compile_ctx_t *ctx) {
     da_push(ctx->value_stack, entry);
     if (size(g->expr.type) != 4) panic();
     Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
-    LOADW(temp, global);
+    LOADW(ctx->curr_block, temp, global);
 }
 
 static void compile_instr_global_set(func_compile_ctx_t *ctx) {
@@ -327,7 +290,7 @@ static void compile_instr_global_set(func_compile_ctx_t *ctx) {
     assert_stack_entry_value(entry, g->expr.type);
     if (size(g->expr.type) != 4) panic();
     Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
-    STOREW(entry->as.value.qbe_temp, global);
+    STOREW(ctx->curr_block, entry->as.value.qbe_temp, global);
     free(entry);
 }
 
@@ -362,7 +325,7 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
                 wasm_valtype param_type = called_type->params_type[i];
                 stack_entry_t *entry = ctx->value_stack->items[paramsidx + i];
                 assert_stack_entry_value(entry, param_type);
-                newFuncCallArg(cast(param_type), entry->as.value.qbe_temp);
+                newFuncCallArg(ctx->curr_block, cast(param_type), entry->as.value.qbe_temp);
             }
             for (uint32_t i = 0; i < num_params; i++) {
                 stack_entry_t *entry = da_pop(ctx->value_stack);
@@ -371,11 +334,11 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
     }
     if (called_type->return_type != NO_VALTYPE) {
         simple_type ret_type = cast(called_type->return_type);
-        FUNC_CALL(temp, ret_type, called_addr);
+        FUNC_CALL(ctx->curr_block, temp, ret_type, called_addr);
         stack_entry_t *entry = alloc_stack_entry_value(temp, called_type->return_type);
         da_push(ctx->value_stack, entry);
     } else {
-        VOID_FUNC_CALL(called_addr);
+        VOID_FUNC_CALL(ctx->curr_block, called_addr);
     }
 }
 
@@ -397,25 +360,26 @@ static void compile_instr_br(func_compile_ctx_t *ctx) {
     if (len <= labelidx) panic();
     label_t *label = ctx->label_stack->items[len - 1 - labelidx];
 
+    stack_entry_t *result = NULL;
     if (label->wasm_type != BLOCK_TYPE_NONE) {
-        stack_entry_t *result = da_pop(ctx->value_stack);
+        result = da_pop(ctx->value_stack);
         assert_stack_entry_value(result, (wasm_valtype) label->wasm_type);
-        if (size(result->as.value.wasm_type) != 4) panic();
-        COPY(label->qbe_result_temp, WORD_TYPE, result->as.value.qbe_temp);
-        free(result);
     }
     unwind_value_stack(ctx->value_stack);
+    if (label->wasm_type != BLOCK_TYPE_NONE) {
+        Ref r = result->as.value.qbe_temp;
+        phi_arg *p = alloc_phi_arg(ctx->curr_block, r);
+        da_push(&label->results, p);
+        free(result);
+    }
     jmp(ctx->qbe_func, ctx->curr_block, label->qbe_block);
-    Blk *continue_blk = newBlock();
-    ctx->curr_block = continue_blk;
-    ctx->br_or_return_flag = BRANCH_FLAG;
+    ctx->skip_flag = BR_FLAG;
+    ctx->curr_block = NULL;
 }
 
 static void compile_instr_br_if(func_compile_ctx_t *ctx) {
     uint32_t labelidx;
 
-    // Pop a value of type i32 from the value stack,
-    // that value is the condition of the if.
     stack_entry_t *ifcond = da_pop(ctx->value_stack);
     assert_stack_entry_value(ifcond, I32_VALTYPE);
     Ref ifcond_qbe_temp = ifcond->as.value.qbe_temp;
@@ -429,50 +393,37 @@ static void compile_instr_br_if(func_compile_ctx_t *ctx) {
     if (label->wasm_type != BLOCK_TYPE_NONE) {
         stack_entry_t *result = da_peak_last(ctx->value_stack);
         assert_stack_entry_value(result, (wasm_valtype) label->wasm_type);
-        if (size(result->as.value.wasm_type) != 4) panic();
-        COPY(label->qbe_result_temp, WORD_TYPE, result->as.value.qbe_temp);
+        Ref r = result->as.value.qbe_temp;
+        phi_arg *p = alloc_phi_arg(ctx->curr_block, r);
+        da_push(&label->results, p);
     }
 
-    Blk *continue_blk = newBlock();
+    Blk *continue_blk = newBlock(ctx->locals_len);
     jnz(ctx->qbe_func, ctx->curr_block, ifcond_qbe_temp, label->qbe_block, continue_blk);
+    seal_block(ctx, continue_blk);
     ctx->curr_block = continue_blk;
 }
 
 static void compile_instr_return(func_compile_ctx_t *ctx) {
     dalist_t *value_stack = ctx->value_stack;
-    stack_entry_t *result;
     wasm_valtype return_type = ctx->wasm_func_decl->type->return_type;
     if (return_type != NO_VALTYPE) {
-        result = da_pop(value_stack);
+        stack_entry_t *result = da_pop(value_stack);
         assert_stack_entry_value(result, (wasm_valtype) return_type);
-        retRef(ctx->curr_block, result->as.value.qbe_temp);
+        retRef(ctx->qbe_func, ctx->curr_block, result->as.value.qbe_temp);
         free(result);
     } else {
-        ret(ctx->curr_block);
+        ret(ctx->qbe_func, ctx->curr_block);
     }
     unwind_value_stack(value_stack);
-    ctx->br_or_return_flag = RETURN_FLAG;
+    ctx->skip_flag = RETURN_FLAG;
+    ctx->curr_block = NULL;
 }
 
-static void common_blocks_logic(func_compile_ctx_t *ctx, label_t l,
-    unsigned char *last_read_opcode, br_or_return_flag *last_br_or_return_flag) {
-
-    dalist_t *value_stack = ctx->value_stack;
-    dalist_t *label_stack = ctx->label_stack;
+static boolean compile_then_branch(func_compile_ctx_t *ctx) {
+   
     read_struct_t *r = &ctx->wasm_func_body->expr;
-
-    Ref zero = newIntConst(ctx->qbe_func, 0);
-    COPY(l.qbe_result_temp, WORD_TYPE, zero);
-
-    // add a special stack entry to keep track of the status of the
-    // value stack before the start of the compilatoin of this block
-    da_push(value_stack, &bottom_block_stack);
-
-    label_t *label = alloc_label(
-        l.qbe_block,
-        l.wasm_type,
-        l.qbe_result_temp);
-    da_push(label_stack, label);
+    da_push(ctx->value_stack, &bottom_block_stack);
 
     unsigned char opcode;
     read_u8(r, &opcode);
@@ -480,133 +431,242 @@ static void common_blocks_logic(func_compile_ctx_t *ctx, label_t l,
         compile_instr(ctx, opcode);
         read_u8(r, &opcode);
     }
-    if (last_read_opcode != NULL) {
-        *last_read_opcode = opcode;
-    }
-    br_or_return_flag branch = ctx->br_or_return_flag;
-    if (last_br_or_return_flag != NULL) {
-        *last_br_or_return_flag = branch;
-    }
-    // reset branch_flag to false, there is no more need to skip
-    // instructions between a br and the end of the closest block
-    ctx->br_or_return_flag = NONE;
-
-    if (l.wasm_type != BLOCK_TYPE_NONE && !branch) {
-        stack_entry_t *block_result = da_pop(value_stack);
-        assert_stack_entry_value(block_result, (wasm_valtype) l.wasm_type);
-        COPY(l.qbe_result_temp,
-             cast((wasm_valtype) l.wasm_type),
-             block_result->as.value.qbe_temp);
-        free(block_result);
-    }
-    // check that the value stack did not change
-    stack_entry_t *bottom = da_pop(value_stack);
-    assert_stack_entry_block_end(bottom);
-
-    free(da_pop(ctx->label_stack));
+    skip_flag skip_flag = ctx->skip_flag;
+    if (skip_flag == BR_FLAG || skip_flag == RETURN_FLAG) {
+        ctx->skip_flag = NONE;
+        unwind_value_stack(ctx->value_stack);
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+    } else if (skip_flag == NONE) {
+        label_t *label = da_peak_last(ctx->label_stack);
+        jmp(ctx->qbe_func, ctx->curr_block, label->qbe_block);
+        if (label->wasm_type != BLOCK_TYPE_NONE) {
+            stack_entry_t *then_result = da_pop(ctx->value_stack);
+            assert_stack_entry_value(then_result, (wasm_valtype) label->wasm_type);
+            Ref r = then_result->as.value.qbe_temp;
+            phi_arg *p = alloc_phi_arg(ctx->curr_block, r);
+            da_push(&label->results, p);
+            free(then_result);
+        }
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+    } else panic();
+    return opcode == ELSE_OPCODE;
 }
 
-static void return_from_blocks(func_compile_ctx_t *ctx, label_t l) {
-    if (l.wasm_type != BLOCK_TYPE_NONE) {
-        stack_entry_t *result = alloc_stack_entry_value(
-            l.qbe_result_temp,
-            (wasm_valtype) l.wasm_type);
-        da_push(ctx->value_stack, result);
+static boolean compile_else_branch(func_compile_ctx_t *ctx) {
+
+    read_struct_t *r = &ctx->wasm_func_body->expr;
+    da_push(ctx->value_stack, &bottom_block_stack);
+
+    unsigned char opcode;
+    read_u8(r, &opcode);
+    while (opcode != END_CODE) {
+        compile_instr(ctx, opcode);
+        read_u8(r, &opcode);
     }
+
+    skip_flag skip_flag = ctx->skip_flag;
+    if (skip_flag == BR_FLAG || skip_flag == RETURN_FLAG) {
+        ctx->skip_flag = NONE;
+        unwind_value_stack(ctx->value_stack);
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+    } else if (skip_flag == NONE) {
+        label_t *label = da_peak_last(ctx->label_stack);
+        if (label->wasm_type != BLOCK_TYPE_NONE) {
+            stack_entry_t *otherwise_result = da_pop(ctx->value_stack);
+            assert_stack_entry_value(otherwise_result, (wasm_valtype) label->wasm_type);
+            Ref r = otherwise_result->as.value.qbe_temp;
+            phi_arg *p = alloc_phi_arg(ctx->curr_block, r);
+            da_push(&label->results, p);
+            free(otherwise_result);
+        }
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+    } else panic();
+    return skip_flag != NONE;
 }
 
 static void compile_instr_if(func_compile_ctx_t *ctx) {
-    label_t l;
 
-    // Pop a value of type i32 from the value stack,
-    // that value is the condition of the if.
+    read_struct_t *r = &ctx->wasm_func_body->expr;
+
     stack_entry_t *ifcond = da_pop(ctx->value_stack);
     assert_stack_entry_value(ifcond, I32_VALTYPE);
     Ref ifcond_qbe_temp = ifcond->as.value.qbe_temp;
     free(ifcond);
 
-    read_u8(&ctx->wasm_func_body->expr, &l.wasm_type);
-    assert_block_type(l.wasm_type);
-    Blk *then = newBlock();
-    Blk *otherwise = newBlock();
-    Blk *end = newBlock();
-    l.qbe_block = end;
-    l.qbe_result_temp = newTemp(ctx->qbe_func);
+    Blk *then = newBlock(ctx->locals_len);
+    Blk *otherwise = newBlock(ctx->locals_len);
+    Blk *end = newBlock(ctx->locals_len);
 
-    // if the condition is not zero jump to then label
-    // otherwise jump to otherwise (else) label
+    wasm_blocktype wasm_type;
+    read_u8(r, &wasm_type);
+    assert_block_type(wasm_type);
+
+    label_t *label = alloc_label(IF_LABEL, end, wasm_type);
+    da_push(ctx->label_stack, label);
+
+    assert(ctx->curr_block->is_sealed);
     jnz(ctx->qbe_func, ctx->curr_block, ifcond_qbe_temp, then, otherwise);
+    seal_block(ctx, then);
+    seal_block(ctx, otherwise);
 
-    // start the compilation of the then branch
     ctx->curr_block = then;
-    unsigned char last_read_opcode = 0;
-    br_or_return_flag last_br_or_return_flag = NONE;
-    common_blocks_logic(ctx, l, &last_read_opcode, &last_br_or_return_flag);
-    if (last_br_or_return_flag == NONE) {
-        jmp(ctx->qbe_func, ctx->curr_block, end);
-    }
-    // if there is a matching else, start the compilation of the else branch
+    boolean matching_else = compile_then_branch(ctx);
+
     ctx->curr_block = otherwise;
-    last_br_or_return_flag = NONE;
-    if (last_read_opcode == ELSE_OPCODE) {
-        common_blocks_logic(ctx, l, &last_read_opcode, &last_br_or_return_flag);
+    boolean br = FALSE;
+    if (matching_else) {
+        br = compile_else_branch(ctx);
     }
-    if (last_br_or_return_flag == NONE) {
+    if (!br) {
         jmp(ctx->qbe_func, ctx->curr_block, end);
     }
-    
-    if (last_read_opcode != END_CODE) panic();
-    return_from_blocks(ctx, l);
+    assert(label == da_pop(ctx->label_stack));
+
+    seal_block(ctx, end);
     ctx->curr_block = end;
+    if (wasm_type != BLOCK_TYPE_NONE) {
+        uint32_t result_size = label->results.size;
+        Ref r;
+        if (result_size > 0) {
+            r = newTemp(ctx->qbe_func);
+            Phi *phi = newPhi(r, cast((wasm_valtype) wasm_type));
+            for (uint32_t i = 0; i < result_size; i++) {
+                phi_arg *p = da_pop(&label->results);
+                phiAppendOperand(phi, p->label, p->result);
+                free(p);
+            }
+            addPhiToBlock(end, phi);
+        } else {
+            r = newIntConst(ctx->qbe_func, 0);
+        }
+        stack_entry_t *result = alloc_stack_entry_value(
+            r, (wasm_valtype) wasm_type);
+        da_push(ctx->value_stack, result);
+    }
+    free(label);
 }
 
 static void compile_instr_block(func_compile_ctx_t *ctx) {
-    label_t l;
 
-    read_u8(&ctx->wasm_func_body->expr, &l.wasm_type);
-    assert_block_type(l.wasm_type);
+    wasm_blocktype wasm_type;
+    read_struct_t *r = &ctx->wasm_func_body->expr;
+    read_u8(r, &wasm_type);
+    assert_block_type(wasm_type);
 
-    Blk *end = newBlock();
-    l.qbe_block = end;
-    l.qbe_result_temp = newTemp(ctx->qbe_func);
-    // start the compilation of the body of the block
-    unsigned char last_read_opcode;
-    br_or_return_flag last_br_or_return_flag;
-    common_blocks_logic(ctx, l, &last_read_opcode, &last_br_or_return_flag);
-    if (last_read_opcode != END_CODE) panic();
-    if (last_br_or_return_flag == NONE) {
+    Blk *end = newBlock(ctx->locals_len);
+    da_push(ctx->value_stack, &bottom_block_stack);
+
+    label_t *label = alloc_label(BLOCK_LABEL, end, wasm_type);
+    da_push(ctx->label_stack, label);
+
+    unsigned char opcode;
+    read_u8(r, &opcode);
+    while (opcode != END_CODE) {
+        compile_instr(ctx, opcode);
+        read_u8(r, &opcode);
+    }
+    skip_flag skip_flag = ctx->skip_flag;
+    if (skip_flag == BR_FLAG || skip_flag == RETURN_FLAG) {
+        ctx->skip_flag = NONE;
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+    } else if (skip_flag == NONE) {
+        if (wasm_type != BLOCK_TYPE_NONE) {
+             stack_entry_t *block_result = da_pop(ctx->value_stack);
+            assert_stack_entry_value(block_result, (wasm_valtype) wasm_type);
+            Ref r = block_result->as.value.qbe_temp;
+            phi_arg *p = alloc_phi_arg(ctx->curr_block, r);
+            da_push(&label->results, p);
+            free(block_result);
+        }
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
         jmp(ctx->qbe_func, ctx->curr_block, end);
     }
-    return_from_blocks(ctx, l);
+    else panic();
+
+    assert(label == da_pop(ctx->label_stack));
+    if (wasm_type != BLOCK_TYPE_NONE) {
+        uint32_t result_size = label->results.size;
+        Ref r;
+        if (result_size > 0) {
+            r = newTemp(ctx->qbe_func);
+            Phi *phi = newPhi(r, cast((wasm_valtype) wasm_type));
+            for (uint32_t i = 0; i < result_size; i++) {
+                phi_arg *p = da_pop(&label->results);
+                phiAppendOperand(phi, p->label, p->result);
+                free(p);
+            }
+            addPhiToBlock(end, phi);
+        } else {
+            r = newIntConst(ctx->qbe_func, 0);
+        }
+        stack_entry_t *result = alloc_stack_entry_value(
+            r, (wasm_valtype) wasm_type);
+        da_push(ctx->value_stack, result);
+    }
+    free(label);
+    seal_block(ctx, end);
     ctx->curr_block = end;
 }
 
 static void compile_instr_loop(func_compile_ctx_t *ctx) {
-    label_t l;
 
-    Blk *loop = newBlock();
-    jmp(ctx->qbe_func, ctx->curr_block, loop);
-    ctx->curr_block = loop;
+    wasm_blocktype wasm_type;
+    read_struct_t *r = &ctx->wasm_func_body->expr;
+    read_u8(r, &wasm_type);
+    assert_block_type(wasm_type);
+    da_push(ctx->value_stack, &bottom_block_stack);
 
-    read_u8(&ctx->wasm_func_body->expr, &l.wasm_type);
-    assert_block_type(l.wasm_type);
-    l.qbe_block = loop;
-    l.qbe_result_temp = newTemp(ctx->qbe_func);
+    Blk *loop_header = newBlock(ctx->locals_len);
+    jmp(ctx->qbe_func, ctx->curr_block, loop_header);
+    ctx->curr_block = loop_header;
 
-    // start the compilation of the body of the loop
-    unsigned char last_read_opcode;
-    br_or_return_flag last_br_or_return_flag = NONE;
-    common_blocks_logic(ctx, l, &last_read_opcode, &last_br_or_return_flag);
-    if (last_read_opcode != END_CODE) panic();
-    return_from_blocks(ctx, l);
+    label_t *label = alloc_label(LOOP_LABEL, loop_header, wasm_type);
+    da_push(ctx->label_stack, label);
+
+    unsigned char opcode;
+    read_u8(r, &opcode);
+    while (opcode != END_CODE) {
+        compile_instr(ctx, opcode);
+        read_u8(r, &opcode);
+    }
+
+    skip_flag skip_flag = ctx->skip_flag;
+    if (skip_flag == BR_FLAG || skip_flag == RETURN_FLAG) {
+        ctx->skip_flag = NONE;
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+        Blk *continue_blk = newBlock(ctx->locals_len);
+        ctx->curr_block = continue_blk;
+    } else if (skip_flag == NONE) {
+        stack_entry_t *loop_result = NULL;
+        if (wasm_type != BLOCK_TYPE_NONE) {
+            loop_result = da_pop(ctx->value_stack);
+            assert_stack_entry_value(loop_result, (wasm_valtype) wasm_type);
+        }
+        stack_entry_t *bottom = da_pop(ctx->value_stack);
+        assert_stack_entry_block_end(bottom);
+        if (wasm_type != BLOCK_TYPE_NONE) {
+            da_push(ctx->value_stack, loop_result);
+        }
+    }
+    else panic();
+
+    assert(label == da_pop(ctx->label_stack));
+    free(label);
+    seal_block(ctx, loop_header);
 }
 
 static void compile_control_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
 
     switch (opcode) {
         case UNREACHABLE_OPCODE:
-            halt(ctx->curr_block);
-            panic();
+            halt(ctx->qbe_func, ctx->curr_block);
             break;
         case NOP_OPCODE:
             break;
@@ -660,9 +720,9 @@ static void compile_parametric_instr(func_compile_ctx_t *ctx, unsigned char opco
                 panic();
             }
             wasm_valtype wasm_type = snd_operand->as.value.wasm_type;
-            Blk *select_fst = newBlock();
-            Blk *select_snd = newBlock();
-            Blk *end = newBlock();
+            Blk *select_fst = newBlock(ctx->locals_len);
+            Blk *select_snd = newBlock(ctx->locals_len);
+            Blk *end = newBlock(ctx->locals_len);
 
             jnz(ctx->qbe_func, ctx->curr_block,
                 select_cond->as.value.qbe_temp, select_fst, select_snd);
@@ -671,10 +731,14 @@ static void compile_parametric_instr(func_compile_ctx_t *ctx, unsigned char opco
             ctx->curr_block = end;
 
             Ref result = newTemp(ctx->qbe_func);
-            phi(result, cast(wasm_type), select_fst, fst_operand->as.value.qbe_temp, select_snd, snd_operand->as.value.qbe_temp);
+            Phi *phi = newPhi(result, cast(wasm_type));
+            Ref fst_arg = fst_operand->as.value.qbe_temp;
+            Ref snd_arg = snd_operand->as.value.qbe_temp;
+            phiAppendOperand(phi, select_fst, fst_arg);
+            phiAppendOperand(phi, select_snd, snd_arg);
+            addPhiToBlock(end, phi);
 
-            stack_entry_t *entry =
-                alloc_stack_entry_value(result, wasm_type);
+            stack_entry_t *entry = alloc_stack_entry_value(result, wasm_type);
             da_push(ctx->value_stack, entry);
 
             free(select_cond);
@@ -698,7 +762,8 @@ static void compile_variable_instr(func_compile_ctx_t *ctx, unsigned char opcode
             compile_instr_local_set(ctx);
             break;
         case LOCAL_TEE_OPCODE:
-            compile_instr_local_tee(ctx);
+            panic();
+            //compile_instr_local_tee(ctx);
             break;
         case GLOBAL_GET_OPCODE:
             compile_instr_global_get(ctx);
@@ -718,20 +783,21 @@ static void compile_i32_load_instr(func_compile_ctx_t *ctx) {
     uint32_t align, offset;
     readULEB128_u32(&ctx->wasm_func_body->expr, &align);
     readULEB128_u32(&ctx->wasm_func_body->expr, &offset);
-
-    Ref result = newTemp(ctx->qbe_func);
-    Ref address_plus_offset = newTemp(ctx->qbe_func);
+    Blk *b = ctx->curr_block;
+    Fn *f = ctx->qbe_func;
+    Ref result = newTemp(f);
+    Ref address_plus_offset = newTemp(f);
 
     stack_entry_t *address = da_pop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
 
-    EXTSW(address_plus_offset, address->as.value.qbe_temp);
+    EXTSW(b, address_plus_offset, address->as.value.qbe_temp);
     Ref c = newIntConst(ctx->qbe_func, offset);
-    ADD(address_plus_offset, LONG_TYPE, address_plus_offset, c);
+    ADD(b, address_plus_offset, LONG_TYPE, address_plus_offset, c);
     Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
-    ADD(address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
+    ADD(b, address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
     //TODO: out of bound memory check
-    LOADW(result, address_plus_offset);
+    LOADW(b, result, address_plus_offset);
 
     stack_entry_t *entry = alloc_stack_entry_value(result, I32_VALTYPE);
     da_push(ctx->value_stack, entry);
@@ -750,14 +816,15 @@ static void compile_i32_store_instr(func_compile_ctx_t *ctx) {
     stack_entry_t *address = da_pop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
 
+    Blk *b = ctx->curr_block;
     Ref address_plus_offset = newTemp(ctx->qbe_func);
-    EXTSW(address_plus_offset, address->as.value.qbe_temp);
+    EXTSW(b, address_plus_offset, address->as.value.qbe_temp);
     Ref c = newIntConst(ctx->qbe_func, offset);
-    ADD(address_plus_offset, LONG_TYPE, address_plus_offset, c);
+    ADD(b, address_plus_offset, LONG_TYPE, address_plus_offset, c);
     Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
-    ADD(address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
+    ADD(b, address_plus_offset, LONG_TYPE, mem0, address_plus_offset);
     //TODO: out of bound memory check
-    STOREW(value->as.value.qbe_temp, address_plus_offset);
+    STOREW(b, value->as.value.qbe_temp, address_plus_offset);
     free(address);
     free(value);
 }
@@ -822,7 +889,7 @@ static void compile_numeric_instr(func_compile_ctx_t *ctx, unsigned char opcode)
 static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
     /* if the branch_flag is true, we are trying to compile an instruction
      * between a br and the end of the closest block, so skip it */
-    if (ctx->br_or_return_flag != NONE) return;
+    if (ctx->skip_flag != NONE) return;
     else if (opcode <= 0x11) {
         compile_control_instr(ctx, opcode);
     }
@@ -847,50 +914,26 @@ static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
 static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *body) {
     wasm_func_type_t *t = decl->type;
 
-    Ref *qbe_params = NULL;
-    Ref *qbe_locals = NULL;
-    if (t->num_params > 0) {
-        qbe_params = xcalloc(t->num_params, sizeof(Ref));
-    }
-    if (body->num_locals > 0) {
-        qbe_locals = xcalloc(body->num_locals, sizeof(Ref));
-    }
+    uint32_t locals_len = t->num_params + body->num_locals;
 
     Lnk link_info = {0};
-    link_info.export = decl->is_exported;
-    func_return_type ret_type = FUNC_NO_RETURN_TYPE;
+    link_info.is_exported = decl->is_exported;
+    simple_type ret_type = NO_TYPE;
     if (t->return_type != NO_VALTYPE) {
-        ret_type = (func_return_type) cast(t->return_type);
+        ret_type = cast(t->return_type);
     }
-    Fn *qbe_func = newFunc(&link_info, ret_type, decl->name);
-    Blk *start = newBlock();
-    Ref four = newIntConst(qbe_func, 4);
+    Blk *start = newBlock(locals_len);
+    Fn *qbe_func = newFunc(&link_info, ret_type, decl->name, start);
     Ref zero = newIntConst(qbe_func, 0);
 
     for (uint32_t i = 0; i < t->num_params; i++) {
         Ref param = newFuncParam(qbe_func, cast(t->params_type[i]));
-        qbe_params[i] = param;
+        start->locals[i] = param;
     }
 
-    for (uint32_t i = 0; i < t->num_params; i++) {
-        Ref temp = newTemp(qbe_func);
-        /* Only 32 bit wasm value type are supported */
-        if (size(t->params_type[i]) != 4) panic();
-        ALLOC4(temp, LONG_TYPE, four);
-        STOREW(qbe_params[i], temp);
-        qbe_params[i] = temp;
-    }
-
-    /* Store and initialize function local variables on the stack */
     for (uint32_t i = 0; i < body->num_locals; i++) {
-        Ref temp = newTemp(qbe_func);
-        /* Only 32 bit wasm value type are supported */
-        if (size(body->locals_type[i]) != 4) panic();
-        ALLOC4(temp, LONG_TYPE, four);
-        STOREW(zero, temp);
-        qbe_locals[i] = temp;
+        start->locals[t->num_params + i] = zero;
     }
-
     dalist_t value_stack = {0};
     dalist_t label_stack = {0};
     func_compile_ctx_t ctx = {
@@ -900,12 +943,11 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         .qbe_func = qbe_func,
         .value_stack = &value_stack,
         .label_stack = &label_stack,
-        .qbe_params = qbe_params,
-        .qbe_locals = qbe_locals,
-        .label_count = 0,
-        .br_or_return_flag = NONE,
+        .locals_len = locals_len,
+        .skip_flag = NONE,
         .curr_block = start,
     };
+    seal_block(&ctx, start);
     da_push(ctx.value_stack, &bottom_block_stack);
     /* compile the body of the function */
     unsigned char opcode;
@@ -914,29 +956,28 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         compile_instr(&ctx, opcode);
     }
     /* Add an implicit return if there is no explicit return in the wasm code */
-    if (ctx.br_or_return_flag != RETURN_FLAG) {
+    if (ctx.skip_flag != RETURN_FLAG) {
         if (t->return_type != NO_VALTYPE) {
             stack_entry_t *entry = da_pop(&value_stack);
             assert_stack_entry_value(entry, t->return_type);
-            retRef(ctx.curr_block, entry->as.value.qbe_temp);
+            retRef(ctx.qbe_func, ctx.curr_block, entry->as.value.qbe_temp);
             free(entry);
         } else {
-            ret(ctx.curr_block);
+            ret(ctx.qbe_func, ctx.curr_block);
         }
     }
     stack_entry_t *bottom = da_pop(ctx.value_stack);
     assert_stack_entry_block_end(bottom);
 
-    if (qbe_params != NULL) free(qbe_params);
-    if (qbe_locals != NULL) free(qbe_locals);
     da_free(&value_stack);
     da_free(&label_stack);
 
-    typecheck(qbe_func);
-    //printfn(qbe_func, stdout);
-    optimizeFunc(qbe_func);
+    printfn(qbe_func, stdout);
+    //typecheck(qbe_func);
+    //optimizeFunc(qbe_func);
 }
 
+/*
 static void compile_globals(wasm_module *m) {
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
@@ -994,18 +1035,19 @@ static void compile_data_segments(wasm_module *m) {
     ADD_ZEROS_DATA_FIELD(mem_size - mem_offset);
     closeData();
 }
+*/
 
-extern Target T_amd64_sysv;
+//TODO: extern Target T_amd64_sysv;
 void compile(wasm_module *m) {
-    T = T_amd64_sysv;
-    compile_data_segments(m);
+    //TODO: T = T_amd64_sysv;
+    //compile_data_segments(m);
     /* m->data_segments is not used anymore. */
     if (m->data_segments != NULL) {
         free(m->data_segments);
         m->data_segments = NULL;
         m->num_data_segments = 0;
     }
-    compile_globals(m);
+    //compile_globals(m);
     for (unsigned int i = 0; i < m->num_funcs; i++) {
         #if ESP_HEAP_DEBUG != 0
         printf("free heap: before compile_func %ld\n", esp_get_free_heap_size());
@@ -1018,5 +1060,5 @@ void compile(wasm_module *m) {
         printf("free heap after compile_func: %ld\n", esp_get_free_heap_size());
         #endif 
     }
-    T.emitfin(stdout);
+    //TODO: T.emitfin(stdout);
 }

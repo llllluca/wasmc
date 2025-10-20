@@ -84,3 +84,35 @@ unsigned int readILEB128_i32(read_struct_t *r, int32_t *out) {
     return count;
 }
 
+wasm_valtype local_type(func_compile_ctx_t *ctx, uint32_t index) {
+    wasm_func_decl *decl = ctx->wasm_func_decl;
+    wasm_func_body *body = ctx->wasm_func_body;
+    wasm_valtype wasm_type = NO_VALTYPE;
+
+    if (index < decl->type->num_params) {
+        wasm_type = decl->type->params_type[index];
+    } else if (index - decl->type->num_params < body->num_locals) {
+        wasm_type = body->locals_type[index - decl->type->num_params];
+    } else panic();
+
+    return wasm_type;
+}
+
+simple_type cast(wasm_valtype t) {
+    switch(t) {
+        case I32_VALTYPE:
+            return WORD_TYPE;
+        case I64_VALTYPE:
+            return LONG_TYPE;
+        case F32_VALTYPE:
+            panic(); //TODO: add support for floating point
+            return 's';
+        case F64_VALTYPE:
+            panic(); //TODO: add support for floating point
+            return 'd';
+        default:
+            panic();
+            return '_'; // dead code, only to remove compiler warning
+    }
+}
+
