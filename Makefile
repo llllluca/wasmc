@@ -11,7 +11,6 @@ LIBQBE_OBJ = \
 OBJ = \
 	src/parse.o \
 	src/compile.o \
-	src/dalist.o \
 	src/adlist.o \
 	src/utils.o \
 	src/main.o \
@@ -37,7 +36,7 @@ wasmc: $(ALL_OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 #Each object target depends on these header files.
-$(OBJ): src/all.h src/dalist.h src/adlist.h src/libqbe.h
+$(OBJ): src/all.h src/adlist.h src/libqbe.h
 $(LIBQBE_OBJ): $(QBE_HEADER) src/libqbe.h
 
 clean:

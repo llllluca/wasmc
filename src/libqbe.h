@@ -10,7 +10,6 @@
 typedef struct Phi Phi;
 typedef struct Ins Ins;
 typedef struct Use Use;
-typedef struct Addr Mem;
 typedef struct Blk Blk;
 
 typedef enum __attribute__ ((__packed__)) simple_type {
@@ -111,7 +110,6 @@ struct Phi {
 typedef struct Fn {
     list *tmp_list;
     list *con_list;
-    list *mem_list;
     list *blk_list;
     char name[NString];
     Blk *start;
@@ -119,31 +117,30 @@ typedef struct Fn {
     Lnk lnk;
 } Fn;
 
-typedef struct Dat {
-	enum {
-		DStart,
-		DEnd,
-		DB,
-		DH,
-		DW,
-		DL,
-		DZ
-	} type;
-	char *name;
-	Lnk *lnk;
-	union {
-		int64_t num;
-		double fltd;
-		float flts;
-		char *str;
-		struct {
-			char *name;
-			int64_t off;
-		} ref;
-	} u;
-	char isref;
-	char isstr;
-} Dat;
+typedef enum DataField_type {
+    DByte,
+    DWord,
+    DLong,
+    DZeros,
+    DString,
+} DataField_type;
+
+typedef struct DataField {
+    DataField_type type;
+    union {
+        unsigned char b;
+        int32_t w;
+        int64_t l;
+        uint64_t z;
+        char *s;
+    } val;
+} DataField;
+
+typedef struct Data {
+    char name[NString];
+	Lnk lnk;
+    list *dataField_list;
+} Data;
 
 typedef enum instr_opcode {
     /* Arithmetic and Bits */
@@ -301,15 +298,17 @@ struct Ins {
 };
 
 typedef enum Use_type {
-        UPhi,
-        UIns,
-        UJmp,
+    UPhi,
+    UIns,
+    UJmp,
+    ULocal,
 } Use_type;
 
 typedef union Use_ptr {
     listNode *ins;
     listNode *phi;
     listNode *blk;
+    Ref *local; 
 } Use_ptr;
 
 struct Use {
@@ -423,6 +422,7 @@ struct Use {
 #define ADD_STR_DATA_FIELD(str) addStrDataField(DB, (str))
 
 void printfn(Fn *fn, FILE *f);
+void printdata(Data *d, FILE *f);
 
 Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start);
 Ref newFuncParam(Fn *f, simple_type type);
@@ -442,29 +442,26 @@ void halt(Fn *f, Blk *b);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
 
+Data *newData(Lnk *link_info, char *name);
+void dataAppendByteField(Data *d, unsigned char b);
+void dataAppendWordField(Data *d, int32_t w);
+void dataAppendLongField(Data *d, int64_t l);
+void dataAppendZerosField(Data *d, uint64_t z);
+void dataAppendStringField(Data *d, char *s, unsigned int len);
 
-void newData(char *name, Lnk *lnk);
-void addNumDataField(int type, int64_t num);
-void addStrDataField(int type, char *str);
-void closeData(void);
-
-Phi *newPhi(Ref temp, simple_type type);
-void phiAppendOperand(Phi *phi, Blk *b, Ref arg);
-listNode *addPhiToBlock(Blk *b, Phi *phi);
+listNode *newPhi(Blk *b, Ref temp, simple_type type);
+void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg);
 void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
-
-/* emit.c */
-void emitfnlnk(char *, Lnk *, FILE *);
-void emitdat(Dat *, FILE *);
-void emitdbgfile(char *, FILE *);
-void emitdbgloc(unsigned int, unsigned int, FILE *);
-int stashbits(void *, int);
-void elf_emitfnfin(char *, FILE *);
-void elf_emitfin(FILE *);
-void macho_emitfin(FILE *);
+void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
 
 int req(Ref a, Ref b);
+
+void freeFunc(Fn *f);
+void freeTemp(Tmp *tmp);
 void freePhi(Phi *phi);
 void freePhi_arg(Phi_arg *arg);
+void freeBlock(Blk *b);
+void freeData(Data *d);
+void freeDataField(DataField *df);
 
 #endif 

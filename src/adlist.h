@@ -21,6 +21,7 @@ typedef struct list {
 #define listPrevNode(n) ((n)->prev)
 #define listNextNode(n) ((n)->next)
 #define listNodeValue(n) ((n)->value)
+#define listPush(l,v) listAddNodeTail((l), (v))
 
 #define listSetFreeMethod(l,m) ((l)->free = (m))
 #define listGetFreeMethod(l) ((l)->free)
@@ -42,5 +43,7 @@ listNode *listNext(listNode **iter);
 listNode *listPrev(listNode **iter);
 void listUnlinkNode(list *list, listNode *node);
 void listDelNode(list *list, listNode *node);
+void *listPop(list *list);
+listNode *listIndex(list *list, long index);
 
 #endif /* __ADLIST_H__ */
