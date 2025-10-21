@@ -21,7 +21,7 @@ ALL_OBJ = \
 	$(LIBQBE_OBJ) \
 
 CC     = cc
-CFLAGS = -std=gnu23 -g -Wall -Wextra -Wpedantic -Isrc
+CFLAGS = -std=c99 -g -Wall -Wextra -Wpedantic -Isrc
 
 all: wasmc
 
