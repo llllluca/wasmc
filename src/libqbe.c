@@ -228,7 +228,7 @@ void printfn(Fn *fn, FILE *f) {
             fprintf(f, "%s", optab[i->op]);
 
             if (i->op == CALL_INSTR) {
-                fprintf(f, " $");
+                fprintf(f, " ");
                 printref(i->arg[0], fn, f);
                 fprintf(f, "(");
                 for (unsigned int i = 0; i < nargs; i++) {
@@ -254,7 +254,7 @@ void printfn(Fn *fn, FILE *f) {
         }
         switch (b->jmp.type) {
             case RET0_JUMP_TYPE:
-                fprintf(f, "\tret");
+                fprintf(f, "\tret\n");
                 break;
             case RET1_JUMP_TYPE:
                 fprintf(f, "\tret ");
@@ -280,13 +280,51 @@ void printfn(Fn *fn, FILE *f) {
     fprintf(f, "}\n");
 }
 
+void printdata(Data *d, FILE *f) {
+    
+    unsigned int n = 1;
+    if (d->lnk.is_exported) {
+        fprintf(f, "export ");
+    }
+    fprintf(f, "data $%s = { ", d->name);
+    listNode *node;
+    listNode *iter = listFirst(d->dataField_list);
+    while ((node = listNext(&iter)) != NULL) {
+        DataField *df = listNodeValue(node);
+        switch (df->type) {
+            case DByte:
+                fprintf(f, "b %d", df->val.b);
+                break;
+            case DWord:
+                fprintf(f, "w %"PRId32, df->val.w);
+                break;
+            case DLong:
+                fprintf(f, "l %"PRId64, df->val.l);
+                break;
+            case DZeros:
+                fprintf(f, "z %"PRIu64, df->val.z);
+                break;
+            case DString:
+                fprintf(f, "b %s", df->val.s);
+                break;
+            default:
+                panic();
+        }
+        if (n < listLength(d->dataField_list)) {
+            fprintf(f, ", ");
+        }
+        n++;
+    }
+    fprintf(f, " }\n");
+}
+
 static void printcon(Con *c, FILE *f) {
     switch (c->type) {
         case CInt64:
             fprintf(f, "%"PRIi64, c->val.i);
             break;
         case CAddr:
-            fprintf(f, "%s", c->val.addr);
+            fprintf(f, "$%s", c->val.addr);
             break;
         default:
             break;
@@ -321,56 +359,51 @@ static void err(char *s, ...) {
     exit(1);
 }
 
-#if 0
-#define DATA_NAME_LEN 16
-static char data_name[DATA_NAME_LEN];
-static Lnk data_lnk;
-
-void newData(char *name, Lnk *lnk) {
-    strncpy(data_name, name, DATA_NAME_LEN);
-    data_lnk = *lnk;
-    Dat d;
-    d.type = DStart;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    emitdat(&d, stdout);
+Data *newData(Lnk *link_info, char *name) {
+    Data *d = xmalloc(sizeof(Data));
+    strncpy(d->name, name, NString);
+    d->lnk = *link_info;
+    d->dataField_list = listCreate();
+    listSetFreeMethod(d->dataField_list, (void (*)(void *))freeDataField);
+    return d;
 }
 
-void addNumDataField(int type, int64_t num) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = type;
-    d.isstr = 0;
-    d.isref = 0;
-    memset(&d.u, 0, sizeof(d.u));
-    d.u.num = num;
-    emitdat(&d, stdout);
+void dataAppendByteField(Data *d, unsigned char b) {
+    DataField *df = xmalloc(sizeof(DataField));
+    df->type = DByte;
+    df->val.b = b;
+    listAddNodeTail(d->dataField_list, df);
 }
 
-void addStrDataField(int type, char *str) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = type;
-    d.isstr = 1;
-    d.isref = 0;
-    memset(&d.u, 0, sizeof(d.u));
-    d.u.str = str;
-    emitdat(&d, stdout);
+void dataAppendWordField(Data *d, int32_t w) {
+    DataField *df = xmalloc(sizeof(DataField));
+    df->type = DWord;
+    df->val.w = w;
+    listAddNodeTail(d->dataField_list, df);
 }
 
-void closeData(void) {
-    Dat d;
-    d.name = data_name;
-    d.lnk = &data_lnk;
-    d.type = DEnd;
-    emitdat(&d, stdout);
-    fputs("/* end data */\n\n", stdout);
-    //freeall();
+void dataAppendLongField(Data *d, int64_t l) {
+    DataField *df = xmalloc(sizeof(DataField));
+    df->type = DLong;
+    df->val.l = l;
+    listAddNodeTail(d->dataField_list, df);
 }
-#endif
 
+void dataAppendZerosField(Data *d, uint64_t z) {
+    DataField *df = xmalloc(sizeof(DataField));
+    df->type = DZeros;
+    df->val.z = z;
+    listAddNodeTail(d->dataField_list, df);
+}
+
+void dataAppendStringField(Data *d, char *s, unsigned int len) {
+    DataField *df = xmalloc(sizeof(DataField));
+    char *str = xcalloc(len, sizeof(char));
+    memcpy(str, s, len);
+    df->type = DString;
+    df->val.s = str;
+    listAddNodeTail(d->dataField_list, df);
+}
 
 Ref newTemp(Fn *f) {
 
@@ -380,6 +413,7 @@ Ref newTemp(Fn *f) {
     snprintf(tmp->name, NString, "t%d", id++);
     tmp->cls = NO_TYPE;
     tmp->use_list = listCreate();
+    listSetFreeMethod(tmp->use_list, free);
     listAddNodeTail(f->tmp_list, tmp);
     return (Ref) { .type = RTmp, .val.tmp = tmp };
 }
@@ -392,6 +426,7 @@ Blk *newBlock(uint32_t nlocals) {
     b->phi_list = listCreate();
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
+    listSetFreeMethod(b->ins_list, free);
     b->jmp.type = NONE_JUMP_TYPE;
     b->jmp.arg = UNDEF_TMP_REF;
     b->s1 = NULL;
@@ -415,9 +450,11 @@ Blk *newBlock(uint32_t nlocals) {
 Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start) {
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
+    listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
     f->con_list = listCreate();
-    f->mem_list = listCreate();
+    listSetFreeMethod(f->con_list, free);
     f->blk_list = listCreate();
+    listSetFreeMethod(f->blk_list, (void (*)(void *)) freeBlock);
     listAddNodeTail(f->blk_list, start);
     f->start = start;
     f->ret_type = ret_type;
@@ -550,29 +587,23 @@ void newFuncCallArg(Blk *b, simple_type type, Ref r) {
     }
 }
 
-Phi *newPhi(Ref temp, simple_type type) {
+listNode *newPhi(Blk *b, Ref temp, simple_type type) {
     Phi *phi = xmalloc(sizeof(struct Phi));
     phi->to = temp;
     phi->type = type;
+    phi->block = b;
     phi->phi_arg_list = listCreate();
     listSetFreeMethod(phi->phi_arg_list, (void (*)(void *))freePhi_arg);
-    phi->block = NULL;
-    return phi;
-}
-
-listNode *addPhiToBlock(Blk *b, Phi *phi) {
     listAddNodeTail(b->phi_list, phi);
-    phi->block = b;
-    return b->phi_list->tail;
+    return listLast(b->phi_list);
 }
 
-
-void phiAppendOperand(Phi *phi, Blk *b, Ref arg) {
+void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg) {
+    Phi *phi = listNodeValue(phi_node);
     Phi_arg *pa = xmalloc(sizeof(struct Phi_arg));
     pa->r = arg;
     pa->b = b;
     listAddNodeTail(phi->phi_arg_list, pa);
-    listNode *phi_node = listLast(phi->phi_arg_list);
     if (arg.type == RTmp) {
         addUsage(arg.val.tmp, UPhi, (Use_ptr) { .phi = phi_node });
     }
@@ -599,4 +630,52 @@ void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {
         use->u = ptr;
         listAddNodeTail(tmp->use_list, use);
     }
+}
+
+void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {
+    if (tmp == NULL) return;
+    listNode *use_node;
+    listNode *use_iter = listFirst(tmp->use_list);
+    while ((use_node = listNext(&use_iter)) != NULL) {
+        Use *use = listNodeValue(use_node);
+        if (use->type == type && use->u.ins == ptr.ins) {
+            listDelNode(tmp->use_list, use_node);
+        }
+    }
+}
+
+void freeFunc(Fn *f) {
+    listRelease(f->tmp_list);
+    listRelease(f->con_list);
+    listRelease(f->blk_list);
+    free(f);
+}
+
+void freeTemp(Tmp *tmp) {
+    listRelease(tmp->use_list);
+    free(tmp);
+}
+
+void freeBlock(Blk *b) {
+    listRelease(b->phi_list);
+    listRelease(b->ins_list);
+    listRelease(b->preds);
+    if (b->locals != NULL) {
+        free(b->locals);
+    }
+    if (b->incomplete_phis != NULL) {
+        free(b->incomplete_phis);
+    }
+    free(b);
+}
+
+void freeData(Data *d) {
+    listRelease(d->dataField_list);
+    free(d);
+}
+void freeDataField(DataField *df) {
+    if (df->type == DString) {
+        free(df->val.s);
+    }
+    free(df);
 }

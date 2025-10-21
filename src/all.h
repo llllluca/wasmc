@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
-#include "dalist.h"
 #include "libqbe.h"
+#include "adlist.h"
 
 typedef int err_t;
 #define OK    0
@@ -163,7 +163,7 @@ typedef struct phi_arg {
 } phi_arg;
 
 typedef struct label_t {
-    dalist_t results;
+    list *results;
     Blk *qbe_block;
     wasm_blocktype wasm_type;
 } label_t;
@@ -179,8 +179,8 @@ typedef struct {
     wasm_func_decl *wasm_func_decl;
     wasm_func_body *wasm_func_body;
     Fn *qbe_func;
-    dalist_t *value_stack;
-    dalist_t *label_stack;
+    list *value_stack;
+    list *label_stack;
     uint32_t locals_len;
     skip_flag skip_flag;
     Blk *curr_block;
