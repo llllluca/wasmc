@@ -5,9 +5,9 @@
 #include <stddef.h>
 #include <assert.h>
 
-void printref(Ref r, Fn *fn, FILE *f);
+void printref(Ref r, FILE *f);
 
-char *optab[] = {
+const char *optab[] = {
     /* Arithmetic and Bits */
     [ADD_INSTR] = "add",
     [SUB_INSTR] = "sub",
@@ -176,7 +176,7 @@ void printfn(Fn *fn, FILE *f) {
             fprintf(f, ", ");
         }
         fprintf(f, "%c ", ktoc[i->type]);
-        printref(i->to, fn, f);
+        printref(i->to, f);
         n++;
     }
     fprintf(f, ") {\n");
@@ -190,7 +190,7 @@ void printfn(Fn *fn, FILE *f) {
         while ((phi_node = listNext(&phi_iter)) != NULL) {
             Phi *p = listNodeValue(phi_node);
             fprintf(f, "\t");
-            printref(p->to, fn, f);
+            printref(p->to, f);
             fprintf(f, " =%c phi ", ktoc[p->type]);
             n = 0;
             listNode *phi_arg_node;
@@ -198,7 +198,7 @@ void printfn(Fn *fn, FILE *f) {
             while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
                 Phi_arg *pa = listNodeValue(phi_arg_node);
                 fprintf(f, "@%s ", pa->b->name);
-                printref(pa->r, fn, f);
+                printref(pa->r, f);
                 if (n == listLength(p->phi_arg_list)-1) {
                     fprintf(f, "\n");
                     break;
@@ -222,21 +222,21 @@ void printfn(Fn *fn, FILE *f) {
             }
             fprintf(f, "\t");
             if (!req(i->to, UNDEF_TMP_REF)) {
-                printref(i->to, fn, f);
+                printref(i->to, f);
                 fprintf(f, " =%c ", ktoc[i->type]);
             }
             fprintf(f, "%s", optab[i->op]);
 
             if (i->op == CALL_INSTR) {
                 fprintf(f, " ");
-                printref(i->arg[0], fn, f);
+                printref(i->arg[0], f);
                 fprintf(f, "(");
                 for (unsigned int i = 0; i < nargs; i++) {
                     if (i > 0) {
                         fprintf(f, ", ");
                     }
                     fprintf(f, "%c ", ktoc[args_type[i]]);
-                    printref(args[i], fn, f);
+                    printref(args[i], f);
                 }
                 fprintf(f, ")\n");
                 nargs = 0;
@@ -244,11 +244,11 @@ void printfn(Fn *fn, FILE *f) {
             }
             if (!req(i->arg[0], UNDEF_TMP_REF)) {
                 fprintf(f, " ");
-                printref(i->arg[0], fn, f);
+                printref(i->arg[0], f);
             }
             if (!req(i->arg[1], UNDEF_TMP_REF)) {
                 fprintf(f, ", ");
-                printref(i->arg[1], fn, f);
+                printref(i->arg[1], f);
             }
             fprintf(f, "\n");
         }
@@ -258,7 +258,7 @@ void printfn(Fn *fn, FILE *f) {
                 break;
             case RET1_JUMP_TYPE:
                 fprintf(f, "\tret ");
-                printref(b->jmp.arg, fn, f);
+                printref(b->jmp.arg, f);
                 fprintf(f, "\n");
                 break;
             case HALT_JUMP_TYPE:
@@ -269,7 +269,7 @@ void printfn(Fn *fn, FILE *f) {
                 break;
             case JNZ_JUMP_TYPE:
                 fprintf(f, "\tjnz ");
-                printref(b->jmp.arg, fn, f);
+                printref(b->jmp.arg, f);
                 fprintf(f, ", ");
                 fprintf(f, "@%s, @%s\n", b->s1->name, b->s2->name);
                 break;
@@ -331,7 +331,7 @@ static void printcon(Con *c, FILE *f) {
     }
 }
 
-void printref(Ref r, Fn *fn, FILE *f) {
+void printref(Ref r, FILE *f) {
     switch (r.type) {
     case RTmp:
         if (r.val.tmp != NULL) {
@@ -548,11 +548,16 @@ void ret(Fn *f, Blk *b) {
 }
 
 void retRef(Fn *f, Blk *b, Ref r) {
+    listNode *b_node = listFirst(f->blk_list);
     if (f->start != b) {
         listAddNodeTail(f->blk_list, b);
+        b_node = listLast(f->blk_list);
     }
     b->jmp.type = RET1_JUMP_TYPE;
     b->jmp.arg = r;
+    if (r.type == RTmp) {
+        addUsage(r.val.tmp, UJmp, (Use_ptr) { .blk = b_node });
+    }
 }
 
 void halt(Fn *f, Blk *b) {

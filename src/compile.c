@@ -76,7 +76,7 @@ static phi_arg *alloc_phi_arg(Blk *label, Ref result) {
 }
 
 
-static label_t *alloc_label(label_kind kind, Blk *qbe_block, wasm_blocktype t) {
+static label_t *alloc_label(Blk *qbe_block, wasm_blocktype t) {
 
     label_t *label = xmalloc(sizeof(struct label_t));
     label->qbe_block = qbe_block;
@@ -518,7 +518,7 @@ static void compile_instr_if(func_compile_ctx_t *ctx) {
     read_u8(r, &wasm_type);
     assert_block_type(wasm_type);
 
-    label_t *label = alloc_label(IF_LABEL, end, wasm_type);
+    label_t *label = alloc_label(end, wasm_type);
     listPush(ctx->label_stack, label);
 
     assert(ctx->curr_block->is_sealed);
@@ -576,7 +576,7 @@ static void compile_instr_block(func_compile_ctx_t *ctx) {
     Blk *end = newBlock(ctx->locals_len);
     listPush(ctx->value_stack, &bottom_block_stack);
 
-    label_t *label = alloc_label(BLOCK_LABEL, end, wasm_type);
+    label_t *label = alloc_label(end, wasm_type);
     listPush(ctx->label_stack, label);
 
     unsigned char opcode;
@@ -648,7 +648,7 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     jmp(ctx->qbe_func, ctx->curr_block, loop_header);
     ctx->curr_block = loop_header;
 
-    label_t *label = alloc_label(LOOP_LABEL, loop_header, wasm_type);
+    label_t *label = alloc_label(loop_header, wasm_type);
     listPush(ctx->label_stack, label);
 
     unsigned char opcode;
@@ -825,7 +825,6 @@ static void compile_i32_load_instr(func_compile_ctx_t *ctx) {
         ADD(b, t1, LONG_TYPE, t0, c);
         ADD(b, load_addr, LONG_TYPE, mem0, t1);
     } else {
-        Ref t1 = newTemp(f);
         ADD(b, load_addr, LONG_TYPE, mem0, t0);
     }
     //TODO: out of bound memory check

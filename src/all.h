@@ -151,12 +151,6 @@ typedef struct stack_entry_t {
     union value_or_block_end as;
 } stack_entry_t;
 
-typedef enum label_kind {
-    IF_LABEL,
-    BLOCK_LABEL,
-    LOOP_LABEL,
-} label_kind;
-
 typedef struct phi_arg {
     Blk *label;
     Ref result;

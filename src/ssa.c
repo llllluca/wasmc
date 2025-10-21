@@ -7,14 +7,13 @@ static Ref add_phi_operands(func_compile_ctx_t *ctx, listNode *phi_node, uint32_
 static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node);
 
 void write_local(Blk *b, uint32_t index, Ref value) {
-    Ref *old_local = &b->locals[index];
-    if (old_local->type == RTmp) {
-        Use_ptr u = { .local = old_local };
-        rmUsage(old_local->val.tmp, ULocal, u);
+    Ref *ptr = &b->locals[index];
+    Use_ptr u = { .local = ptr };
+    if (ptr->type == RTmp) {
+        rmUsage(ptr->val.tmp, ULocal, u);
     }
     b->locals[index] = value;
     if (value.type == RTmp) {
-        Use_ptr u = { .local = &b->locals[index] };
         addUsage(value.val.tmp, ULocal, u);
     }
 }
@@ -80,8 +79,7 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
                     Phi_arg *phi_arg = listNodeValue(phi_arg_node);
                     if (req(phi_arg->r, phi->to)) {
                         phi_arg->r = r;
-                        Use_ptr u_add = { .phi = use->u.phi };
-                        addUsage(r.val.tmp, UPhi, u_add);
+                        addUsage(r.val.tmp, UPhi, use->u);
                     }
                 }
             } break;
@@ -90,16 +88,14 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
                 for (unsigned int j = 0; j < 2; j++) {
                     if (req(i->arg[j], phi->to)) {
                         i->arg[j] = r;
-                        Use_ptr u = { .ins = use->u.ins };
-                        addUsage(r.val.tmp, UIns, u);
+                        addUsage(r.val.tmp, UIns, use->u);
                     }
                 }
             } break;
             case UJmp: {
                 Blk *b = listNodeValue(use->u.blk);
                 b->jmp.arg = r;
-                Use_ptr u = { .blk = use->u.blk };
-                addUsage(r.val.tmp, UJmp, u);
+                addUsage(r.val.tmp, UJmp, use->u);
             } break;
             case ULocal: {
                 Ref *l = use->u.local;
@@ -150,6 +146,7 @@ static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node) {
         listDelNode(to->use_list, use_node);
     }
 
+    //TODO: to can be freed now
     //freeTemp(to);
     return same;
 }
