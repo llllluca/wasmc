@@ -1,7 +1,7 @@
 # wasmc
-The project was developed and tested using a GNU/Linux Debian 12 stable machine.
+The project was developed and tested using a GNU/Linux Debian 13 stable machine.
 
-The following Debian 12 stable package are required:
+The following Debian 13 stable package are required:
 ```
 sudo apt install \
     git \
@@ -22,7 +22,7 @@ mv qbe-git/qbe .
 
 ## Build from source
 ```
-./build.sh
+make
 ```
 
 ## How to run tests
@@ -37,5 +37,7 @@ mv qbe-git/qbe .
 
 ## How compile from WASM to machine code
 ```
-./compile.sh test/qsort.wasm
+./wasmc test/qsort.wasm > test/qsort.ssa
+./qbe test/qsort.ssa > test/qsort.s
+cc -o qsort test/qsort.s
 ```
