@@ -244,3 +244,46 @@ void listInitNode(listNode *node, void *value) {
     node->next = NULL;
     node->value = value;
 }
+
+list *listInsertNodeBefore(list *list, listNode *old_node, void *value) {
+    listNode *node;
+
+    if ((node = malloc(sizeof(*node))) == NULL) {
+        return NULL;
+    }
+    node->value = value;
+    node->next = old_node;
+    node->prev = old_node->prev;
+    if (list->head == old_node) {
+        list->head = node;
+    }
+    if (node->prev != NULL) {
+        node->prev->next = node;
+    }
+    if (node->next != NULL) {
+        node->next->prev = node;
+    }
+    list->len++;
+    return list;
+}
+
+list *listInsertNodeAfter(list *list, listNode *old_node, void *value) {
+    listNode *node;
+
+    if ((node = malloc(sizeof(*node))) == NULL)
+        return NULL;
+    node->value = value;
+    node->prev = old_node;
+    node->next = old_node->next;
+    if (list->tail == old_node) {
+        list->tail = node;
+    }
+    if (node->prev != NULL) {
+        node->prev->next = node;
+    }
+    if (node->next != NULL) {
+        node->next->prev = node;
+    }
+    list->len++;
+    return list;
+}

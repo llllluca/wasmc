@@ -14,7 +14,8 @@ OBJ = \
 	src/adlist.o \
 	src/utils.o \
 	src/main.o \
-	src/ssa.o
+	src/ssa.o \
+	src/rega.o
 
 ALL_OBJ = \
 	$(OBJ) \

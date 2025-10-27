@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <assert.h>
 
+static unsigned int next_temp_id = 0;
+static unsigned int next_instr_id = 1;
+
 void printref(Ref r, FILE *f);
 
 const char *optab[] = {
@@ -184,7 +187,7 @@ void printfn(Fn *fn, FILE *f) {
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        fprintf(f, "@%s\n", b->name);
+        fprintf(f, "%d:@%s\n", b->start_id, b->name);
         listNode *phi_node;
         listNode *phi_iter = listFirst(b->phi_list);
         while ((phi_node = listNext(&phi_iter)) != NULL) {
@@ -220,7 +223,7 @@ void printfn(Fn *fn, FILE *f) {
                 nargs++;
                 continue;
             }
-            fprintf(f, "\t");
+            fprintf(f, "\t %d:", i->id);
             if (!req(i->to, UNDEF_TMP_REF)) {
                 printref(i->to, f);
                 fprintf(f, " =%c ", ktoc[i->type]);
@@ -252,23 +255,24 @@ void printfn(Fn *fn, FILE *f) {
             }
             fprintf(f, "\n");
         }
+        fprintf(f, "\t %d:", b->jmp.id);
         switch (b->jmp.type) {
             case RET0_JUMP_TYPE:
-                fprintf(f, "\tret\n");
+                fprintf(f, "ret\n");
                 break;
             case RET1_JUMP_TYPE:
-                fprintf(f, "\tret ");
+                fprintf(f, "ret ");
                 printref(b->jmp.arg, f);
                 fprintf(f, "\n");
                 break;
             case HALT_JUMP_TYPE:
-                fprintf(f, "\thlt\n");
+                fprintf(f, "hlt\n");
                 break;
             case JMP_JUMP_TYPE:
-                fprintf(f, "\tjmp @%s\n", b->s1->name);
+                fprintf(f, "jmp @%s\n", b->s1->name);
                 break;
             case JNZ_JUMP_TYPE:
-                fprintf(f, "\tjnz ");
+                fprintf(f, "jnz ");
                 printref(b->jmp.arg, f);
                 fprintf(f, ", ");
                 fprintf(f, "@%s, @%s\n", b->s1->name, b->s2->name);
@@ -408,14 +412,13 @@ void dataAppendStringField(Data *d, char *s, unsigned int len) {
 
 Ref newTemp(Fn *f) {
 
-    static unsigned int id = 0;
-
     Tmp *tmp = xmalloc(sizeof(Tmp));
-    snprintf(tmp->name, NString, "t%d", id++);
+    snprintf(tmp->name, NString, "t%d", next_temp_id++);
     tmp->cls = NO_TYPE;
     tmp->use_list = listCreate();
     listSetFreeMethod(tmp->use_list, free);
     listAddNodeTail(f->tmp_list, tmp);
+    tmp->i = NULL;
     listNode *tmp_node = listLast(f->tmp_list);
     return (Ref) { .type = RTmp, .val.tmp_node = tmp_node };
 }
@@ -429,6 +432,8 @@ Blk *newBlock(uint32_t nlocals) {
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
+    b->is_visited = 0;
+    b->live_in = NULL;
     b->jmp.type = NONE_JUMP_TYPE;
     b->jmp.arg = UNDEF_TMP_REF;
     b->s1 = NULL;
@@ -450,6 +455,8 @@ Blk *newBlock(uint32_t nlocals) {
 }
 
 Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start) {
+    next_temp_id = 0;
+    next_instr_id = 1;
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
     listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
@@ -476,6 +483,10 @@ Ref newFuncParam(Fn *f, simple_type type) {
     ins->to = r;
     ins->arg[0] = UNDEF_TMP_REF;
     ins->arg[1] = UNDEF_TMP_REF;
+    if (listLength(f->start->ins_list) == 0) {
+        f->start->start_id = next_instr_id++;
+    }
+    ins->id = next_instr_id++;
     listAddNodeTail(f->start->ins_list, ins);
     return r;
 }
@@ -496,6 +507,10 @@ void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2)
     ins->to = r;
     ins->arg[0] = arg1;
     ins->arg[1] = arg2;
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    ins->id = next_instr_id++;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
     if (arg1.type == RTmp && arg1.val.tmp_node != NULL) {
@@ -517,6 +532,11 @@ void jmp(Fn *f, Blk *b, Blk *b0) {
     if (f->start == b0) {
         err("invalid jump to the start block");
     }
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    b->jmp.id = next_instr_id++;
+    b->end_id = next_instr_id++;
 }
 
 void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
@@ -540,6 +560,11 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
     if (f->start == b0 || f->start == b1) {
         err("invalid jump to the start block");
     }
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    b->jmp.id = next_instr_id++;
+    b->end_id = next_instr_id++;
 }
 
 void ret(Fn *f, Blk *b) {
@@ -547,6 +572,11 @@ void ret(Fn *f, Blk *b) {
         listAddNodeTail(f->blk_list, b);
     }
     b->jmp.type = RET0_JUMP_TYPE;
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    b->jmp.id = next_instr_id++;
+    b->end_id = next_instr_id++;
 }
 
 void retRef(Fn *f, Blk *b, Ref r) {
@@ -560,6 +590,11 @@ void retRef(Fn *f, Blk *b, Ref r) {
     if (r.type == RTmp && r.val.tmp_node != NULL) {
         addUsage(listNodeValue(r.val.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    b->jmp.id = next_instr_id++;
+    b->end_id = next_instr_id++;
 }
 
 void halt(Fn *f, Blk *b) {
@@ -567,6 +602,11 @@ void halt(Fn *f, Blk *b) {
         listAddNodeTail(f->blk_list, b);
     }
     b->jmp.type = HALT_JUMP_TYPE;
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    b->jmp.id = next_instr_id++;
+    b->end_id = next_instr_id++;
 }
 
 // TODO: intern the string addrName
@@ -587,6 +627,10 @@ void newFuncCallArg(Blk *b, simple_type type, Ref r) {
     ins->to = UNDEF_TMP_REF;
     ins->arg[0] = r;
     ins->arg[1] = UNDEF_TMP_REF;
+    if (listLength(b->ins_list) == 0) {
+        b->start_id = next_instr_id++;
+    }
+    ins->id = next_instr_id++;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
     if (r.type == RTmp && r.val.tmp_node != NULL) {

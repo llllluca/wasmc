@@ -1042,6 +1042,15 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     printfn(qbe_func, stdout);
     //typecheck(qbe_func);
     //optimizeFunc(qbe_func);
+    live_interval *intervals = linear_scan_register_allocator(qbe_func, 3);
+    listNode *tmp_node;
+    listNode *tmp_iter = listFirst(qbe_func->tmp_list);
+    while ((tmp_node = listNext(&tmp_iter)) != NULL) {
+        Tmp *t = listNodeValue(tmp_node);
+        printf("%s: i->start = %d, i->end = %d, i->reg = %d, i->location = %d\n",
+               t->name, t->i->start, t->i->end, t->i->reg, t->i->location);
+    }
+    free(intervals);
     freeFunc(qbe_func);
 }
 

@@ -11,6 +11,7 @@ typedef struct Phi Phi;
 typedef struct Ins Ins;
 typedef struct Use Use;
 typedef struct Blk Blk;
+typedef struct Tmp Tmp;
 
 typedef enum __attribute__ ((__packed__)) simple_type {
     NO_TYPE,
@@ -28,11 +29,20 @@ typedef struct Lnk {
     char *secf;
 } Lnk;
 
-typedef struct Tmp {
+typedef struct live_interval {
+    unsigned int start;
+    unsigned int end;
+    unsigned int reg;
+    unsigned int location;
+    Tmp *tmp;
+} live_interval;
+
+struct Tmp {
     char name[NString];
     simple_type cls;
     list *use_list;
-} Tmp;
+    live_interval *i;
+};
 
 typedef enum Con_type {
     CInt64,
@@ -80,6 +90,7 @@ typedef enum Jump_type {
 typedef struct Jump {
     Jump_type type;
     Ref arg;
+    unsigned int id;
 } Jump;
 
 struct Blk {
@@ -93,6 +104,11 @@ struct Blk {
     Ref *locals;
     listNode **incomplete_phis;
     unsigned char is_sealed;
+/* list of variable that are live at the beginning of the block */
+    list *live_in;
+    unsigned char is_visited;
+    unsigned int start_id;
+    unsigned int end_id;
 };
 
 typedef struct Phi_arg {
@@ -295,6 +311,7 @@ struct Ins {
     simple_type type;
     Ref to;
     Ref arg[2];
+    unsigned int id;
 };
 
 typedef enum Use_type {
@@ -466,5 +483,8 @@ void freePhi_arg(Phi_arg *arg);
 void freeBlock(Blk *b);
 void freeData(Data *d);
 void freeDataField(DataField *df);
+
+live_interval *build_intervals(Fn *f);
+live_interval *linear_scan_register_allocator(Fn *f, unsigned int registers);
 
 #endif 

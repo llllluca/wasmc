@@ -45,5 +45,7 @@ void listUnlinkNode(list *list, listNode *node);
 void listDelNode(list *list, listNode *node);
 void *listPop(list *list);
 listNode *listIndex(list *list, long index);
+list *listInsertNodeBefore(list *list, listNode *old_node, void *value);
+list *listInsertNodeAfter(list *list, listNode *old_node, void *value);
 
 #endif /* __ADLIST_H__ */
