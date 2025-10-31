@@ -400,6 +400,9 @@ struct Use {
 #define LOADW(b, temp, addr) \
     instr((b), (temp), WORD_TYPE, LOADSW_INSTR, (addr), UNDEF_TMP_REF)
 
+#define LOADUB(b, temp, addr) \
+    instr((b), (temp), WORD_TYPE, LOADUB_INSTR, (addr), UNDEF_TMP_REF)
+
 /* Conversions */
 #define EXTSW(b, temp, ref) \
     instr((b), (temp), LONG_TYPE, EXTSW_INSTR, (ref), UNDEF_TMP_REF)

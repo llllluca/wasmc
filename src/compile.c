@@ -796,7 +796,53 @@ static void compile_variable_instr(func_compile_ctx_t *ctx, unsigned char opcode
     }
 }
 
-static void compile_i32_load_instr(func_compile_ctx_t *ctx) {
+static Ref addr_32bit(func_compile_ctx_t *ctx,
+    Ref mem0, Ref address, uint32_t offset) {
+
+    Fn *f = ctx->qbe_func;
+    Blk *b = ctx->curr_block;
+
+    Ref addr = newTemp(f);
+    if (offset != 0) {
+        Ref t1 = newTemp(f);
+        Ref c = newIntConst(ctx->qbe_func, offset);
+        ADD(b, t1, WORD_TYPE, address, c);
+        ADD(b, addr, WORD_TYPE, mem0, t1);
+    } else {
+        ADD(b, addr, WORD_TYPE, mem0, address);
+    }
+    return addr;
+}
+
+static Ref addr_64bit(func_compile_ctx_t *ctx,
+    Ref mem0, Ref address, uint32_t offset) {
+
+    Fn *f = ctx->qbe_func;
+    Blk *b = ctx->curr_block;
+
+    Ref t0;
+    if (address.type == RCon) {
+        t0 = address;
+    } else if (address.type == RTmp) {
+        t0 = newTemp(f);
+        EXTSW(b, t0, address);
+    } else panic();
+
+    Ref addr = newTemp(f);
+    if (offset != 0) {
+        Ref t1 = newTemp(f);
+        Ref c = newIntConst(ctx->qbe_func, offset);
+        ADD(b, t1, LONG_TYPE, t0, c);
+        ADD(b, addr, LONG_TYPE, mem0, t1);
+    } else {
+        ADD(b, addr, LONG_TYPE, mem0, t0);
+    }
+    return addr;
+}
+
+static void compile_i32_load_instr_generic(
+    func_compile_ctx_t *ctx, int load_instr) {
+
     assert_memory0_exists(ctx);
     //TODO: how to properly use align?
     uint32_t align, offset;
@@ -809,68 +855,32 @@ static void compile_i32_load_instr(func_compile_ctx_t *ctx) {
     assert_stack_entry_value(address, I32_VALTYPE);
     Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
 
-    //TODO: this compilation of load works only on 64 bit target
-    Ref t0;
-    if (address->as.value.qbe_temp.type == RCon) {
-        t0 = address->as.value.qbe_temp;
-    } else if (address->as.value.qbe_temp.type == RTmp) {
-        t0 = newTemp(f);
-        EXTSW(b, t0, address->as.value.qbe_temp);
-    } else panic();
-
-    Ref load_addr = newTemp(f);
-    if (offset != 0) {
-        Ref t1 = newTemp(f);
-        Ref c = newIntConst(ctx->qbe_func, offset);
-        ADD(b, t1, LONG_TYPE, t0, c);
-        ADD(b, load_addr, LONG_TYPE, mem0, t1);
-    } else {
-        ADD(b, load_addr, LONG_TYPE, mem0, t0);
-    }
+    Ref load_addr = addr_32bit(ctx, mem0, address->as.value.qbe_temp, offset);
     //TODO: out of bound memory check
     Ref result = newTemp(f);
-    LOADW(b, result, load_addr);
-
+    instr(b, result, WORD_TYPE, load_instr, load_addr, UNDEF_TMP_REF);
     stack_entry_t *entry = alloc_stack_entry_value(result, I32_VALTYPE);
     listPush(ctx->value_stack, entry);
     free(address);
 }
 
-static void compile_i32_store_instr(func_compile_ctx_t *ctx) {
+static void compile_i32_store_instr_generic(
+    func_compile_ctx_t *ctx, int store_instr) {
     assert_memory0_exists(ctx);
     //TODO: how to properly use align?
     uint32_t align, offset;
     readULEB128_u32(&ctx->wasm_func_body->expr, &align);
     readULEB128_u32(&ctx->wasm_func_body->expr, &offset);
     Blk *b = ctx->curr_block;
-    Fn *f = ctx->qbe_func;
 
     stack_entry_t *value = listPop(ctx->value_stack);
     assert_stack_entry_value(value, I32_VALTYPE);
     stack_entry_t *address = listPop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
     Ref mem0 = newAddrConst(ctx->qbe_func, "mem0");
-
-    //TODO: this compilation of load works only on 64 bit target
-    Ref t0;
-    if (address->as.value.qbe_temp.type == RCon) {
-        t0 = address->as.value.qbe_temp;
-    } else if (address->as.value.qbe_temp.type == RTmp) {
-        t0 = newTemp(f);
-        EXTSW(b, t0, address->as.value.qbe_temp);
-    } else panic();
-
-    Ref store_addr = newTemp(f);
-    if (offset != 0) {
-        Ref t1 = newTemp(f);
-        Ref c = newIntConst(ctx->qbe_func, offset);
-        ADD(b, t1, LONG_TYPE, t0, c);
-        ADD(b, store_addr, LONG_TYPE, mem0, t1);
-    } else {
-        ADD(b, store_addr, LONG_TYPE, mem0, t0);
-    }
+    Ref store_addr = addr_32bit(ctx, mem0, address->as.value.qbe_temp, offset);
     //TODO: out of bound memory check
-    STOREW(b, value->as.value.qbe_temp, store_addr);
+    instr(b, UNDEF_TMP_REF, WORD_TYPE, store_instr, value->as.value.qbe_temp, store_addr);
 
     free(address);
     free(value);
@@ -880,10 +890,16 @@ static void compile_memory_instr(func_compile_ctx_t *ctx, unsigned char opcode) 
 
     switch (opcode) {
         case I32_LOAD_OPCODE:
-            compile_i32_load_instr(ctx);
+            compile_i32_load_instr_generic(ctx, LOADUW_INSTR);
             break;
         case I32_STORE_OPCODE:
-            compile_i32_store_instr(ctx);
+            compile_i32_store_instr_generic(ctx, STOREW_INSTR);
+            break;
+        case I32_LOAD8_U_OPCODE:
+            compile_i32_load_instr_generic(ctx, LOADUB_INSTR);
+            break;
+        case I32_STORE8_OPCODE:
+            compile_i32_store_instr_generic(ctx, STOREB_INSTR);
             break;
         default:
             printf("PANIC: opcode = 0x%02X\n", opcode);
@@ -1007,10 +1023,14 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         if (t->return_type != NO_VALTYPE) {
             stack_entry_t *entry = listPop(ctx.value_stack);
             assert_stack_entry_value(entry, t->return_type);
-            retRef(ctx.qbe_func, ctx.curr_block, entry->as.value.qbe_temp);
+            if (ctx.curr_block != NULL) {
+                retRef(ctx.qbe_func, ctx.curr_block, entry->as.value.qbe_temp);
+            }
             free(entry);
         } else {
-            ret(ctx.qbe_func, ctx.curr_block);
+            if (ctx.curr_block != NULL) {
+                ret(ctx.qbe_func, ctx.curr_block);
+            }
         }
     }
     stack_entry_t *bottom = listPop(ctx.value_stack);

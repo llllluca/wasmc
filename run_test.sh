@@ -6,6 +6,8 @@ GREEN='\033[0;32m'
 #ANSI escape codes for reset color
 NO_COLOR='\033[0m'
 
+TARGET="rv32"
+
 log_error() {
     echo "${RED}[ERROR]: ${1}${NO_COLOR}" >&2
 }
@@ -24,21 +26,35 @@ run_test() {
     fi
     log_info "Starting test '${name}'."
 
-    wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
-        ./wasmc "test/${name}.wasm" > "test/${name}.ssa" && \
-        ./qbe "test/${name}.ssa" > "test/${name}.s" && \
-        cc "test/${name}.s" -o "test/a.out"
+    case "$TARGET" in
+    "rv32")
+        wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
+            ./wasmc "test/${name}.wasm" > "test/${name}.ssa" && \
+            ./qbe "test/${name}.ssa" > "test/${name}.s" && \
+            riscv32-unknown-linux-gnu-gcc -no-pie -static "test/${name}.s" -o "test/a.out"
+        ;;
+    "amd64_sysv")
+        wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
+            ./wasmc "test/${name}.wasm" > "test/${name}.ssa" && \
+            ./qbe -t amd64_sysv "test/${name}.ssa" > "test/${name}.s" && \
+            cc -g "test/${name}.s" -o "test/a.out"
+        ;;
+    *)
+        log_error "wrong target."
+        exit 1
+        ;;
+    esac
 
     local exit_code="$?"
     if [ "$exit_code" -ne 0 ]; then
-        log_error "run_test(${name}, ${expected_result}) failed."
+        log_error "compilation of ${name} failed."
         exit 1
     fi
 
     ./test/a.out
     exit_code="$?"
     if [ "$exit_code" -ne "$expected_result" ]; then
-        log_error "run_test(${name}, ${expected_result}) failed."
+        log_error "${name} failed, the expected exit code is ${expected_result} but received ${exit_code}."
         exit 1
     fi
 
@@ -92,5 +108,14 @@ run_test "max" 255
 run_test "isort" 0
 run_test "msort" 21
 run_test "qsort" 102
+run_test "ackermann" 253
+run_test "base64" 43
+run_test "fib2" 165
+#DOESNT WORKS, require support for i64. run_test "gimli" 238
+run_test "heapsort" 145
+run_test "matrix" 3
+#DOESNT WORKS, clang produce wrong code. run_test "minicsv" 0
+run_test "sieve" 160
+#DOESNT WORKS, there is a bug in wasmc. run_test "xchacha20" 146
 
 

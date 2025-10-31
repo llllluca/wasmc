@@ -223,8 +223,10 @@ typedef struct {
 #define GLOBAL_SET_OPCODE 0x24
 
 // Memory instructions
-#define I32_LOAD_OPCODE  0x28
-#define I32_STORE_OPCODE 0x36
+#define I32_LOAD_OPCODE     0x28
+#define I32_STORE_OPCODE    0x36
+#define I32_LOAD8_U_OPCODE  0x2D
+#define I32_STORE8_OPCODE   0x3A
 
 // Numeric instruction opcodes
 #define I32_CONST_OPCODE  0x41
