@@ -9,17 +9,17 @@ static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node);
 void write_local(Blk *b, uint32_t index, Ref value) {
     Ref *ptr = &b->locals[index];
     Use_ptr u = { .local = ptr };
-    if (ptr->type == RTmp) {
-        rmUsage(ptr->val.tmp, ULocal, u);
+    if (ptr->type == RTmp && ptr->val.tmp_node != NULL) {
+        rmUsage(listNodeValue(ptr->val.tmp_node), ULocal, u);
     }
     b->locals[index] = value;
-    if (value.type == RTmp) {
-        addUsage(value.val.tmp, ULocal, u);
+    if (value.type == RTmp && value.val.tmp_node != NULL) {
+        addUsage(listNodeValue(value.val.tmp_node), ULocal, u);
     }
 }
 
 Ref read_local(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
-    if (b->locals[index].val.tmp != NULL) {
+    if (b->locals[index].val.tmp_node != NULL) {
         return b->locals[index];
     }
     return read_local_rec(ctx, b, index);
@@ -65,7 +65,7 @@ static Ref add_phi_operands(func_compile_ctx_t *ctx, listNode *phi_node, uint32_
 static void phi_replace_by(listNode *phi_node, Ref r) {
 
     Phi *phi = listNodeValue(phi_node);
-    Tmp *to = phi->to.val.tmp;
+    Tmp *to = listNodeValue(phi->to.val.tmp_node);
     listNode *use_node;
     listNode *use_iter = listFirst(to->use_list);
     while ((use_node = listNext(&use_iter)) != NULL) {
@@ -79,7 +79,9 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
                     Phi_arg *phi_arg = listNodeValue(phi_arg_node);
                     if (req(phi_arg->r, phi->to)) {
                         phi_arg->r = r;
-                        addUsage(r.val.tmp, UPhi, use->u);
+                        if (r.val.tmp_node != NULL) {
+                            addUsage(listNodeValue(r.val.tmp_node), UPhi, use->u);
+                        }
                     }
                 }
             } break;
@@ -88,19 +90,25 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
                 for (unsigned int j = 0; j < 2; j++) {
                     if (req(i->arg[j], phi->to)) {
                         i->arg[j] = r;
-                        addUsage(r.val.tmp, UIns, use->u);
+                        if (r.val.tmp_node != NULL) {
+                            addUsage(listNodeValue(r.val.tmp_node), UIns, use->u);
+                        }
                     }
                 }
             } break;
             case UJmp: {
                 Blk *b = listNodeValue(use->u.blk);
                 b->jmp.arg = r;
-                addUsage(r.val.tmp, UJmp, use->u);
+                if (r.val.tmp_node != NULL) {
+                    addUsage(listNodeValue(r.val.tmp_node), UJmp, use->u);
+                }
             } break;
             case ULocal: {
                 Ref *l = use->u.local;
                 *l = r;
-                addUsage(r.val.tmp, ULocal, use->u);
+                if (r.val.tmp_node != NULL) {
+                    addUsage(listNodeValue(r.val.tmp_node), ULocal, use->u);
+                }
             } break;
             default:
                 panic();
@@ -127,12 +135,13 @@ static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node) {
     }
 
     assert(phi->to.type == RTmp);
-    Tmp *to = phi->to.val.tmp;
+    listNode *to_node = phi->to.val.tmp_node;
+    Tmp *to = listNodeValue(to_node);
 
     phi_replace_by(phi_node, same);
-    if (same.type == RTmp && same.val.tmp != NULL) {
+    if (same.type == RTmp && same.val.tmp_node != NULL) {
         Use_ptr u = { .phi = phi_node };
-        rmUsage(same.val.tmp, UPhi, u);
+        rmUsage(listNodeValue(same.val.tmp_node), UPhi, u);
     }
     listDelNode(phi->block->phi_list, phi_node);
 
@@ -146,8 +155,7 @@ static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node) {
         listDelNode(to->use_list, use_node);
     }
 
-    //TODO: to can be freed now
-    //freeTemp(to);
+    listDelNode(ctx->qbe_func->tmp_list, to_node);
     return same;
 }
 

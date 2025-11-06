@@ -57,7 +57,7 @@ typedef enum Ref_type {
 } Ref_type;
 
 typedef union Ref_ptr {
-    Tmp *tmp;
+    listNode *tmp_node;
     Con *con;
 } Ref_ptr;
 
@@ -66,7 +66,7 @@ typedef struct Ref {
     Ref_ptr val;
 } Ref;
 
-#define UNDEF_TMP_REF (Ref){ .type = RTmp, .val.tmp = NULL }
+#define UNDEF_TMP_REF (Ref){ .type = RTmp, .val.tmp_node = NULL }
 
 typedef enum Jump_type {
     NONE_JUMP_TYPE,

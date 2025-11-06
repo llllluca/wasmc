@@ -235,7 +235,7 @@ static void compile_instr_local_get(func_compile_ctx_t *ctx) {
     wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
     Ref local = read_local(ctx, ctx->curr_block, index);
-    if (local.val.tmp == NULL) {
+    if (local.val.tmp_node == NULL) {
         local = newIntConst(ctx->qbe_func, 0);
     }
     stack_entry_t *entry = alloc_stack_entry_value(local, wasm_type);
