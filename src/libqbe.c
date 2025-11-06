@@ -6,7 +6,6 @@
 #include <assert.h>
 
 static unsigned int next_temp_id = 0;
-static unsigned int next_instr_id = 1;
 
 void printref(Ref r, FILE *f);
 
@@ -160,34 +159,17 @@ const char *optab[] = {
 
 void printfn(Fn *fn, FILE *f) {
     char ktoc[] = " wlsd";
-    Ref args[10];
-    simple_type args_type[10];
-    unsigned int nargs = 0;
-    unsigned int n;
+    unsigned int n = 0;
 
     if (fn->lnk.is_exported) {
         fprintf(f, "export ");
     }
-    fprintf(f, "function %c $%s(", ktoc[fn->ret_type], fn->name);
-    n = 0;
-    listNode *ins_node;
-    listNode *ins_iter = listFirst(fn->start->ins_list);
-    while ((ins_node = listNext(&ins_iter)) != NULL) {
-        Ins *i = listNodeValue(ins_node);
-        if (i->op != PAR_INSTR) break;
-        if (n > 0) {
-            fprintf(f, ", ");
-        }
-        fprintf(f, "%c ", ktoc[i->type]);
-        printref(i->to, f);
-        n++;
-    }
-    fprintf(f, ") {\n");
+    fprintf(f, "function %c $%s() {\n", ktoc[fn->ret_type], fn->name);
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        fprintf(f, "%d:@%s\n", b->start_id, b->name);
+        fprintf(f, "%d:@%s\n", b->id, b->name);
         listNode *phi_node;
         listNode *phi_iter = listFirst(b->phi_list);
         while ((phi_node = listNext(&phi_iter)) != NULL) {
@@ -216,35 +198,12 @@ void printfn(Fn *fn, FILE *f) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
-            if (i->op == PAR_INSTR) continue;
-            if (i->op == ARG_INSTR) {
-                args[nargs] = i->arg[0];
-                args_type[nargs] = i->type;
-                nargs++;
-                continue;
-            }
             fprintf(f, "\t %d:", i->id);
             if (!req(i->to, UNDEF_TMP_REF)) {
                 printref(i->to, f);
                 fprintf(f, " =%c ", ktoc[i->type]);
             }
             fprintf(f, "%s", optab[i->op]);
-
-            if (i->op == CALL_INSTR) {
-                fprintf(f, " ");
-                printref(i->arg[0], f);
-                fprintf(f, "(");
-                for (unsigned int i = 0; i < nargs; i++) {
-                    if (i > 0) {
-                        fprintf(f, ", ");
-                    }
-                    fprintf(f, "%c ", ktoc[args_type[i]]);
-                    printref(args[i], f);
-                }
-                fprintf(f, ")\n");
-                nargs = 0;
-                continue;
-            }
             if (!req(i->arg[0], UNDEF_TMP_REF)) {
                 fprintf(f, " ");
                 printref(i->arg[0], f);
@@ -456,7 +415,6 @@ Blk *newBlock(uint32_t nlocals) {
 
 Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start) {
     next_temp_id = 0;
-    next_instr_id = 1;
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
     listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
@@ -483,10 +441,6 @@ Ref newFuncParam(Fn *f, simple_type type) {
     ins->to = r;
     ins->arg[0] = UNDEF_TMP_REF;
     ins->arg[1] = UNDEF_TMP_REF;
-    if (listLength(f->start->ins_list) == 0) {
-        f->start->start_id = next_instr_id++;
-    }
-    ins->id = next_instr_id++;
     listAddNodeTail(f->start->ins_list, ins);
     return r;
 }
@@ -507,10 +461,6 @@ void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2)
     ins->to = r;
     ins->arg[0] = arg1;
     ins->arg[1] = arg2;
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    ins->id = next_instr_id++;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
     if (arg1.type == RTmp && arg1.val.tmp_node != NULL) {
@@ -532,11 +482,6 @@ void jmp(Fn *f, Blk *b, Blk *b0) {
     if (f->start == b0) {
         err("invalid jump to the start block");
     }
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    b->jmp.id = next_instr_id++;
-    b->end_id = next_instr_id++;
 }
 
 void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
@@ -560,11 +505,6 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
     if (f->start == b0 || f->start == b1) {
         err("invalid jump to the start block");
     }
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    b->jmp.id = next_instr_id++;
-    b->end_id = next_instr_id++;
 }
 
 void ret(Fn *f, Blk *b) {
@@ -572,11 +512,6 @@ void ret(Fn *f, Blk *b) {
         listAddNodeTail(f->blk_list, b);
     }
     b->jmp.type = RET0_JUMP_TYPE;
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    b->jmp.id = next_instr_id++;
-    b->end_id = next_instr_id++;
 }
 
 void retRef(Fn *f, Blk *b, Ref r) {
@@ -590,11 +525,6 @@ void retRef(Fn *f, Blk *b, Ref r) {
     if (r.type == RTmp && r.val.tmp_node != NULL) {
         addUsage(listNodeValue(r.val.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    b->jmp.id = next_instr_id++;
-    b->end_id = next_instr_id++;
 }
 
 void halt(Fn *f, Blk *b) {
@@ -602,11 +532,6 @@ void halt(Fn *f, Blk *b) {
         listAddNodeTail(f->blk_list, b);
     }
     b->jmp.type = HALT_JUMP_TYPE;
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    b->jmp.id = next_instr_id++;
-    b->end_id = next_instr_id++;
 }
 
 // TODO: intern the string addrName
@@ -627,10 +552,6 @@ void newFuncCallArg(Blk *b, simple_type type, Ref r) {
     ins->to = UNDEF_TMP_REF;
     ins->arg[0] = r;
     ins->arg[1] = UNDEF_TMP_REF;
-    if (listLength(b->ins_list) == 0) {
-        b->start_id = next_instr_id++;
-    }
-    ins->id = next_instr_id++;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
     if (r.type == RTmp && r.val.tmp_node != NULL) {

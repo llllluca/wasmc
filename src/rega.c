@@ -8,7 +8,7 @@ static Tmp *input_of(Phi *phi, Blk *b) {
     while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
         Phi_arg *phi_arg = listNodeValue(phi_arg_node);
         if (b == phi_arg->b && phi_arg->r.type == RTmp) {
-            return phi_arg->r.val.tmp;
+            return listNodeValue(phi_arg->r.val.tmp_node);
         }
     }
     return NULL;
@@ -52,13 +52,54 @@ static void live_remove(list *live, Tmp *t) {
     }
 }
 
-live_interval *build_intervals(Fn *f) {
-    //printf("lenght of f->blk_list: %ld\n", listLength(f->blk_list));
-    long n = listLength(f->tmp_list);
-    live_interval *intervals = xcalloc(n, sizeof(struct live_interval));
-    memset(intervals, 0, n * sizeof(struct live_interval));
-    unsigned int next_interval = 0;
+static void number_instrs(Fn *f) {
+    unsigned int next_id = 16;
+    listNode *blk_node;
+    listNode *blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+        b->id = next_id;
+        next_id += 2;
+        listNode *ins_node;
+        listNode *ins_iter = listFirst(b->ins_list);
+        while ((ins_node = listNext(&ins_iter)) != NULL) {
+            Ins *i = listNodeValue(ins_node);
+            i->id = next_id;
+            next_id += 2;
+        }
+        b->jmp.id = next_id;
+        next_id += 2;
+    }
+}
 
+static void add_range(Tmp *t, unsigned int start, unsigned int end) {
+    assert(start < end);
+    if (t->i == NULL) {
+        t->i = xmalloc(sizeof(struct live_interval));
+        t->i->start = start;
+        t->i->end = end;
+        return;
+    }
+    if (start < t->i->start) t->i->start = start;
+    if (end > t->i->end) t->i->end = end;
+}
+
+static void set_start(Tmp *t, unsigned int start) {
+    if (t->i != NULL) {
+        assert(start < t->i->end);
+        t->i->start = start;
+    } else {
+        // This happens when we don't have a use of t
+        t->i = xmalloc(sizeof(struct live_interval));
+        t->i->start = start;
+        t->i->end = start;
+    }
+}
+
+Tmp **build_intervals(Fn *f) {
+    number_instrs(f);
+    unsigned int n = listLength(f->tmp_list);
+    Tmp **sorted_intervals = xcalloc(n, sizeof(Tmp *));
     listNode *blk_node;
     listNode *blk_iter = listLast(f->blk_list);
     while ((blk_node = listPrev(&blk_iter)) != NULL) {
@@ -74,106 +115,84 @@ live_interval *build_intervals(Fn *f) {
         listNode *live_iter = listFirst(live);
         while ((live_node = listNext(&live_iter)) != NULL) {
             Tmp *t = listNodeValue(live_node);
-            if (t->i == NULL) {
-                assert(next_interval < n);
-                t->i = &intervals[next_interval++];
-                t->i->tmp = t;
-            }
-            t->i->start = b->start_id;
-            if (t->i->end == 0) {
-                t->i->end = b->end_id;
-            }
+            add_range(t, b->id, b->jmp.id);
+        }
+
+        listNode *tmp_node = b->jmp.arg.val.tmp_node;
+        if (b->jmp.arg.type == RTmp && tmp_node != NULL) {
+            Tmp *t = listNodeValue(tmp_node);
+            add_range(t, b->id, b->jmp.id);
+            listAddNodeHead(live, t);
         }
 
         listNode *ins_node;
         listNode *ins_iter = listLast(b->ins_list);
         while ((ins_node = listPrev(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            Tmp *t = ins->to.val.tmp;
-            if (ins->to.type == RTmp && t != NULL) {
-                if (t->i == NULL) {
-                    assert(next_interval < n);
-                    t->i = &intervals[next_interval++];
-                    t->i->tmp = t;
-                }
-                t->i->start = ins->id;
+            // output operand
+            listNode *tmp_node = ins->to.val.tmp_node;
+            if (ins->to.type == RTmp && tmp_node != NULL) {
+                Tmp *t = listNodeValue(tmp_node);
+                set_start(t, ins->id);
                 live_remove(live, t);
+                sorted_intervals[--n] = t;
             }
-
+            // input operand
             for (unsigned int i = 0; i < 2; i++) {
-                t = ins->arg[i].val.tmp;
-                if (ins->arg[i].type == RTmp && t != NULL) {
-                    if (t->i == NULL) {
-                        assert(next_interval < n);
-                        t->i = &intervals[next_interval++];
-                        t->i->tmp = t;
-                    }
-                    t->i->start = b->start_id;
-                    if (t->i->end == 0) {
-                        t->i->end = ins->id;
-                    }
+                tmp_node = ins->arg[i].val.tmp_node;
+                if (ins->arg[i].type == RTmp && tmp_node != NULL) {
+                    Tmp *t = listNodeValue(tmp_node);
+                    add_range(t, b->id, ins->id);
                     listAddNodeHead(live, t);
                 }
             }
         }
-        if (b->jmp.type == JNZ_JUMP_TYPE || b->jmp.type == RET1_JUMP_TYPE) {
-            Tmp *t = b->jmp.arg.val.tmp;
-            if (t->i == NULL) {
-                assert(next_interval < n);
-                t->i = &intervals[next_interval++];
-                t->i->tmp = t;
-            }
-            t->i->start = b->start_id;
-            if (t->i->end == 0) {
-                t->i->end = b->jmp.id;
-            }
-            listAddNodeHead(live, t);
-        }
+
         listNode *phi_node;
-        listNode *phi_iter = listFirst(b->phi_list);
-        while ((phi_node = listNext(&phi_iter)) != NULL) {
+        listNode *phi_iter = listLast(b->phi_list);
+        while ((phi_node = listPrev(&phi_iter)) != NULL) {
             Phi *phi = listNodeValue(phi_node);
-            Tmp *t = phi->to.val.tmp;
-            assert(phi->to.type == RTmp && t != NULL);
+            listNode *tmp_node = phi->to.val.tmp_node;
+            assert(phi->to.type == RTmp && tmp_node != NULL);
+            Tmp *t = listNodeValue(tmp_node);
             live_remove(live, t);
+            sorted_intervals[--n] = t;
         }
 
         //TODO: loop are not implemented here
-
         b->live_in = live;
-        /*
-        printf("End of block %s\n", b->name);
-        listNode *tmp_node;
-        listNode *tmp_iter = listFirst(f->tmp_list);
-        while ((tmp_node = listNext(&tmp_iter)) != NULL) {
-            Tmp *t = listNodeValue(tmp_node);
-            printf("%s: i.start = %d, i.end = %d\n", t->name, t->i.start, t->i.end);
-        }
-        printf("live at start of block %s:", b->name);
-        live_iter = listFirst(live);
-        while ((live_node = listNext(&live_iter)) != NULL) {
-            Tmp *t = listNodeValue(live_node);
-            printf("%s ", t->name);
-        }
-        printf("\n");
-        */
-        listRelease(live);
-        //TODO: b->live_in can be freed for each block b
     }
-    return intervals;
-}
-static int compare_intervals(const live_interval *lhs, const live_interval *rhs) {
-    return lhs->start - rhs->start;
+
+    // Free b->live_in for all block b
+    blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+        listRelease(b->live_in);
+        b->live_in = NULL;
+    }
+
+    printf("listLength = %ld\n", listLength(f->tmp_list));
+    printf("n = %d\n", n);
+    listNode *tmp_node;
+    listNode *tmp_iter = listFirst(f->tmp_list);
+    while ((tmp_node = listNext(&tmp_iter)) != NULL) {
+        Tmp *t = listNodeValue(tmp_node);
+        printf("%s\n", t->name);
+    }
+    assert(n == 0);
+
+
+    return sorted_intervals;
 }
 
-static void expire_old_intervals(list *active, live_interval *i, unsigned int *next_reg) {
+static void expire_old_intervals(list *active, live_interval *i, unsigned char*free_regs) {
     listNode *active_node;
     listNode *active_iter = listFirst(active);
     while ((active_node = listNext(&active_iter)) != NULL) {
         live_interval *j = listNodeValue(active_node);
-        if (j->end >= i->start) return;
+        if (j->end > i->start) return;
         listDelNode(active, active_node);
-        (*next_reg)--;
+        free_regs[j->assign.reg] = 1;
     }
 }
 
@@ -191,42 +210,60 @@ static void active_insert(list *active, live_interval *i) {
     }
 }
 
-static void spill_at_interval(list *active, live_interval *i, unsigned int *next_stack_slot) {
+static void spill_at_interval(list *active, live_interval *i, unsigned int *num_stack_slots) {
     listNode *spill_node = listLast(active);
     live_interval *spill = listNodeValue(spill_node);
     if (spill->end > i->end) {
-        i->reg = spill->reg;
-        spill->location = (*next_stack_slot)++;
+        i->assign_type = ASSIGN_TYPE_REGISTER;
+        i->assign.reg = spill->assign.reg;
+        spill->assign_type = ASSIGN_TYPE_STACK_SLOT;
+        spill->assign.stack_slot = (*num_stack_slots)++;
         listDelNode(active, spill_node);
         active_insert(active, i);
     } else {
-        i->location = (*next_stack_slot)++;
+        i->assign_type = ASSIGN_TYPE_STACK_SLOT;
+        i->assign.stack_slot = (*num_stack_slots)++;
     }
 }
 
-live_interval *linear_scan_register_allocator(Fn *f, unsigned int registers) {
+static unsigned int select_reg(unsigned char *free_regs, unsigned int nregs) {
+    for (unsigned int i = 0; i < nregs; i++) {
+        if (free_regs[i] == 1) {
+            free_regs[i] = 0;
+            return i;
+        }
+    }
+    assert(0);
+    return 0; // dead code, only to remove compiler warning
+}
+
+void linear_scan(Fn *f, unsigned int registers,
+                 unsigned int *num_stack_slots) {
+
+    assert(registers > 0);
+    Tmp **sorted_intervals = build_intervals(f);
+    printfn(f, stdout);
+    unsigned int n = listLength(f->tmp_list);
+
+    // free_regs[i] is 1 if the register i is free and 0 otherwise
+    unsigned char *free_regs = xcalloc(registers, sizeof(unsigned char));
+    memset(free_regs, 1, registers);
     list *active = listCreate();
-    unsigned int next_stack_slot = 1;
-    unsigned int next_reg = 1;
-    long n = listLength(f->tmp_list);
-    live_interval *intervals = build_intervals(f);
-//TODO: modify build_intervals in order to produce intervals array sorted by increasing start point.
-    qsort(intervals, n, sizeof(struct live_interval), 
-          (int (*)(const void *, const void*)) compare_intervals);
+    *num_stack_slots = 0;
 
     for (unsigned int j = 0; j < n; j++) {
-        live_interval *i = &intervals[j];
-        i->tmp->i = i;
-        expire_old_intervals(active, i, &next_reg);
+        live_interval *i = sorted_intervals[j]->i;
+        expire_old_intervals(active, i, free_regs);
         if (listLength(active) == registers) {
-            spill_at_interval(active, i, &next_stack_slot);
+            spill_at_interval(active, i, num_stack_slots);
         } else {
-            i->reg = next_reg++; 
+            i->assign_type = ASSIGN_TYPE_REGISTER;
+            i->assign.reg = select_reg(free_regs, registers);
             active_insert(active, i);
         }
     }
 
-    return intervals;
+    free(sorted_intervals);
+    free(free_regs);
 }
-
 

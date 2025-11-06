@@ -32,9 +32,14 @@ typedef struct Lnk {
 typedef struct live_interval {
     unsigned int start;
     unsigned int end;
-    unsigned int reg;
-    unsigned int location;
-    Tmp *tmp;
+    enum {
+        ASSIGN_TYPE_REGISTER,
+        ASSIGN_TYPE_STACK_SLOT,
+    } assign_type;
+    union {
+        unsigned int reg;
+        unsigned int stack_slot;
+    } assign;
 } live_interval;
 
 struct Tmp {
@@ -87,6 +92,7 @@ typedef enum Jump_type {
     HALT_JUMP_TYPE
 } Jump_type;
 
+// TODO: put Jump as normal Ins
 typedef struct Jump {
     Jump_type type;
     Ref arg;
@@ -107,8 +113,7 @@ struct Blk {
 /* list of variable that are live at the beginning of the block */
     list *live_in;
     unsigned char is_visited;
-    unsigned int start_id;
-    unsigned int end_id;
+    unsigned int id;
 };
 
 typedef struct Phi_arg {
@@ -484,7 +489,6 @@ void freeBlock(Blk *b);
 void freeData(Data *d);
 void freeDataField(DataField *df);
 
-live_interval *build_intervals(Fn *f);
-live_interval *linear_scan_register_allocator(Fn *f, unsigned int registers);
+void linear_scan(Fn *f, unsigned int registers, unsigned int *num_stack_slots);
 
 #endif 

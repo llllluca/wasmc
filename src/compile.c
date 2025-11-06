@@ -1039,18 +1039,30 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     listRelease(ctx.value_stack);
     listRelease(ctx.label_stack);
 
-    printfn(qbe_func, stdout);
     //typecheck(qbe_func);
     //optimizeFunc(qbe_func);
-    live_interval *intervals = linear_scan_register_allocator(qbe_func, 3);
+    unsigned int num_stack_slots;
+    printfn(qbe_func, stdout);
+    linear_scan(qbe_func, 2, &num_stack_slots);
+    printfn(qbe_func, stdout);
     listNode *tmp_node;
     listNode *tmp_iter = listFirst(qbe_func->tmp_list);
     while ((tmp_node = listNext(&tmp_iter)) != NULL) {
         Tmp *t = listNodeValue(tmp_node);
-        printf("%s: i->start = %d, i->end = %d, i->reg = %d, i->location = %d\n",
-               t->name, t->i->start, t->i->end, t->i->reg, t->i->location);
+        printf("%s: i->start = %d, i->end = %d ",
+               t->name, t->i->start, t->i->end);
+        switch(t->i->assign_type) {
+            case ASSIGN_TYPE_REGISTER:
+                printf("REGISTER %d\n", t->i->assign.reg);
+                break;
+            case ASSIGN_TYPE_STACK_SLOT:
+                printf("STACK SLOT %d\n", t->i->assign.stack_slot);
+                break;
+            default:
+                panic();
+        }
+
     }
-    free(intervals);
     freeFunc(qbe_func);
 }
 
