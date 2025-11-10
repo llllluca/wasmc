@@ -29,8 +29,7 @@ run_test() {
     case "$TARGET" in
     "rv32")
         wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
-            ./wasmc "test/${name}.wasm" > "test/${name}.ssa" && \
-            ./qbe "test/${name}.ssa" > "test/${name}.s" && \
+            ./wasmc "test/${name}.wasm" > "test/${name}.s" && \
             riscv32-unknown-linux-gnu-gcc -no-pie -static "test/${name}.s" -o "test/a.out"
         ;;
     "amd64_sysv")

@@ -23,28 +23,79 @@ typedef enum __attribute__ ((__packed__)) simple_type {
 
 typedef struct Lnk {
     char is_exported;
-    char thread;
     char align;
-    char *sec;
-    char *secf;
 } Lnk;
+
+typedef enum {
+    ZERO = 0,
+    RA  = 1,
+    SP  = 2,
+    GP  = 3,
+    TP  = 4,
+    T0  = 5,
+    T1  = 6,
+    T2  = 7,
+    FP  = 8,
+    S1  = 9,
+    A0  = 10,
+    A1  = 11,
+    A2  = 12,
+    A3  = 13,
+    A4  = 14,
+    A5  = 15,
+    A6  = 16,
+    A7  = 17,
+    S2  = 18,
+    S3  = 19,
+    S4  = 20,
+    S5  = 21,
+    S6  = 22,
+    S7  = 23,
+    S8  = 24,
+    S9  = 25,
+    S10 = 26,
+    S11 = 27,
+    T3  = 28,
+    T4  = 29,
+    T5  = 30,
+    T6  = 31,
+    RV32_NUM_REG
+} rv32_reg;
+
+#define RV32_GP_NUM_REG 18
+extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
+
+#define RV32_ARG_NUM_REG 8
+extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
+
+typedef uint8_t boolean;
+#define TRUE 1
+#define FALSE 0
+
+typedef struct rv32_reg_pool {
+    boolean pool[RV32_NUM_REG];
+    unsigned int size;
+} rv32_reg_pool;
 
 typedef struct live_interval {
     unsigned int start;
     unsigned int end;
     enum {
-        ASSIGN_TYPE_REGISTER,
+        ASSIGN_TYPE_NONE,
+        ASSIGN_TYPE_GP_REGISTER,
+        ASSIGN_TYPE_ARG_REGISTER,
         ASSIGN_TYPE_STACK_SLOT,
     } assign_type;
     union {
-        unsigned int reg;
+        rv32_reg reg;
         unsigned int stack_slot;
     } assign;
+    unsigned char can_spill;
 } live_interval;
 
 struct Tmp {
     char name[NString];
-    simple_type cls;
+    simple_type cls; // TODO: when cls is used?
     list *use_list;
     live_interval *i;
 };
@@ -69,11 +120,15 @@ typedef struct Con {
 typedef enum Ref_type {
     RTmp,
     RCon,
+    RReg,
+    RStack_slot,
 } Ref_type;
 
 typedef union Ref_ptr {
     listNode *tmp_node;
     Con *con;
+    rv32_reg reg;
+    unsigned int stack_slot;
 } Ref_ptr;
 
 typedef struct Ref {
@@ -136,6 +191,7 @@ typedef struct Fn {
     Blk *start;
     simple_type ret_type;
     Lnk lnk;
+    unsigned int num_stack_slots;
 } Fn;
 
 typedef enum DataField_type {
@@ -309,6 +365,9 @@ typedef enum instr_opcode {
     FLAGFNE_INSTR = 135,
     FLAGFO_INSTR = 136,
     FLAGFUO_INSTR = 137,
+
+    MV_INSTR,
+    LI_INSTR,
 } instr_opcode;
 
 struct Ins {
@@ -489,6 +548,6 @@ void freeBlock(Blk *b);
 void freeData(Data *d);
 void freeDataField(DataField *df);
 
-void linear_scan(Fn *f, unsigned int registers, unsigned int *num_stack_slots);
+void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *arg);
 
 #endif 

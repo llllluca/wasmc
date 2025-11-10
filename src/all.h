@@ -14,10 +14,6 @@ typedef int err_t;
 #define OK    0
 #define FAIL -1
 
-typedef uint8_t boolean;
-#define TRUE 1
-#define FALSE 0
-
 typedef struct {
     /* It is needed at least min_page_num page of memory
      * in order to execute the WebAssembly module.

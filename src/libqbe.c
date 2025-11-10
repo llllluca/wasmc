@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <assert.h>
 
+extern char *rname[];
+
 static unsigned int next_temp_id = 0;
 
 void printref(Ref r, FILE *f);
@@ -169,7 +171,7 @@ void printfn(Fn *fn, FILE *f) {
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        fprintf(f, "%d:@%s\n", b->id, b->name);
+        fprintf(f, "@%s\n", b->name);
         listNode *phi_node;
         listNode *phi_iter = listFirst(b->phi_list);
         while ((phi_node = listNext(&phi_iter)) != NULL) {
@@ -198,7 +200,7 @@ void printfn(Fn *fn, FILE *f) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
-            fprintf(f, "\t %d:", i->id);
+            fprintf(f, "\t");
             if (!req(i->to, UNDEF_TMP_REF)) {
                 printref(i->to, f);
                 fprintf(f, " =%c ", ktoc[i->type]);
@@ -214,7 +216,7 @@ void printfn(Fn *fn, FILE *f) {
             }
             fprintf(f, "\n");
         }
-        fprintf(f, "\t %d:", b->jmp.id);
+        fprintf(f, "\t");
         switch (b->jmp.type) {
             case RET0_JUMP_TYPE:
                 fprintf(f, "ret\n");
@@ -306,6 +308,12 @@ void printref(Ref r, FILE *f) {
         break;
     case RCon:
         printcon(r.val.con, f);
+        break;
+    case RReg:
+        fprintf(f, "%s", rname[r.val.reg]);
+        break;
+    case RStack_slot:
+        fprintf(f, "Stack_Slot_%u", r.val.stack_slot);
         break;
     default:
         panic();

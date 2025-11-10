@@ -8,6 +8,16 @@
 #include "esp_system.h"
 #endif
 
+extern void rv32_emitfn(Fn *fn, FILE *f);
+const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG] = {
+    T0, T1, T2, T3, T4, T5, T6,
+    S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, 
+};
+
+const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG] = {
+    A0, A1, A2, A3, A4, A5, A6, A7,
+};
+
 static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode);
 
 stack_entry_t bottom_block_stack = {
@@ -1041,10 +1051,20 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
 
     //typecheck(qbe_func);
     //optimizeFunc(qbe_func);
-    unsigned int num_stack_slots;
-    printfn(qbe_func, stdout);
-    linear_scan(qbe_func, 2, &num_stack_slots);
-    printfn(qbe_func, stdout);
+    rv32_reg_pool gpr;
+    gpr.size = RV32_GP_NUM_REG;
+    for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
+        gpr.pool[rv32_gp_reg[i]] = 1;
+    }
+    rv32_reg_pool argr;
+    argr.size = RV32_ARG_NUM_REG;
+    for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
+        argr.pool[rv32_arg_reg[i]] = 1;
+    }
+    linear_scan(qbe_func, &gpr, &argr);
+    //printfn(qbe_func, stdout);
+    rv32_emitfn(qbe_func, stdout);
+    /*
     listNode *tmp_node;
     listNode *tmp_iter = listFirst(qbe_func->tmp_list);
     while ((tmp_node = listNext(&tmp_iter)) != NULL) {
@@ -1052,8 +1072,11 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         printf("%s: i->start = %d, i->end = %d ",
                t->name, t->i->start, t->i->end);
         switch(t->i->assign_type) {
-            case ASSIGN_TYPE_REGISTER:
-                printf("REGISTER %d\n", t->i->assign.reg);
+            case ASSIGN_TYPE_ARG_REGISTER:
+                printf("ARG REGISTER %d\n", t->i->assign.reg);
+                break;
+            case ASSIGN_TYPE_GP_REGISTER:
+                printf("GP REGISTER %d\n", t->i->assign.reg);
                 break;
             case ASSIGN_TYPE_STACK_SLOT:
                 printf("STACK SLOT %d\n", t->i->assign.stack_slot);
@@ -1063,6 +1086,7 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         }
 
     }
+    */
     freeFunc(qbe_func);
 }
 

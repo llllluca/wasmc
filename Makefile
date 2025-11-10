@@ -15,7 +15,8 @@ OBJ = \
 	src/utils.o \
 	src/main.o \
 	src/ssa.o \
-	src/rega.o
+	src/rega.o \
+	src/rv32/emit.o
 
 ALL_OBJ = \
 	$(OBJ) \
