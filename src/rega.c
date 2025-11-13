@@ -2,13 +2,13 @@
 #include <assert.h>
 #include <string.h>
 
-static Tmp *input_of(Phi *phi, Blk *b) {
+static Ref *input_of(Phi *phi, Blk *b) {
     listNode *phi_arg_node;
     listNode *phi_arg_iter = listFirst(phi->phi_arg_list);
     while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
         Phi_arg *phi_arg = listNodeValue(phi_arg_node);
-        if (b == phi_arg->b && phi_arg->r.type == RTmp) {
-            return listNodeValue(phi_arg->r.val.tmp_node);
+        if (b == phi_arg->b) {
+            return &phi_arg->r;
         }
     }
     return NULL;
@@ -32,8 +32,9 @@ static void live_init(list *live, Blk* b, Blk *b_succ) {
     listNode *phi_iter = listFirst(b_succ->phi_list);
     while ((phi_node = listNext(&phi_iter)) != NULL) {
         Phi *phi = listNodeValue(phi_node);
-        Tmp *t = input_of(phi, b);
-        if (t != NULL) {
+        Ref *r = input_of(phi, b);
+        if (r->type == RTmp) {
+            Tmp *t = listNodeValue(r->val.tmp_node);
             listAddNodeTail(live, t);
         }
     }
@@ -71,14 +72,263 @@ static void number_instrs(Fn *f) {
     }
 }
 
+typedef enum move_status {
+    TO_MOVE,
+    BEING_MOVED,
+    MOVED,
+} move_status;
+
+typedef struct move_from {
+    enum {
+        CONST,
+        LOCATION,
+    } type;
+    union {
+        location loc;
+        Con *con;
+    } as;
+} move_from;
+
+typedef struct move {
+    move_from from;
+    location to;
+    move_status status;
+} move;
+
+#define LOCATION_EQ(a, b) ( \
+    ((a).type == LOCATION_NONE && (b).type == LOCATION_NONE) || \
+    ((a).type == REGISTER && (b).type == REGISTER && \
+     (a).as.reg == (b).as.reg) || \
+    ((a).type == STACK_SLOT && (b).type == STACK_SLOT && \
+     (a).as.stack_slot == (b).as.stack_slot))
+
+#define MOVE_FROM_EQ_TO(from, to) \
+    (from.type != CONST && LOCATION_EQ(from.as.loc, to))
+
+static list *phi_parallel_moves(Blk *pred, Blk *succ) {
+    list *mappings = listCreate();
+    listSetFreeMethod(mappings, free);
+    listNode *phi_node;
+    listNode *phi_iter = listFirst(succ->phi_list);
+    while ((phi_node = listNext(&phi_iter)) != NULL) {
+        Phi *phi = listNodeValue(phi_node);
+        Ref *r = input_of(phi, pred);
+        if (r == NULL) continue;
+        move *move = xmalloc(sizeof(struct move));
+        switch (r->type) {
+            case RTmp: {
+                Tmp *t = listNodeValue(r->val.tmp_node);
+                move->from.type = LOCATION;
+                move->from.as.loc = t->i->assign;
+            } break;
+            case RCon: {
+                move->from.type = CONST;
+                move->from.as.con = r->val.con;
+            } break;
+            default:
+                free(move);
+                panic();
+        }
+
+        if (phi->to.type != RTmp) {
+            free(move);
+            panic();
+        }
+        Tmp *t = listNodeValue(phi->to.val.tmp_node);
+        move->to = t->i->assign;
+
+        if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+            listAddNodeTail(mappings, move);
+        }
+    }
+    return mappings;
+}
+
+static Ins *alloc_copy(location *dst, move_from *src) {
+    Ins *ins = xmalloc(sizeof(struct Ins));
+    ins->op = COPY_INSTR;
+    ins->type = WORD_TYPE;
+
+    ins->to.type = RLoc;
+    ins->to.val.loc = *dst;
+
+    switch (src->type) {
+        case CONST:
+            ins->arg[0].type = RCon;
+            ins->arg[0].val.con = src->as.con;
+            break;
+        case LOCATION: {
+            ins->arg[0].type = RLoc;
+            ins->arg[0].val.loc = src->as.loc;
+        } break;
+        default:
+            panic();
+    }
+    ins->arg[1] = UNDEF_TMP_REF;
+    return ins;
+}
+
+static void move_one(move *m, list* par_move, list *move_seq) {
+    if (MOVE_FROM_EQ_TO(m->from, m->to)) return;
+    m->status = BEING_MOVED;
+    location tmp = {
+        .type = REGISTER,
+        .as.reg = rv32_reserved_reg[0],
+    };
+    listNode *move_node;
+    listNode *move_iter = listFirst(par_move);
+    while ((move_node = listNext(&move_iter)) != NULL) {
+        move *x = listNodeValue(move_node);
+        if (MOVE_FROM_EQ_TO(x->from, m->to)) {
+            switch (x->status) {
+                case TO_MOVE:
+                    move_one(x, par_move, move_seq);
+                    break;
+                case BEING_MOVED: {
+                    Ins *i = alloc_copy(&tmp, &x->from);
+                    listAddNodeTail(move_seq, i);
+                    x->from.type = LOCATION;
+                    x->from.as.loc = tmp;
+                } break;
+                case MOVED:
+                    break;
+                default:
+                    panic();
+            }
+        }
+    }
+    Ins *i = alloc_copy(&m->to, &m->from);
+    listAddNodeHead(move_seq, i);
+    m->status = MOVED;
+}
+
+static list *sequentialize(list *par_move) {
+    list *move_seq = listCreate();
+    listNode *move_node;
+    listNode *move_iter = listFirst(par_move);
+    while ((move_node = listNext(&move_iter)) != NULL) {
+        move *move = listNodeValue(move_node);
+        move->status = TO_MOVE;
+    }
+
+    move_iter = listFirst(par_move);
+    while ((move_node = listNext(&move_iter)) != NULL) {
+        move *move = listNodeValue(move_node);
+        if (move->status == TO_MOVE) {
+            move_one(move, par_move, move_seq);
+        }
+    }
+
+    return move_seq;
+}
+
+static void print_location(location *l) {
+    switch (l->type) {
+        case LOCATION_NONE:
+            printf("LOCATION_NONE\n");
+            break;
+        case REGISTER:
+            printf("REGISTER %u\n", l->as.reg);
+            break;
+        case STACK_SLOT:
+            printf("STACK_SLOT %u\n", l->as.stack_slot);
+            break;
+        default:
+            panic();
+    }
+}
+
+static void print_move(move *m) {
+    printf("from: ");
+    if (m->from.type == CONST) {
+        printf("%"PRIi64"\n", m->from.as.con->val.i);
+    } else {
+        print_location(&m->from.as.loc);
+    }
+    printf("to: ");
+    print_location(&m->to);
+}
+
+static void insert_move_at_start(Blk *b, list *ins_list) {
+    listNode *ins_node;
+    listNode *ins_iter = listLast(ins_list);
+    while ((ins_node = listPrev(&ins_iter)) != NULL) {
+        listUnlinkNode(ins_list, ins_node);
+        listLinkNodeHead(b->ins_list, ins_node);
+    }
+}
+
+static void insert_move_at_end(Blk *b, list *ins_list) {
+    listNode *ins_node;
+    listNode *ins_iter = listLast(ins_list);
+    while ((ins_node = listPrev(&ins_iter)) != NULL) {
+        listUnlinkNode(ins_list, ins_node);
+        listLinkNodeTail(b->ins_list, ins_node);
+    }
+}
+
+static void insert_move_sequence(Fn* f,
+    list *move_seq, Blk *pred, Blk *succ) {
+
+    if (listLength(move_seq) == 0) return;
+    if (listLength(succ->preds) > 1 &&
+        pred->s1 != NULL && pred->s2 != NULL) {
+        /* succ has pred and other predecessors and
+         * pred has succ and another one successor */
+        Blk *b = newBlock(0);
+        if (pred->s1 == succ) {
+            pred->s1 = b;
+        } else {
+            pred->s2 = b;
+        }
+        insert_move_at_start(b, move_seq);
+        jmp(f, b, succ);
+    } else if (pred->s1 != NULL && pred->s2 != NULL) {
+        /* succ has only pred as predecessor and
+         * pred has succ and another one successor */
+        insert_move_at_start(succ, move_seq);
+    } else {
+        /* succ has pred and other predecessors and
+         * pred has only succ as successor */
+        insert_move_at_end(pred, move_seq);
+    }
+}
+
+static void resolve_edge(Fn *f, Blk *pred, Blk *succ) {
+    if (succ == NULL) return;
+    list *par_move = phi_parallel_moves(pred, succ);
+    list *move_seq = sequentialize(par_move);
+    insert_move_sequence(f, move_seq, pred, succ);
+    listRelease(par_move);
+    assert(listLength(move_seq) == 0);
+    listRelease(move_seq);
+}
+
+static void resolve_ssa(Fn *f) {
+
+    listNode *blk_node;
+    listNode *blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *pred = listNodeValue(blk_node);
+        resolve_edge(f, pred, pred->s1);
+        resolve_edge(f, pred, pred->s2);
+    }
+
+    blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+        listEmpty(b->phi_list);
+    }
+}
+
 static void add_range(Tmp *t, unsigned int start, unsigned int end) {
     assert(start < end);
     if (t->i == NULL) {
         t->i = xmalloc(sizeof(struct live_interval));
         t->i->start = start;
         t->i->end = end;
-        t->i->assign_type = ASSIGN_TYPE_NONE;
-        t->i->can_spill = 1;
+        t->i->assign.type = LOCATION_NONE;
+        t->i->register_hint = ZERO;
         return;
     }
     if (start < t->i->start) t->i->start = start;
@@ -94,12 +344,54 @@ static void set_start(Tmp *t, unsigned int start) {
         t->i = xmalloc(sizeof(struct live_interval));
         t->i->start = start;
         t->i->end = start;
-        t->i->assign_type = ASSIGN_TYPE_NONE;
-        t->i->can_spill = 1;
+        t->i->assign.type = LOCATION_NONE;
+        t->i->register_hint = ZERO;
     }
 }
 
-live_interval **build_intervals(Fn *f) {
+static void fill_register_hints(Fn *f) {
+
+    unsigned int arg_index = 0;
+    listNode *ins_node;
+    listNode *ins_iter = listFirst(f->start->ins_list);
+    while ((ins_node = listNext(&ins_iter)) != NULL) {
+        Ins *ins = listNodeValue(ins_node);
+        if (ins->op != PAR_INSTR) break;
+        assert(ins->to.type == RTmp);
+        Tmp *t = listNodeValue(ins->to.val.tmp_node);
+        t->i->register_hint = rv32_arg_reg[arg_index++];
+    }
+    arg_index = 0;
+
+    listNode *blk_node;
+    listNode *blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+
+        listNode *ins_node;
+        listNode *ins_iter = listFirst(b->ins_list);
+        while ((ins_node = listNext(&ins_iter)) != NULL) {
+            Ins *ins = listNodeValue(ins_node);
+            if (ins->op == ARG_INSTR && ins->arg[0].type == RTmp) {
+                Tmp *t = listNodeValue(ins->arg[0].val.tmp_node);
+                t->i->register_hint = rv32_arg_reg[arg_index++];
+            }
+            else if (ins->op == CALL_INSTR) {
+                arg_index = 0;
+                assert(ins->to.type == RTmp);
+                Tmp *t = listNodeValue(ins->to.val.tmp_node);
+                t->i->register_hint = A0;
+            }
+        }
+
+        if (b->jmp.type == RET1_JUMP_TYPE && b->jmp.arg.type == RTmp) {
+            Tmp *t = listNodeValue(b->jmp.arg.val.tmp_node);
+            t->i->register_hint = A0;
+        }
+    }
+}
+
+static live_interval **build_intervals(Fn *f) {
     number_instrs(f);
     unsigned int n = listLength(f->tmp_list) + 1;
     live_interval **sorted_intervals = xcalloc(n, sizeof(struct live_interval *));
@@ -205,6 +497,7 @@ live_interval **build_intervals(Fn *f) {
         }
 
         //TODO: loop are not implemented
+        assert(b->is_loop_header == FALSE);
 
         b->live_in = live;
     }
@@ -220,8 +513,19 @@ live_interval **build_intervals(Fn *f) {
     /* Assert that the length of sorted_intervals is equal to the length of
      * tmp list of the function */
     assert(n == 0);
+    fill_register_hints(f);
     return sorted_intervals;
 }
+
+static boolean is_arg_reg(rv32_reg reg) {
+    for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
+        if (reg == rv32_arg_reg[i]) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 
 static void expire_old_intervals(list *active, live_interval *i,
     rv32_reg_pool *gpr, rv32_reg_pool *argr) {
@@ -232,17 +536,13 @@ static void expire_old_intervals(list *active, live_interval *i,
         live_interval *j = listNodeValue(active_node);
         if (j->end > i->start) return;
         listDelNode(active, active_node);
-        switch (j->assign_type) {
-            case ASSIGN_TYPE_GP_REGISTER:
-                gpr->pool[j->assign.reg] = 1;
-                gpr->size++;
-                break;
-            case ASSIGN_TYPE_ARG_REGISTER:
-                argr->pool[j->assign.reg] = 1;
-                argr->size++;
-                break;
-            default:
-                assert(0);
+        assert(j->assign.type == REGISTER);
+        if (is_arg_reg(j->assign.as.reg)) {
+            argr->pool[j->assign.as.reg] = TRUE;
+            argr->size++;
+        } else {
+            gpr->pool[j->assign.as.reg] = TRUE;
+            gpr->size++;
         }
     }
 }
@@ -270,32 +570,30 @@ static void spill_at_interval(list *active,
     listNode *li_iter = listLast(active);
     while ((li_node = listPrev(&li_iter)) != NULL) {
         live_interval *i = listNodeValue(li_node);
-        if (i->can_spill) {
-            spill = i;
-            spill_node = li_node;
-        }
+        spill = i;
+        spill_node = li_node;
     }
     if (spill == NULL || spill_node == NULL) panic();
 
     if (spill->end > i->end) {
-        i->assign_type = spill->assign_type;
-        i->assign.reg = spill->assign.reg;
-        spill->assign_type = ASSIGN_TYPE_STACK_SLOT;
-        spill->assign.stack_slot = (*num_stack_slots)++;
+        i->assign.type = spill->assign.type;
+        i->assign.as.reg = spill->assign.as.reg;
+        spill->assign.type = STACK_SLOT;
+        spill->assign.as.stack_slot = (*num_stack_slots)++;
         listDelNode(active, spill_node);
         active_insert(active, i);
     } else {
-        i->assign_type = ASSIGN_TYPE_STACK_SLOT;
-        i->assign.stack_slot = (*num_stack_slots)++;
+        i->assign.type = STACK_SLOT;
+        i->assign.as.stack_slot = (*num_stack_slots)++;
     }
 }
 
 static boolean try_assign_reg(live_interval *i, rv32_reg_pool *r) {
     for (unsigned int j = 0; j < RV32_NUM_REG; j++) {
-        if (r->pool[j] == TRUE) {
+        if (r->pool[j]) {
             r->pool[j] = FALSE;
             r->size--;
-            i->assign.reg = j;
+            i->assign.as.reg = j;
             return FALSE;
         }
     }
@@ -306,118 +604,83 @@ static void assign_reg(live_interval *i,
     rv32_reg_pool *gpr, rv32_reg_pool *argr) {
 
     boolean err;
-    i->assign_type = ASSIGN_TYPE_GP_REGISTER;
+    i->assign.type = REGISTER;
+    rv32_reg h = i->register_hint;
+    if (h != ZERO) {
+        if (is_arg_reg(h)) {
+            if (argr->pool[h]) {
+                argr->pool[h] = FALSE;
+                argr->size--;
+                i->assign.as.reg = h;
+                return;
+            }
+        } else {
+            if (gpr->pool[h]) {
+                gpr->pool[h] = FALSE;
+                gpr->size--;
+                i->assign.as.reg = h;
+                return;
+            }
+        }
+    }
+
     err = try_assign_reg(i, gpr);
     if (!err) return;
-    i->assign_type = ASSIGN_TYPE_ARG_REGISTER;
     err = try_assign_reg(i, argr);
     if (!err) return;
     assert(0);
 }
 
-static void handle_func_params(Fn *f, rv32_reg_pool *argr, list *active) {
-    listNode *ins_node;
-    listNode *ins_iter = listFirst(f->start->ins_list);
-    while ((ins_node = listNext(&ins_iter)) != NULL) {
-        Ins *ins = listNodeValue(ins_node);
-        if (ins->op != PAR_INSTR) return;
-        assert(ins->to.type == RTmp);
-        Tmp *tmp = listNodeValue(ins->to.val.tmp_node);
-        live_interval *i = tmp->i;
-        i->assign_type = ASSIGN_TYPE_ARG_REGISTER;
-        i->can_spill = 0;
-        boolean err = try_assign_reg(i, argr);
-        if (err) panic();
-        active_insert(active, i);
-        listDelNode(f->start->ins_list, ins_node);
-    }
-}
-
-static void handle_func_call(Blk *b, live_interval **intervals,
-    listNode *first_arg_node, listNode *func_call_node) {
-
-    Ins *func_call = listNodeValue(func_call_node);
-    list *survivors = listCreate();
-    for (unsigned int j = 0; intervals[j] != NULL; j++) {
-        live_interval *li = intervals[j];
-        if ((li->assign_type == ASSIGN_TYPE_GP_REGISTER ||
-            li->assign_type == ASSIGN_TYPE_ARG_REGISTER) &&
-            li->start < func_call->id && li->end > func_call->id) {
-            listAddNodeTail(survivors, li);
-        }
-    }
-
-    assert(listLength(survivors) == 0);
-    /*
-    listNode *li_node;
-    listNode *li_iter = listFirst(survivors);
-    while ((li_node = listNext(&li_iter)) != NULL) {
-        live_interval *li = listNodeValue(li_node);
-        //TODO: insert push
-    }
-    */
-
-    // check if the current func_call has at least one argument
-    if (first_arg_node != NULL) {
-        unsigned int arg_index = 0;
-        listNode *ins_node;
-        listNode *ins_iter = first_arg_node;
-        while ((ins_node = listNext(&ins_iter)) != func_call_node) {
-            Ins *ins = listNodeValue(ins_node);
-            if (arg_index >= RV32_ARG_NUM_REG) panic();
-            ins->to.val.reg = rv32_arg_reg[arg_index++];
-            ins->to.type = RReg;
-            ins->op = COPY_INSTR;
-        }
-    }
-
-    Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->type = func_call->type;
-    ins->op = COPY_INSTR;
-    ins->to.type = RReg;
-    ins->to = func_call->to;
-    ins->arg[0].type = RReg;
-    ins->arg[0].val.reg = A0;
-    ins->arg[1] = UNDEF_TMP_REF;
-    listInsertNodeAfter(b->ins_list, func_call_node, ins);
-    func_call->to = UNDEF_TMP_REF;
-
-    /*
-    li_iter = listFirst(survivors);
-    while ((li_node = listNext(&li_iter)) != NULL) {
-        live_interval *li = listNodeValue(li_node);
-        //TODO: insert pop
-    }
-    */
-    listRelease(survivors);
-}
-
-static void change_tmpref_to_reg_or_stack_slot(Ref *r) {
+static void tmpref_to_location(Ref *r) {
     if (r->type == RTmp && r->val.tmp_node != NULL) {
         Tmp *t = listNodeValue(r->val.tmp_node);
         assert(t != NULL);
         live_interval *li = t->i;
         assert(li != NULL);
-        switch (li->assign_type) {
-            case ASSIGN_TYPE_GP_REGISTER:
-            case ASSIGN_TYPE_ARG_REGISTER:
-                r->type = RReg;
-                r->val.reg = li->assign.reg;
-                break;
-
-            case ASSIGN_TYPE_STACK_SLOT:
-                r->type = RStack_slot;
-                r->val.reg = li->assign.stack_slot;
-                break;
-
-            default:
-                panic();
-        }
+        r->type = RLoc;
+        r->val.loc = li->assign;
     }
 }
 
-static void to_lower_level_ir(Fn *f, live_interval **intervals) {
-    listNode *first_arg_node = NULL;
+static void handle_register_constraints(Fn *f, live_interval **intervals) {
+    location a0 = {
+        .type = REGISTER,
+        .as.reg = A0,
+    };
+    list *par_move = listCreate();
+    unsigned int arg_index = 0;
+
+    listNode *ins_node;
+    listNode *ins_iter = listFirst(f->start->ins_list);
+    while ((ins_node = listNext(&ins_iter)) != NULL) {
+        Ins *ins = listNodeValue(ins_node);
+        if (ins->op != PAR_INSTR) break;
+        assert(ins->to.type == RTmp);
+        Tmp *t = listNodeValue(ins->to.val.tmp_node);
+        move *move = xmalloc(sizeof(struct move));
+        move->from.type = LOCATION;
+
+        move->from.as.loc.type = REGISTER;
+        if (arg_index >= RV32_ARG_NUM_REG) panic();
+        move->from.as.loc.as.reg = rv32_arg_reg[arg_index++];
+        move->to = t->i->assign;
+        if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+            listAddNodeTail(par_move, move);
+        }
+        listDelNode(f->start->ins_list, ins_node);
+    }
+
+    list *move_seq = sequentialize(par_move);
+    listNode *copy_node;
+    listNode *copy_iter = listFirst(move_seq);
+    while ((copy_node = listNext(&copy_iter)) != NULL) {
+        listUnlinkNode(move_seq, copy_node);
+        listLinkNodeHead(f->start->ins_list, copy_node);
+    }
+    arg_index = 0;
+    listRelease(move_seq);
+    listEmpty(par_move);
+
     listNode *blk_node;
     listNode *blk_iter = listFirst(f->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
@@ -427,41 +690,122 @@ static void to_lower_level_ir(Fn *f, live_interval **intervals) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            change_tmpref_to_reg_or_stack_slot(&ins->to);
-            change_tmpref_to_reg_or_stack_slot(&ins->arg[0]);
-            change_tmpref_to_reg_or_stack_slot(&ins->arg[1]);
-            if (ins->op == ARG_INSTR && first_arg_node == NULL) {
-                first_arg_node = ins_node;
+            if (ins->op == ARG_INSTR) {
+                Ref *r = &ins->arg[0];
+                move *move = xmalloc(sizeof(struct move));
+                switch (r->type) {
+                    case RTmp: {
+                        Tmp *t = listNodeValue(r->val.tmp_node);
+                        move->from.type = LOCATION;
+                        move->from.as.loc = t->i->assign;
+                    } break;
+                    case RCon: {
+                        move->from.type = CONST;
+                        move->from.as.con = r->val.con;
+                    } break;
+                    default:
+                        assert(0);
+                }
+                listDelNode(b->ins_list, ins_node);
+
+                move->to.type = REGISTER;
+                if (arg_index >= RV32_ARG_NUM_REG) panic();
+                move->to.as.reg = rv32_arg_reg[arg_index++];
+
+                if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+                    listAddNodeTail(par_move, move);
+                }
             }
             else if (ins->op == CALL_INSTR) {
-                handle_func_call(
-                     b,
-                    intervals,
-                    first_arg_node,
-                    ins_node);
-                first_arg_node = NULL;
-            }
+                listNode *call_node = ins_node;
 
-        }
-        if (b->jmp.type == JNZ_JUMP_TYPE || b->jmp.type == RET1_JUMP_TYPE) {
-            change_tmpref_to_reg_or_stack_slot(&b->jmp.arg);
+                Ins *func_call = listNodeValue(call_node);
+                list *survivors = listCreate();
+                for (unsigned int j = 0; intervals[j] != NULL; j++) {
+                    live_interval *li = intervals[j];
+                    if (li->assign.type == REGISTER &&
+                        li->start < func_call->id &&
+                        li->end > func_call->id) {
+
+                        listAddNodeTail(survivors, li);
+                    }
+                }
+                //TODO: not implemented
+                assert(listLength(survivors) == 0);
+                listRelease(survivors);
+
+                list *move_seq = sequentialize(par_move);
+                listNode *copy_node;
+                listNode *copy_iter = listLast(move_seq);
+                while ((copy_node = listPrev(&copy_iter)) != NULL) {
+                    listUnlinkNode(move_seq, copy_node);
+                    listLinkNodeBefore(b->ins_list, call_node, copy_node);
+                }
+                arg_index = 0;
+                listRelease(move_seq);
+                listEmpty(par_move);
+
+                assert(func_call->to.type == RTmp);
+                Tmp *t = listNodeValue(func_call->to.val.tmp_node);
+
+                if (!LOCATION_EQ(a0, t->i->assign)) {
+                    move_from src = {
+                        .type = LOCATION,
+                        .as.loc = a0
+                    };
+                    Ins *ins = alloc_copy(&t->i->assign, &src);
+                    listInsertNodeAfter(b->ins_list, call_node, ins);
+                }
+                func_call->to = UNDEF_TMP_REF;
+            }
         }
 
         if (b->jmp.type == RET1_JUMP_TYPE) {
-            Ins *ins = xmalloc(sizeof(struct Ins));
-            ins->op = COPY_INSTR;
-            ins->to.type = RReg;
-            ins->to.val.reg = A0;
-            ins->type = f->ret_type;
-            ins->arg[0] = b->jmp.arg;
-            ins->arg[1] = UNDEF_TMP_REF;
-            listAddNodeTail(b->ins_list, ins);
+            move_from src;
+            Ref *r = &b->jmp.arg;
+            switch (r->type) {
+                case RTmp: {
+                    Tmp *t = listNodeValue(r->val.tmp_node);
+                    src.type = LOCATION;
+                    src.as.loc = t->i->assign;
+                } break;
+                case RCon: {
+                    src.type = CONST;
+                    src.as.con = r->val.con;
+                } break;
+                default:
+                    assert(0);
+            }
+            if (!MOVE_FROM_EQ_TO(src, a0)) {
+                Ins *ins = alloc_copy(&a0, &src);
+                listAddNodeTail(b->ins_list, ins);
+            }
+            b->jmp.type = RET0_JUMP_TYPE;
         }
-        // set the jump to ret0
-        b->jmp.type = RET0_JUMP_TYPE;
-        b->jmp.arg = UNDEF_TMP_REF;
     }
+    listRelease(par_move);
+}
 
+static void to_lower_level_ir(Fn *f) {
+    listNode *blk_node;
+    listNode *blk_iter = listFirst(f->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+
+        listNode *ins_node;
+        listNode *ins_iter = listFirst(b->ins_list);
+        while ((ins_node = listNext(&ins_iter)) != NULL) {
+            Ins *ins = listNodeValue(ins_node);
+            tmpref_to_location(&ins->to);
+            tmpref_to_location(&ins->arg[0]);
+            tmpref_to_location(&ins->arg[1]);
+
+        }
+        if (b->jmp.type == JNZ_JUMP_TYPE ||
+            b->jmp.type == RET1_JUMP_TYPE) {
+            tmpref_to_location(&b->jmp.arg);
+        }
+    }
 }
 
 void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr) {
@@ -471,11 +815,10 @@ void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr) {
     live_interval **sorted_intervals = build_intervals(f);
     f->num_stack_slots = 0;
     list *active = listCreate();
-    handle_func_params(f, argr, active);
 
     for (unsigned int j = 0; sorted_intervals[j] != NULL; j++) {
         live_interval *i = sorted_intervals[j];
-        if (i->assign_type != ASSIGN_TYPE_NONE) continue;
+        if (i->assign.type != LOCATION_NONE) continue;
         expire_old_intervals(active, i, gpr, argr);
         if (listLength(active) == nreg) {
             spill_at_interval(active, i, &f->num_stack_slots);
@@ -486,7 +829,9 @@ void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr) {
     }
 
     listRelease(active);
-    to_lower_level_ir(f, sorted_intervals);
+    handle_register_constraints(f, sorted_intervals);
+    resolve_ssa(f);
+    to_lower_level_ir(f);
     for (unsigned int j = 0; sorted_intervals[j] != NULL; j++) {
         free(sorted_intervals[j]);
     }

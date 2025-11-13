@@ -309,12 +309,18 @@ void printref(Ref r, FILE *f) {
     case RCon:
         printcon(r.val.con, f);
         break;
-    case RReg:
-        fprintf(f, "%s", rname[r.val.reg]);
-        break;
-    case RStack_slot:
-        fprintf(f, "Stack_Slot_%u", r.val.stack_slot);
-        break;
+    case RLoc: {
+        switch (r.val.loc.type) {
+            case REGISTER:
+                fprintf(f, "%s", rname[r.val.loc.as.reg]);
+                break;
+            case STACK_SLOT:
+                fprintf(f, "Stack_Slot_%u", r.val.loc.as.stack_slot);
+                break;
+            default:
+                panic();
+        }
+    } break;
     default:
         panic();
     }
@@ -399,7 +405,7 @@ Blk *newBlock(uint32_t nlocals) {
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
-    b->is_visited = 0;
+    b->is_visited = FALSE;
     b->live_in = NULL;
     b->jmp.type = NONE_JUMP_TYPE;
     b->jmp.arg = UNDEF_TMP_REF;
@@ -417,7 +423,8 @@ Blk *newBlock(uint32_t nlocals) {
             b->incomplete_phis[i] = NULL;
         }
     }
-    b->is_sealed = 0;
+    b->is_sealed = FALSE;
+    b->is_loop_header = FALSE;
     return b;
 }
 
@@ -480,7 +487,6 @@ void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2)
 }
 
 void jmp(Fn *f, Blk *b, Blk *b0) {
-    assert(b0->is_sealed == 0);
     b->jmp.type = JMP_JUMP_TYPE;
     b->s1 = b0;
     if (f->start != b) {

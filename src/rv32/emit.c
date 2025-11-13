@@ -2,7 +2,21 @@
 #include <assert.h>
 
 const char * const omap[] = {
-	[ADD_INSTR] =  "add %=, %0, %1",
+	[ADD_INSTR] = "add %=, %0, %1",
+    [SUB_INSTR] = "sub %=, %0, %1",
+};
+
+const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG] = {
+    T0, T1, T2, T3, T4,
+    S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, 
+};
+
+const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG] = {
+    A0, A1, A2, A3, A4, A5, A6, A7,
+};
+
+const rv32_reg rv32_reserved_reg[RV32_RESERVED_NUM_REG] = {
+    T5, T6
 };
 
 char *rname[] = {
@@ -40,6 +54,34 @@ char *rname[] = {
     [T6] = "t6",
 };
 
+
+static void fix_arg(Ref *arg, rv32_reg r, FILE *f) {
+    switch (arg->type) {
+        case RCon: {
+            assert(arg->val.con->type == CInt64);
+            fprintf(f, "\tli %s, %"PRIi64"\n",
+                rname[r], arg->val.con->val.i);
+                arg->type = RLoc;
+                arg->val.loc.type = REGISTER;
+                arg->val.loc.as.reg = r;
+        } break;
+        case RLoc: {
+            switch (arg->val.loc.type) {
+                case REGISTER:
+                    break;
+                case STACK_SLOT: {
+                    //TODO: not implemented
+                    assert(0);
+                } break;
+                default:
+                    assert(0);
+            }
+        } break;
+        default:
+            assert(0);
+    }
+}
+
 static void emitf(const char *s, Ins *i, FILE *f) {
     fputc('\t', f);
     for (;;) {
@@ -55,30 +97,24 @@ static void emitf(const char *s, Ins *i, FILE *f) {
         switch ((c = *s++)) {
             case '=': {
                 Ref r = i->to;
-                assert(r.type == RReg);
-                fputs(rname[r.val.reg], f);
+                assert(r.type == RLoc);
+                assert(r.val.loc.type == REGISTER);
+                fputs(rname[r.val.loc.as.reg], f);
             } break;
             case '0': {
                 Ref r = i->arg[0];
-                assert(r.type == RReg);
-                fputs(rname[r.val.reg], f);
+                assert(r.type == RLoc);
+                assert(r.val.loc.type == REGISTER);
+                fputs(rname[r.val.loc.as.reg], f);
              } break;
             case '1': {
                 Ref r = i->arg[1];
-                switch (r.type) {
-                    case RReg: {
-                        fputs(rname[r.val.reg], f);
-                    } break;
-                    case RCon: {
-                        Con *c = r.val.con;
-                        fprintf(f, "%"PRIi64, c->val.i);
-                    } break;
-                    default: 
-                        panic();
-                }
+                assert(r.type == RLoc);
+                assert(r.val.loc.type == REGISTER);
+                fputs(rname[r.val.loc.as.reg], f);
              } break;
             default:
-                panic();
+                assert(0);
         }
     }
 }
@@ -89,40 +125,45 @@ static int slot_fp_offset(unsigned int stack_slot) {
 }
 
 static void emit_copy(Ins *i, FILE *f) {
-    assert(i->op == COPY_INSTR);
-    switch (i->to.type) {
-        case RReg: {
+    assert(i->to.type == RLoc);
+    switch (i->to.val.loc.type) {
+        case REGISTER: {
             switch (i->arg[0].type) {
-                case RReg: {
-                    if (i->to.val.reg != i->arg[0].val.reg) {
-                        fprintf(f, "\tmv %s, %s\n",
-                            rname[i->to.val.reg], rname[i->arg[0].val.reg]);
+
+                case RLoc: {
+                    location *loc = &i->arg[0].val.loc;
+                    switch (loc->type) {
+                        case REGISTER: {
+                            if (i->to.val.loc.as.reg != loc->as.reg) {
+                                fprintf(f, "\tmv %s, %s\n",
+                                rname[i->to.val.loc.as.reg],
+                                rname[loc->as.reg]);
+                            }
+                        } break;
+                        case STACK_SLOT: {
+                            // TODO: not implemented
+                            assert(0);
+                        } break;
+
+                        default:
+                            assert(0);
                     }
                 } break;
-                case RStack_slot: {
-                    int offset = slot_fp_offset(i->arg[0].val.stack_slot);
-                    fprintf(f, "\tlw %s, %d(fp)\n",
-                            rname[i->to.val.reg], offset);
-                } break;
+
                 case RCon: {
                     assert(i->arg[0].val.con->type == CInt64);
                     fprintf(f, "\tli %s, %"PRIi64"\n",
-                            rname[i->to.val.reg], i->arg[0].val.con->val.i);
+                            rname[i->to.val.loc.as.reg],
+                            i->arg[0].val.con->val.i);
                 } break;
 
                 default:
-                    panic();
+                    assert(0);
             }
         } break;
-        case RStack_slot: {
-            switch (i->arg[0].type) {
-                case RReg: {
-                    int offset = slot_fp_offset(i->to.val.stack_slot);
-                    fprintf(f, "\tsw %s, %d(fp)\n", rname[i->to.val.reg], offset);
-                } break;
-                default:
-                    panic();
-            }
+        case STACK_SLOT: {
+            //TODO: not implemented
+            assert(0);
         } break;
         default:
             panic();
@@ -140,6 +181,8 @@ static void emitins(Ins *i, FILE *f) {
             fprintf(f, "\tcall %s\n", i->arg[0].val.con->val.addr);
         } break;
         default: {
+            fix_arg(&i->arg[0], rv32_reserved_reg[0], f);
+            fix_arg(&i->arg[1], rv32_reserved_reg[1], f);
             emitf(omap[i->op], i, f);
         } break;
     }
@@ -171,23 +214,13 @@ static void emitins(Ins *i, FILE *f) {
 
 */
 
-static void emitfnlnk(char *name, Lnk *l, FILE *f) {
-	fputs(".text\n", f);
-	if (l->is_exported) {
-		fprintf(f, ".globl %s\n", name);
-    }
-	fprintf(f, "%s:\n", name);
-}
-
 void rv32_emitfn(Fn *fn, FILE *f) {
-    /*
-    static int id0;
-    int lbl, neg, off, frame, *pr, r;
-    Blk *b, *s;
-    Ins *i;
-    */
 
-    emitfnlnk(fn->name, &fn->lnk, f);
+    fputs(".text\n", f);
+    if (fn->lnk.is_exported) {
+        fprintf(f, ".globl %s\n", fn->name);
+    }
+    fprintf(f, "%s:\n", fn->name);
 
     fprintf(f, "\tsw fp, -8(sp)\n");
     fprintf(f, "\tsw ra, -4(sp)\n");
@@ -206,12 +239,12 @@ void rv32_emitfn(Fn *fn, FILE *f) {
             frame);
     }
 
+    boolean lbl = FALSE;
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        if (listLength(b->preds) > 1) {
-            //fprintf(f, ".L%d:\n", id0+b->id);
+        if (lbl || listLength(b->preds) > 1) {
             fprintf(f, ".L%s:\n", b->name);
         }
         listNode *ins_node;
@@ -220,6 +253,7 @@ void rv32_emitfn(Fn *fn, FILE *f) {
             Ins *i = listNodeValue(ins_node);
             emitins(i, f);
         }
+        lbl = TRUE;
         switch (b->jmp.type) {
             case HALT_JUMP_TYPE: {
                 fprintf(f, "\tebreak\n");
@@ -232,18 +266,41 @@ void rv32_emitfn(Fn *fn, FILE *f) {
                 );
             } break;
             case JMP_JUMP_TYPE: {
-                listNode *blk_node_next = listNextNode(ins_node);
-                Blk *blk_next = blk_node_next == NULL ?
-                    NULL : listNodeValue(blk_node_next);
+                listNode *blk_node_next = listNextNode(blk_node);
+                Blk *blk_next = NULL;
+                if (blk_node_next != NULL) {
+                    blk_next = listNodeValue(blk_node_next);
+                }
                 if (b->s1 != blk_next) {
                     fprintf(f, "\tj .L%s\n", b->s1->name);
-                } 
+                } else {
+                    lbl = FALSE;
+                }
+            } break;
+            case JNZ_JUMP_TYPE: {
+                fix_arg(&b->jmp.arg, rv32_reserved_reg[0], f);
+                listNode *blk_node_next = listNextNode(blk_node);
+                Blk *blk_next = NULL;
+                if (blk_node_next != NULL) {
+                    blk_next = listNodeValue(blk_node_next);
+                }
+                if (blk_next == b->s1) {
+                    fprintf(f,
+                        "\tbeqz %s, .L%s\n",
+                        rname[b->jmp.arg.val.loc.as.reg],
+                        b->s2->name);
+                } else if (blk_next == b->s2) {
+                    fprintf(f,
+                        "\tbnez %s, .L%s\n",
+                        rname[b->jmp.arg.val.loc.as.reg],
+                        b->s1->name);
+                } else panic();
             } break;
             default:
                 panic();
         }
     }
+
     fprintf(f, ".type %s, @function\n", fn->name);
-    fprintf(f, ".size %s, .-%s\n", fn->name, fn->name);
-    fprintf(f, "/* end function _f0 */\n\n");
+    fprintf(f, ".size %s, .-%s\n\n", fn->name, fn->name);
 }

@@ -62,11 +62,14 @@ typedef enum {
     RV32_NUM_REG
 } rv32_reg;
 
-#define RV32_GP_NUM_REG 18
+#define RV32_GP_NUM_REG 16
 extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
 
 #define RV32_ARG_NUM_REG 8
 extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
+
+#define RV32_RESERVED_NUM_REG 2
+extern const rv32_reg rv32_reserved_reg[RV32_RESERVED_NUM_REG];
 
 typedef uint8_t boolean;
 #define TRUE 1
@@ -77,20 +80,25 @@ typedef struct rv32_reg_pool {
     unsigned int size;
 } rv32_reg_pool;
 
-typedef struct live_interval {
-    unsigned int start;
-    unsigned int end;
-    enum {
-        ASSIGN_TYPE_NONE,
-        ASSIGN_TYPE_GP_REGISTER,
-        ASSIGN_TYPE_ARG_REGISTER,
-        ASSIGN_TYPE_STACK_SLOT,
-    } assign_type;
+typedef enum location_type {
+    LOCATION_NONE,
+    REGISTER,
+    STACK_SLOT,
+} location_type;
+
+typedef struct location {
+    location_type type;
     union {
         rv32_reg reg;
         unsigned int stack_slot;
-    } assign;
-    unsigned char can_spill;
+    } as;
+} location;
+
+typedef struct live_interval {
+    unsigned int start;
+    unsigned int end;
+    location assign;
+    rv32_reg register_hint;
 } live_interval;
 
 struct Tmp {
@@ -120,15 +128,13 @@ typedef struct Con {
 typedef enum Ref_type {
     RTmp,
     RCon,
-    RReg,
-    RStack_slot,
+    RLoc
 } Ref_type;
 
 typedef union Ref_ptr {
     listNode *tmp_node;
     Con *con;
-    rv32_reg reg;
-    unsigned int stack_slot;
+    location loc;
 } Ref_ptr;
 
 typedef struct Ref {
@@ -164,10 +170,11 @@ struct Blk {
     char name[NString];
     Ref *locals;
     listNode **incomplete_phis;
-    unsigned char is_sealed;
+    boolean is_sealed;
 /* list of variable that are live at the beginning of the block */
     list *live_in;
-    unsigned char is_visited;
+    boolean is_visited;
+    boolean is_loop_header;
     unsigned int id;
 };
 

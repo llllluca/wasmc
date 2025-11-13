@@ -9,14 +9,6 @@
 #endif
 
 extern void rv32_emitfn(Fn *fn, FILE *f);
-const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG] = {
-    T0, T1, T2, T3, T4, T5, T6,
-    S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, 
-};
-
-const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG] = {
-    A0, A1, A2, A3, A4, A5, A6, A7,
-};
 
 static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode);
 
@@ -655,6 +647,7 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     listPush(ctx->value_stack, &bottom_block_stack);
 
     Blk *loop_header = newBlock(ctx->locals_len);
+    loop_header->is_loop_header = TRUE;
     jmp(ctx->qbe_func, ctx->curr_block, loop_header);
     ctx->curr_block = loop_header;
 
@@ -1052,11 +1045,13 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     //typecheck(qbe_func);
     //optimizeFunc(qbe_func);
     rv32_reg_pool gpr;
+    memset(gpr.pool, FALSE, RV32_NUM_REG);
     gpr.size = RV32_GP_NUM_REG;
     for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
         gpr.pool[rv32_gp_reg[i]] = 1;
     }
     rv32_reg_pool argr;
+    memset(argr.pool, FALSE, RV32_NUM_REG);
     argr.size = RV32_ARG_NUM_REG;
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         argr.pool[rv32_arg_reg[i]] = 1;
@@ -1071,20 +1066,19 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         Tmp *t = listNodeValue(tmp_node);
         printf("%s: i->start = %d, i->end = %d ",
                t->name, t->i->start, t->i->end);
-        switch(t->i->assign_type) {
-            case ASSIGN_TYPE_ARG_REGISTER:
-                printf("ARG REGISTER %d\n", t->i->assign.reg);
+        switch(t->i->assign.type) {
+            case ARG_REGISTER:
+                printf("ARG REGISTER %d\n", t->i->assign.as.reg);
                 break;
-            case ASSIGN_TYPE_GP_REGISTER:
-                printf("GP REGISTER %d\n", t->i->assign.reg);
+            case GP_REGISTER:
+                printf("GP REGISTER %d\n", t->i->assign.as.reg);
                 break;
-            case ASSIGN_TYPE_STACK_SLOT:
-                printf("STACK SLOT %d\n", t->i->assign.stack_slot);
+            case STACK_SLOT:
+                printf("STACK SLOT %d\n", t->i->assign.as.stack_slot);
                 break;
             default:
                 panic();
         }
-
     }
     */
     freeFunc(qbe_func);
