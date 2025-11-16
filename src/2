@@ -26,12 +26,12 @@ const omap_elem omap[] = {
     //TODO: why lw works for unsigned and signed load?
     [LOADUW_INSTR] = { "lw %=, 0(%0)",    1 },
     [LOADSW_INSTR] = { "lw %=, 0(%0)",    1 },
-    [LOADUB_INSTR] = { "lw %=, 0(%0)",    1 },
-    [STOREB_INSTR] = { "sb %0, 0(%1)",    1 },
 
     [NEG_INSTR]    = { NULL, 0 },
     [SHR_INSTR]    = { NULL, 0 },
     [CNEW_INSTR]   = { NULL, 0 },
+    [LOADUB_INSTR] = { NULL, 0 },
+    [STOREB_INSTR] = { NULL, 0 },
     [CALL_INSTR]   = { NULL, 0 },
     [PAR_INSTR]    = { NULL, 0 },
     [ARG_INSTR]    = { NULL, 0 },
@@ -237,8 +237,8 @@ static void emitins(Ins *i, FILE *f) {
         case POP_INSTR: {
             assert(i->to.type == RLoc);
             assert(i->to.val.loc.type == REGISTER);
-            fprintf(f, "\tlw %s, 0(sp)\n", rname[i->to.val.loc.as.reg]);
             fprintf(f, "\tadd sp, sp, 4\n");
+            fprintf(f, "\tlw %s, 0(sp)\n", rname[i->to.val.loc.as.reg]);
         } break;
         default: {
             for (unsigned int j = 0; j < omap[i->op].argn; j++) {
@@ -321,17 +321,8 @@ void rv32_emitfn(Fn *fn, FILE *f) {
                 fprintf(f, "\tebreak\n");
             } break;
             case RET0_JUMP_TYPE: {
-                if (frame <= 2048) {
-                    fprintf(f,
-                        "\tadd sp, sp, %d\n",
-                        frame);
-                } else {
-                    fprintf(f,
-                        "\tli t6, %d\n"
-                        "\tadd sp, sp, t6\n",
-                        frame);
-                }
                 fprintf(f,
+                    "\tadd sp, fp, 8\n"
                     "\tlw ra, 4(fp)\n"
                     "\tlw fp, 0(fp)\n"
                     "\tret\n"

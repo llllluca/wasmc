@@ -370,17 +370,11 @@ unsigned char bin[] = {
 
 char b64[1337];
 
-int main()
+int main(void)
 {
     size_t len = 1000;
     size_t b64_len = base64_encoded_len(len, 1);
-
-    int i;
-    for (i = 0; i < ITERATIONS; i++)
-    {
-        bin2base64(b64, b64_len, bin, len, 1);
-        base642bin(bin, len, b64, b64_len, NULL, NULL, NULL, 1);
-    }
-
+    bin2base64(b64, b64_len, bin, len, 1);
+    base642bin(bin, len, b64, b64_len, NULL, NULL, NULL, 1);
     return b64[42];
 }

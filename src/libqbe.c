@@ -28,135 +28,28 @@ const char *optab[] = {
     [SHR_INSTR] = "shr",
     [SHL_INSTR] = "shl",
     /* Comparisons */
-    [CEQW_INSTR] = "ceqw",
+    [EQZW_INSTR] = "eqz",
     [CNEW_INSTR] = "cnew",
-    [CSGEW_INSTR] = "csgew",
-    [CSGTW_INSTR] = "csgtw",
-    [CSLEW_INSTR] = "cslew",
     [CSLTW_INSTR] = "csltw",
-    [CUGEW_INSTR] = "cugew",
-    [CUGTW_INSTR] = "cugtw",
-    [CULEW_INSTR] = "culew",
     [CULTW_INSTR] = "cultw",
-    [CEQL_INSTR] = "ceql",
-    [CNEL_INSTR] = "cnel",
-    [CSGEL_INSTR] = "csgel",
-    [CSGTL_INSTR] = "csgtl",
-    [CSLEL_INSTR] = "cslel",
-    [CSLTL_INSTR] = "csltl",
-    [CUGEL_INSTR] = "cugel",
-    [CUGTL_INSTR] = "cugtl",
-    [CULEL_INSTR] = "culel",
-    [CULTL_INSTR] = "cultl",
-    [CEQS_INSTR] = "ceqs",
-    [CGES_INSTR] = "cges",
-    [CGTS_INSTR] = "cgts",
-    [CLES_INSTR] = "cles",
-    [CLTS_INSTR] = "clts",
-    [CNES_INSTR] = "cnes",
-    [COS_INSTR] = "cos",
-    [CUOS_INSTR] = "cuos",
-    [CEQD_INSTR] = "ceqd",
-    [CGED_INSTR] = "cged",
-    [CGTD_INSTR] = "cgtd",
-    [CLED_INSTR] = "cled",
-    [CLTD_INSTR] = "cltd",
-    [CNED_INSTR] = "cned",
-    [COD_INSTR] = "cod",
-    [CUOD_INSTR] = "cuod",
     /* Memory */
     [STOREB_INSTR] = "storeb",
-    [STOREH_INSTR] = "storeh",
     [STOREW_INSTR] = "storew",
-    [STOREL_INSTR] = "storel",
-    [STORES_INSTR] = "stores",
-    [STORED_INSTR] = "stored",
-    [LOADSB_INSTR] = "loadsb",
     [LOADUB_INSTR] = "loadub",
-    [LOADSH_INSTR] = "loadsh",
-    [LOADUH_INSTR] = "loaduh",
     [LOADSW_INSTR] = "loadsw",
     [LOADUW_INSTR] = "loaduw",
-    [LOAD_INSTR] = "load",
-    [ALLOC4_INSTR] = "alloc4",
-    [ALLOC8_INSTR] = "alloc8",
-    [ALLOC16_INSTR] = "alloc16",
     /* Conversions */
-    [EXTSB_INSTR] = "extsb",
-    [EXTUB_INSTR] = "extub",
-    [EXTSH_INSTR] = "extsh",
-    [EXTUH_INSTR] = "extuh",
     [EXTSW_INSTR] = "extsw",
-    [EXTUW_INSTR] = "extuw",
-    [EXTS_INSTR] = "exts",
-    [TRUNCD_INSTR] = "truncd",
-    [STOSI_INSTR] = "stosi",
-    [STOUI_INSTR] = "stoui",
-    [DTOSI_INSTR] = "dtosi",
-    [DTOUI_INSTR] = "dtoui",
-    [SWTOF_INSTR] = "swtof",
-    [UWTOF_INSTR] = "uwtof",
-    [SLTOF_INSTR] = "sltof",
-    [ULTOF_INSTR] = "ultof",
     /* Cast and Copy */
-    [CAST_INSTR] = "cast",
     [COPY_INSTR] = "copy",
-    /* Variadic */
-    [VAARG_INSTR] = "vaarg",
-    [VASTART_INSTR] = "vastart",
     /* Call */
     [CALL_INSTR] = "call",
     /* Other */
-    [DBGLOC_INSTR] = "dbgloc",
-    [NOP_INSTR] = "nop",
-    [ADDR_INSTR] = "addr",
-    [BLIT0_INSTR] = "blit0",
-    [BLIT1_INSTR] = "blit1",
-    [SWAP_INSTR] = "swap",
-    [SIGN_INSTR] = "sign",
-    [SALLOC_INSTR] = "salloc",
-    [XIDIV_INSTR] = "xidiv",
-    [XDIV_INSTR] = "xdiv",
-    [XCMP_INSTR] = "xcmp",
-    [XTEST_INSTR] = "xtest",
-    [ACMP_INSTR] = "acmp",
-    [ACMN_INSTR] = "acmn",
-    [AFCMP_INSTR] = "afcmp",
-    [REQZ_INSTR] = "reqz",
-    [RNEZ_INSTR] = "rnez",
     [PAR_INSTR] = "par",
-    [PARSB_INSTR] = "parsb",
-    [PARUB_INSTR] = "parub",
-    [PARSH_INSTR] = "parsh",
-    [PARUH_INSTR] = "paruh",
-    [PARC_INSTR] = "parc",
-    [PARE_INSTR] = "pare",
     [ARG_INSTR] = "arg",
-    [ARGSB_INSTR] = "argsb",
-    [ARGUB_INSTR] = "argub",
-    [ARGSH_INSTR] = "argsh",
-    [ARGUH_INSTR] = "arguh",
-    [ARGC_INSTR] = "argc",
-    [ARGE_INSTR] = "arge",
-    [ARGV_INSTR] = "argv",
-    [FLAGIEQ_INSTR] = "flagieq",
-    [FLAGINE_INSTR] = "flagine",
-    [FLAGISGE_INSTR] = "flagisge",
-    [FLAGISGT_INSTR] = "flagisgt",
-    [FLAGISLE_INSTR] = "flagisle",
-    [FLAGISLT_INSTR] = "flagislt",
-    [FLAGIUGE_INSTR] = "flagiuge",
-    [FLAGIUGT_INSTR] = "flagiugt",
-    [FLAGIULE_INSTR] = "flagiule",
-    [FLAGIULT_INSTR] = "flagiult",
-    [FLAGFEQ_INSTR] = "flagfeq",
-    [FLAGFGE_INSTR] = "flagfge",
-    [FLAGFGT_INSTR] = "flagfgt",
-    [FLAGFLE_INSTR] = "flagfle",
-    [FLAGFLT_INSTR] = "flagflt",
-    [FLAGFNE_INSTR] = "flagfne",
-    [FLAGFO_INSTR] = "flagfo",
-    [FLAGFUO_INSTR] = "flagfuo",
+
+    [PUSH_INSTR] = "push",
+    [POP_INSTR] = "pop",
 };
 
 void printfn(Fn *fn, FILE *f) {
@@ -230,13 +123,13 @@ void printfn(Fn *fn, FILE *f) {
                 fprintf(f, "hlt\n");
                 break;
             case JMP_JUMP_TYPE:
-                fprintf(f, "jmp @%s\n", b->s1->name);
+                fprintf(f, "jmp @%s\n", b->succ[0]->name);
                 break;
             case JNZ_JUMP_TYPE:
                 fprintf(f, "jnz ");
                 printref(b->jmp.arg, f);
                 fprintf(f, ", ");
-                fprintf(f, "@%s, @%s\n", b->s1->name, b->s2->name);
+                fprintf(f, "@%s, @%s\n", b->succ[0]->name, b->succ[1]->name);
                 break;
             default:
                 panic();
@@ -405,12 +298,15 @@ Blk *newBlock(uint32_t nlocals) {
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
-    b->is_visited = FALSE;
+    b->visited = FALSE;
+    b->active = FALSE;
+    b->is_loop_header = FALSE;
+    b->loop_end_blk_list = NULL;
     b->live_in = NULL;
     b->jmp.type = NONE_JUMP_TYPE;
     b->jmp.arg = UNDEF_TMP_REF;
-    b->s1 = NULL;
-    b->s2 = NULL;
+    b->succ[0] = NULL;
+    b->succ[1] = NULL;
     b->preds = listCreate();
     snprintf(b->name, NString, "l%d", id++);
     b->locals = NULL;
@@ -424,7 +320,6 @@ Blk *newBlock(uint32_t nlocals) {
         }
     }
     b->is_sealed = FALSE;
-    b->is_loop_header = FALSE;
     return b;
 }
 
@@ -462,6 +357,14 @@ Ref newFuncParam(Fn *f, simple_type type) {
 
 
 Ref newIntConst(Fn *f, int64_t val) {
+    listNode *con_node;
+    listNode *con_iter = listFirst(f->con_list);
+    while ((con_node = listNext(&con_iter)) != NULL) {
+        Con *c = listNodeValue(con_node);
+        if (c->type == CInt64 && c->val.i == val) {
+            return (Ref) { .type = RCon, .val.con = c };
+        }
+    }
     Con *con = xmalloc(sizeof(struct Con));
     con->type = CInt64;
     con->val.i = val;
@@ -488,7 +391,7 @@ void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2)
 
 void jmp(Fn *f, Blk *b, Blk *b0) {
     b->jmp.type = JMP_JUMP_TYPE;
-    b->s1 = b0;
+    b->succ[0] = b0;
     if (f->start != b) {
         listAddNodeTail(f->blk_list, b);
     }
@@ -503,8 +406,8 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
     assert(b1->is_sealed == 0);
     b->jmp.type = JNZ_JUMP_TYPE;
     b->jmp.arg = r;
-    b->s1 = b0;
-    b->s2 = b1;
+    b->succ[0] = b0;
+    b->succ[1] = b1;
     listNode *b_node = listFirst(f->blk_list);
     if (f->start != b) {
         listAddNodeTail(f->blk_list, b);

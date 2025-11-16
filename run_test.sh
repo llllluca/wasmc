@@ -1,19 +1,19 @@
 #!/bin/sh
 
-#ANSI escape codes for color
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-#ANSI escape codes for reset color
-NO_COLOR='\033[0m'
+#ansi escape codes for color
+red='\033[0;31m'
+green='\033[0;32m'
+#ansi escape codes for reset color
+no_color='\033[0m'
 
-TARGET="rv32"
+target="rv32"
 
 log_error() {
-    echo "${RED}[ERROR]: ${1}${NO_COLOR}" >&2
+    echo "${red}[error]: ${1}${no_color}" >&2
 }
 
 log_info() {
-    echo "${GREEN}[INFO]: ${1}${NO_COLOR}"
+    echo "${green}[info]: ${1}${no_color}"
 }
 
 run_test() {
@@ -24,9 +24,9 @@ run_test() {
         log_error "run_test() failed, missing 'name' or 'expected_result'."
         exit 1
     fi
-    log_info "Starting test '${name}'."
+    log_info "starting test '${name}'."
 
-    case "$TARGET" in
+    case "$target" in
     "rv32")
         wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
             ./wasmc "test/${name}.wasm" > "test/${name}.s" && \
@@ -59,11 +59,10 @@ run_test() {
 
     rm -f \
         "test/${name}.wasm" \
-        "test/${name}.ssa" \
         "test/${name}.s" \
         "test/a.out"
 
-    log_info "Test '${name}' successfully completed."
+    log_info "test '${name}' successfully completed."
 }
 
 run_test "add" 101

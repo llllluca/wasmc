@@ -164,8 +164,7 @@ struct Blk {
     list *phi_list;
     list *ins_list;
     Jump jmp;
-    Blk *s1;
-    Blk *s2;
+    Blk *succ[2];
     list *preds;
     char name[NString];
     Ref *locals;
@@ -173,9 +172,12 @@ struct Blk {
     boolean is_sealed;
 /* list of variable that are live at the beginning of the block */
     list *live_in;
-    boolean is_visited;
-    boolean is_loop_header;
     unsigned int id;
+
+    boolean visited;
+    boolean active;
+    boolean is_loop_header;
+    list* loop_end_blk_list;
 };
 
 typedef struct Phi_arg {
@@ -227,154 +229,37 @@ typedef struct Data {
 } Data;
 
 typedef enum instr_opcode {
-    /* Arithmetic and Bits */
-    ADD_INSTR = 1,
-    SUB_INSTR = 2,
-    NEG_INSTR = 3,
-    DIV_INSTR = 4,
-    REM_INSTR = 5,
-    UDIV_INSTR = 6,
-    UREM_INSTR = 7,
-    MUL_INSTR = 8,
-    AND_INSTR = 9,
-    OR_INSTR = 10,
-    XOR_INSTR = 11,
-    SAR_INSTR = 12,
-    SHR_INSTR = 13,
-    SHL_INSTR = 14,
-    /* Comparisons */
-    CEQW_INSTR = 15,
-    CNEW_INSTR = 16,
-    CSGEW_INSTR = 17,
-    CSGTW_INSTR = 18,
-    CSLEW_INSTR = 19,
-    CSLTW_INSTR = 20,
-    CUGEW_INSTR = 21,
-    CUGTW_INSTR = 22,
-    CULEW_INSTR = 23,
-    CULTW_INSTR = 24,
-    CEQL_INSTR = 25,
-    CNEL_INSTR = 26,
-    CSGEL_INSTR = 27,
-    CSGTL_INSTR = 28,
-    CSLEL_INSTR = 29,
-    CSLTL_INSTR = 30,
-    CUGEL_INSTR = 31,
-    CUGTL_INSTR = 32,
-    CULEL_INSTR = 33,
-    CULTL_INSTR = 34,
-    CEQS_INSTR = 35,
-    CGES_INSTR = 36,
-    CGTS_INSTR = 37,
-    CLES_INSTR = 38,
-    CLTS_INSTR = 39,
-    CNES_INSTR = 40,
-    COS_INSTR = 41,
-    CUOS_INSTR = 42,
-    CEQD_INSTR = 43,
-    CGED_INSTR = 44,
-    CGTD_INSTR = 45,
-    CLED_INSTR = 46,
-    CLTD_INSTR = 47,
-    CNED_INSTR = 48,
-    COD_INSTR = 49,
-    CUOD_INSTR = 50,
-    /* Memory */
-    STOREB_INSTR = 51,
-    STOREH_INSTR = 52,
-    STOREW_INSTR = 53,
-    STOREL_INSTR = 54,
-    STORES_INSTR = 55,
-    STORED_INSTR = 56,
-    LOADSB_INSTR = 57,
-    LOADUB_INSTR = 58,
-    LOADSH_INSTR = 59,
-    LOADUH_INSTR = 60,
-    LOADSW_INSTR = 61,
-    LOADUW_INSTR = 62,
-    LOAD_INSTR = 63,
-    ALLOC4_INSTR = 81,
-    ALLOC8_INSTR = 82,
-    ALLOC16_INSTR = 83,
-    /* Conversions */
-    EXTSB_INSTR = 64,
-    EXTUB_INSTR = 65,
-    EXTSH_INSTR = 66,
-    EXTUH_INSTR = 67,
-    EXTSW_INSTR = 68,
-    EXTUW_INSTR = 69,
-    EXTS_INSTR = 70,
-    TRUNCD_INSTR = 71,
-    STOSI_INSTR = 72,
-    STOUI_INSTR = 73,
-    DTOSI_INSTR = 74,
-    DTOUI_INSTR = 75,
-    SWTOF_INSTR = 76,
-    UWTOF_INSTR = 77,
-    SLTOF_INSTR = 78,
-    ULTOF_INSTR = 79,
-    /* Cast and Copy */
-    CAST_INSTR = 80,
-    COPY_INSTR = 86,
-    /* Variadic */
-    VAARG_INSTR = 84,
-    VASTART_INSTR = 85,
-    /* Call */
-    CALL_INSTR = 119,
-    /* Other */
-    DBGLOC_INSTR = 87,
-    NOP_INSTR = 88,
-    ADDR_INSTR = 89,
-    BLIT0_INSTR = 90,
-    BLIT1_INSTR = 91,
-    SWAP_INSTR = 92,
-    SIGN_INSTR = 93,
-    SALLOC_INSTR = 94,
-    XIDIV_INSTR = 95,
-    XDIV_INSTR = 96,
-    XCMP_INSTR = 97,
-    XTEST_INSTR = 98,
-    ACMP_INSTR = 99,
-    ACMN_INSTR = 100,
-    AFCMP_INSTR = 101,
-    REQZ_INSTR = 102,
-    RNEZ_INSTR = 103,
-    PAR_INSTR = 104,
-    PARSB_INSTR = 105,
-    PARUB_INSTR = 106,
-    PARSH_INSTR = 107,
-    PARUH_INSTR = 108,
-    PARC_INSTR = 109,
-    PARE_INSTR = 110,
-    ARG_INSTR = 111,
-    ARGSB_INSTR = 112,
-    ARGUB_INSTR = 113,
-    ARGSH_INSTR = 114,
-    ARGUH_INSTR = 115,
-    ARGC_INSTR = 116,
-    ARGE_INSTR = 117,
-    ARGV_INSTR = 118,
-    FLAGIEQ_INSTR = 120,
-    FLAGINE_INSTR = 121,
-    FLAGISGE_INSTR = 122,
-    FLAGISGT_INSTR = 123,
-    FLAGISLE_INSTR = 124,
-    FLAGISLT_INSTR = 125,
-    FLAGIUGE_INSTR = 126,
-    FLAGIUGT_INSTR = 127,
-    FLAGIULE_INSTR = 128,
-    FLAGIULT_INSTR = 129,
-    FLAGFEQ_INSTR = 130,
-    FLAGFGE_INSTR = 131,
-    FLAGFGT_INSTR = 132,
-    FLAGFLE_INSTR = 133,
-    FLAGFLT_INSTR = 134,
-    FLAGFNE_INSTR = 135,
-    FLAGFO_INSTR = 136,
-    FLAGFUO_INSTR = 137,
+    ADD_INSTR,
+    SUB_INSTR,
+    NEG_INSTR,
+    DIV_INSTR,
+    REM_INSTR,
+    UDIV_INSTR,
+    UREM_INSTR,
+    MUL_INSTR,
+    AND_INSTR,
+    OR_INSTR,
+    XOR_INSTR,
+    SAR_INSTR,
+    SHR_INSTR,
+    SHL_INSTR,
+    EQZW_INSTR,
+    CNEW_INSTR,
+    CSLTW_INSTR,
+    CULTW_INSTR,
+    STOREW_INSTR,
+    LOADSW_INSTR,
+    LOADUW_INSTR,
+    LOADUB_INSTR,
+    STOREB_INSTR,
+    CALL_INSTR,
+    PAR_INSTR,
+    ARG_INSTR,
+    EXTSW_INSTR,
+    COPY_INSTR,
 
-    MV_INSTR,
-    LI_INSTR,
+    PUSH_INSTR,
+    POP_INSTR,
 } instr_opcode;
 
 struct Ins {
@@ -448,8 +333,8 @@ struct Use {
     instr((b), (temp), (kind), SHL_INSTR, (ref1), (ref2))
 
 /* Comparisons */
-#define CEQW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CEQW_INSTR, (ref1), (ref2))
+#define EQZW(b, temp, ref1) \
+    instr((b), (temp), WORD_TYPE, EQZW_INSTR, (ref1), UNDEF_TMP_REF)
 
 #define CNEW(b, temp, ref1, ref2) \
     instr((b), (temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
@@ -460,36 +345,12 @@ struct Use {
 #define CULTW(b, temp, ref1, ref2) \
     instr((b), (temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
 
-#define CSGTW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CSGTW_INSTR, (ref1), (ref2))
-
-#define CUGTW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CUGTW_INSTR, (ref1), (ref2))
-
-#define CSLEW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CSLEW_INSTR, (ref1), (ref2))
-
-#define CULEW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CULEW_INSTR, (ref1), (ref2))
-
-#define CSGEW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CSGEW_INSTR, (ref1), (ref2))
-
-#define CUGEW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CUGEW_INSTR, (ref1), (ref2))
-
 /* Memory */
-#define ALLOC4(b, temp, kind, ref) \
-    instr((b), (temp), (kind), ALLOC4_INSTR, (ref), UNDEF_TMP_REF)
-
 #define STOREW(b, fromRef, toRef) \
     instr((b), UNDEF_TMP_REF, WORD_TYPE, STOREW_INSTR, (fromRef), (toRef))
 
 #define LOADW(b, temp, addr) \
     instr((b), (temp), WORD_TYPE, LOADSW_INSTR, (addr), UNDEF_TMP_REF)
-
-#define LOADUB(b, temp, addr) \
-    instr((b), (temp), WORD_TYPE, LOADUB_INSTR, (addr), UNDEF_TMP_REF)
 
 /* Conversions */
 #define EXTSW(b, temp, ref) \

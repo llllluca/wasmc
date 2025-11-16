@@ -157,7 +157,7 @@ void listDelNodeHead(list *list) {
 }
 
 void listDelNodeTail(list *list) {
-    listNode *head = listUnlinkNodeHead(list);
+    listNode *head = listUnlinkNodeTail(list);
     if (list->free) list->free(head->value);
     free(head);
 }

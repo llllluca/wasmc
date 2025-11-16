@@ -9,3 +9,4 @@ src/*.o
 src/rv32/*.o
 src/qbe-1.2/*.o
 esp32c3-idf/build/
+esp32c3-idf/managed_components/

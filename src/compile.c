@@ -8,7 +8,10 @@
 #include "esp_system.h"
 #endif
 
+extern void loop_detection(Fn *f);
+
 extern void rv32_emitfn(Fn *fn, FILE *f);
+extern void rv32_emitdata(Data *d, FILE *f);
 
 static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode);
 
@@ -170,8 +173,7 @@ static void compile_instr_i32_tests(func_compile_ctx_t *ctx, unsigned char opcod
     listPush(ctx->value_stack, entry);
     switch (opcode) {
         case I32_EQZ_OPCODE: {
-            Ref zero = newIntConst(ctx->qbe_func, 0);
-            CEQW(ctx->curr_block, result, test_cond->as.value.qbe_temp, zero);
+            EQZW(ctx->curr_block, result, test_cond->as.value.qbe_temp);
         } break;
         default:
             panic();
@@ -192,11 +194,13 @@ static void compile_instr_i32_comparisons(func_compile_ctx_t *ctx, unsigned char
     value_t *fst = &fst_operand->as.value;
     value_t *snd = &snd_operand->as.value;
     switch (opcode) {
-        case I32_EQ_OPCODE:
-            CEQW(b, result, fst->qbe_temp, snd->qbe_temp);
-            break;
+        case I32_EQ_OPCODE: {
+            Ref tmp = newTemp(ctx->qbe_func);
+            XOR(b, tmp, WORD_TYPE, fst->qbe_temp, snd->qbe_temp);
+            EQZW(b, result, tmp);
+        } break;
         case I32_NE_OPCODE:
-            CNEW(b, result, fst->qbe_temp, snd->qbe_temp);
+            XOR(b, result, WORD_TYPE, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_LT_S_OPCODE:
             CSLTW(b, result, fst->qbe_temp, snd->qbe_temp);
@@ -205,23 +209,35 @@ static void compile_instr_i32_comparisons(func_compile_ctx_t *ctx, unsigned char
             CULTW(b, result, fst->qbe_temp, snd->qbe_temp);
             break;
         case I32_GT_S_OPCODE:
-            CSGTW(b, result, fst->qbe_temp, snd->qbe_temp);
+            CSLTW(b, result,  snd->qbe_temp, fst->qbe_temp);
             break;
         case I32_GT_U_OPCODE:
-            CUGTW(b, result, fst->qbe_temp, snd->qbe_temp);
+            CULTW(b, result, snd->qbe_temp, fst->qbe_temp);
             break;
-        case I32_LE_S_OPCODE:
-            CSLEW(b, result, fst->qbe_temp, snd->qbe_temp);
-            break;
-        case I32_LE_U_OPCODE:
-            CULEW(b, result, fst->qbe_temp, snd->qbe_temp);
-            break;
-        case I32_GE_S_OPCODE:
-            CSGEW(b, result, fst->qbe_temp, snd->qbe_temp);
-            break;
-        case I32_GE_U_OPCODE:
-            CUGEW(b, result, fst->qbe_temp, snd->qbe_temp);
-            break;
+        case I32_LE_S_OPCODE: {
+            Ref tmp = newTemp(ctx->qbe_func);
+            CSLTW(b, tmp, snd->qbe_temp, fst->qbe_temp);
+            Ref one = newIntConst(ctx->qbe_func, 1);
+            XOR(b, result, WORD_TYPE, tmp, one);
+        } break;
+        case I32_LE_U_OPCODE: {
+            Ref tmp = newTemp(ctx->qbe_func);
+            CULTW(b, tmp, snd->qbe_temp, fst->qbe_temp);
+            Ref one = newIntConst(ctx->qbe_func, 1);
+            XOR(b, result, WORD_TYPE, tmp, one);
+        } break;
+        case I32_GE_S_OPCODE: {
+            Ref tmp = newTemp(ctx->qbe_func);
+            CSLTW(b, tmp, fst->qbe_temp, snd->qbe_temp);
+            Ref one = newIntConst(ctx->qbe_func, 1);
+            XOR(b, result, WORD_TYPE, tmp, one);
+        } break;
+        case I32_GE_U_OPCODE: {
+            Ref tmp = newTemp(ctx->qbe_func);
+            CULTW(b, tmp, fst->qbe_temp, snd->qbe_temp);
+            Ref one = newIntConst(ctx->qbe_func, 1);
+            XOR(b, result, WORD_TYPE, tmp, one);
+        } break;
         default:
             panic();
     }
@@ -325,9 +341,7 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
         panic();
     }
 
-    Ref temp = newTemp(ctx->qbe_func);
     Ref called_addr = newAddrConst(ctx->qbe_func, ctx->m->func_decls[funcidx].name);
-
     uint32_t num_params = called_type->num_params;
     if (num_params > 0) {
             listNode *node;
@@ -344,6 +358,7 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
             }
     }
     if (called_type->return_type != NO_VALTYPE) {
+        Ref temp = newTemp(ctx->qbe_func);
         simple_type ret_type = cast(called_type->return_type);
         FUNC_CALL(ctx->curr_block, temp, ret_type, called_addr);
         stack_entry_t *entry = alloc_stack_entry_value(temp, called_type->return_type);
@@ -647,7 +662,6 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     listPush(ctx->value_stack, &bottom_block_stack);
 
     Blk *loop_header = newBlock(ctx->locals_len);
-    loop_header->is_loop_header = TRUE;
     jmp(ctx->qbe_func, ctx->curr_block, loop_header);
     ctx->curr_block = loop_header;
 
@@ -1042,8 +1056,6 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     listRelease(ctx.value_stack);
     listRelease(ctx.label_stack);
 
-    //typecheck(qbe_func);
-    //optimizeFunc(qbe_func);
     rv32_reg_pool gpr;
     memset(gpr.pool, FALSE, RV32_NUM_REG);
     gpr.size = RV32_GP_NUM_REG;
@@ -1056,8 +1068,8 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         argr.pool[rv32_arg_reg[i]] = 1;
     }
-    linear_scan(qbe_func, &gpr, &argr);
     //printfn(qbe_func, stdout);
+    linear_scan(qbe_func, &gpr, &argr);
     rv32_emitfn(qbe_func, stdout);
     /*
     listNode *tmp_node;
@@ -1099,7 +1111,8 @@ static void compile_globals(wasm_module *m) {
             default:
                 panic();
         }
-        printdata(d, stdout);
+        //printdata(d, stdout);
+        rv32_emitdata(d, stdout);
         freeData(d);
     }
 }
@@ -1138,7 +1151,8 @@ static void compile_data_segments(wasm_module *m) {
         mem_offset = dseg->offset + dseg->init_len;
     }
     dataAppendZerosField(d, mem_size - mem_offset);
-    printdata(d, stdout);
+    rv32_emitdata(d, stdout);
+    //printdata(d, stdout);
     freeData(d);
 }
 

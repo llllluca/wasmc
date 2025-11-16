@@ -2,6 +2,36 @@
 #include <assert.h>
 #include <string.h>
 
+static void loop_detection(Fn *f) {
+    list *stack = listCreate();
+    f->start->visited = TRUE;
+    listAddNodeTail(stack, f->start);
+
+    while (listLength(stack) != 0) {
+        Blk *b = listNodeValue(listLast(stack));
+        if (!b->active) {
+            b->active = TRUE;
+            for (unsigned int i = 0; i < 2; i++) {
+                Blk *s = b->succ[i];
+                if (s == NULL) continue;
+                if (!s->visited) {
+                    s->visited = TRUE;
+                    listAddNodeTail(stack, s);
+                } else if (s->active) {
+                    s->is_loop_header = TRUE;
+                    if (s->loop_end_blk_list == NULL) {
+                        s->loop_end_blk_list = listCreate();
+                    }
+                    listAddNodeTail(s->loop_end_blk_list, b);
+                }
+            }
+        } else {
+            listDelNodeTail(stack);
+            b->active = FALSE;
+        }
+    }
+}
+
 static Ref *input_of(Phi *phi, Blk *b) {
     listNode *phi_arg_node;
     listNode *phi_arg_iter = listFirst(phi->phi_arg_list);
@@ -272,18 +302,18 @@ static void insert_move_sequence(Fn* f,
 
     if (listLength(move_seq) == 0) return;
     if (listLength(succ->preds) > 1 &&
-        pred->s1 != NULL && pred->s2 != NULL) {
+        pred->succ[0] != NULL && pred->succ[1] != NULL) {
         /* succ has pred and other predecessors and
          * pred has succ and another one successor */
         Blk *b = newBlock(0);
-        if (pred->s1 == succ) {
-            pred->s1 = b;
+        if (pred->succ[0] == succ) {
+            pred->succ[0] = b;
         } else {
-            pred->s2 = b;
+            pred->succ[1] = b;
         }
         insert_move_at_start(b, move_seq);
         jmp(f, b, succ);
-    } else if (pred->s1 != NULL && pred->s2 != NULL) {
+    } else if (pred->succ[0] != NULL && pred->succ[1] != NULL) {
         /* succ has only pred as predecessor and
          * pred has succ and another one successor */
         insert_move_at_start(succ, move_seq);
@@ -310,8 +340,8 @@ static void resolve_ssa(Fn *f) {
     listNode *blk_iter = listFirst(f->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *pred = listNodeValue(blk_node);
-        resolve_edge(f, pred, pred->s1);
-        resolve_edge(f, pred, pred->s2);
+        resolve_edge(f, pred, pred->succ[0]);
+        resolve_edge(f, pred, pred->succ[1]);
     }
 
     blk_iter = listFirst(f->blk_list);
@@ -357,9 +387,10 @@ static void fill_register_hints(Fn *f) {
     while ((ins_node = listNext(&ins_iter)) != NULL) {
         Ins *ins = listNodeValue(ins_node);
         if (ins->op != PAR_INSTR) break;
-        assert(ins->to.type == RTmp);
-        Tmp *t = listNodeValue(ins->to.val.tmp_node);
-        t->i->register_hint = rv32_arg_reg[arg_index++];
+        if (ins->to.type == RTmp && ins->to.val.tmp_node != NULL) {
+            Tmp *t = listNodeValue(ins->to.val.tmp_node);
+            t->i->register_hint = rv32_arg_reg[arg_index++];
+        }
     }
     arg_index = 0;
 
@@ -372,26 +403,32 @@ static void fill_register_hints(Fn *f) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            if (ins->op == ARG_INSTR && ins->arg[0].type == RTmp) {
-                Tmp *t = listNodeValue(ins->arg[0].val.tmp_node);
-                t->i->register_hint = rv32_arg_reg[arg_index++];
+            if (ins->op == ARG_INSTR) {
+                if (ins->arg[0].type == RTmp && ins->arg[0].val.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(ins->arg[0].val.tmp_node);
+                    t->i->register_hint = rv32_arg_reg[arg_index++];
+                }
             }
             else if (ins->op == CALL_INSTR) {
                 arg_index = 0;
-                assert(ins->to.type == RTmp);
-                Tmp *t = listNodeValue(ins->to.val.tmp_node);
-                t->i->register_hint = A0;
+                if (ins->to.type == RTmp && ins->to.val.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(ins->to.val.tmp_node);
+                    t->i->register_hint = A0;
+                }
             }
         }
 
-        if (b->jmp.type == RET1_JUMP_TYPE && b->jmp.arg.type == RTmp) {
-            Tmp *t = listNodeValue(b->jmp.arg.val.tmp_node);
-            t->i->register_hint = A0;
+        if (b->jmp.type == RET1_JUMP_TYPE) {
+            if (b->jmp.arg.type == RTmp && b->jmp.arg.val.tmp_node != NULL) {
+                Tmp *t = listNodeValue(b->jmp.arg.val.tmp_node);
+                t->i->register_hint = A0;
+            }
         }
     }
 }
 
 static live_interval **build_intervals(Fn *f) {
+    loop_detection(f);
     number_instrs(f);
     unsigned int n = listLength(f->tmp_list) + 1;
     live_interval **sorted_intervals = xcalloc(n, sizeof(struct live_interval *));
@@ -414,8 +451,8 @@ static live_interval **build_intervals(Fn *f) {
          * set. For each Phi, the input operand corresponting to b is added
          * to the live set. */
         list *live = listCreate();
-        live_init(live, b, b->s1);
-        live_init(live, b, b->s2);
+        live_init(live, b, b->succ[0]);
+        live_init(live, b, b->succ[1]);
 
         /* For each live Tmp, an initial lifetime interval covering the entire
          * block is added to te live set. This live range might me shortened
@@ -496,9 +533,25 @@ static live_interval **build_intervals(Fn *f) {
             sorted_intervals[--n] = t->i;
         }
 
-        //TODO: loop are not implemented
-        assert(b->is_loop_header == FALSE);
+        if (b->is_loop_header) {
+            unsigned int max = 0;
+            assert(listLength(b->loop_end_blk_list) > 0);
+            listNode *blk_node;
+            listNode *blk_iter = listFirst(b->loop_end_blk_list);
+            while ((blk_node = listNext(&blk_iter)) != NULL) {
+                Blk *b = listNodeValue(blk_node);
+                if (b->jmp.id > max) {
+                    max = b->jmp.id;
+                }
+            }
 
+            listNode *live_node;
+            listNode *live_iter = listFirst(live);
+            while ((live_node = listNext(&live_iter)) != NULL) {
+                Tmp *t = listNodeValue(live_node);
+                add_range(t, b->id, max);
+            }
+        }
         b->live_in = live;
     }
 
@@ -512,7 +565,16 @@ static live_interval **build_intervals(Fn *f) {
 
     /* Assert that the length of sorted_intervals is equal to the length of
      * tmp list of the function */
-    assert(n == 0);
+    if (n != 0) {
+        listNode *tmp_node;
+        listNode *tmp_iter = listFirst(f->tmp_list);
+        while ((tmp_node = listNext(&tmp_iter)) != NULL) {
+            Tmp *t = listNodeValue(tmp_node);
+            assert(t->i != NULL);
+        }
+        assert(0);
+    }
+
     fill_register_hints(f);
     return sorted_intervals;
 }
@@ -730,8 +792,34 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                         listAddNodeTail(survivors, li);
                     }
                 }
-                //TODO: not implemented
-                assert(listLength(survivors) == 0);
+
+                listNode *survivor_node;
+                listNode *survivor_iter = listFirst(survivors);
+                while ((survivor_node = listNext(&survivor_iter)) != NULL) {
+                    live_interval *li = listNodeValue(survivor_node);
+                    Ins *push_ins = xmalloc(sizeof(struct Ins));
+                    push_ins->op = PUSH_INSTR;
+                    push_ins->type = WORD_TYPE;
+                    push_ins->to = UNDEF_TMP_REF;
+                    push_ins->arg[0].type = RLoc;
+                    push_ins->arg[0].val.loc = li->assign;
+                    push_ins->arg[1] = UNDEF_TMP_REF;
+                    listInsertNodeBefore(b->ins_list, call_node, push_ins);
+                }
+
+                survivor_iter = listFirst(survivors);
+                while ((survivor_node = listNext(&survivor_iter)) != NULL) {
+                    live_interval *li = listNodeValue(survivor_node);
+                    Ins *pop_ins = xmalloc(sizeof(struct Ins));
+                    pop_ins->op = POP_INSTR;
+                    pop_ins->type = WORD_TYPE;
+                    pop_ins->to.type = RLoc;
+                    pop_ins->to.val.loc = li->assign;
+                    pop_ins->arg[0] = UNDEF_TMP_REF;
+                    pop_ins->arg[1] = UNDEF_TMP_REF;
+                    listInsertNodeAfter(b->ins_list, call_node, pop_ins);
+                }
+
                 listRelease(survivors);
 
                 list *move_seq = sequentialize(par_move);
@@ -745,18 +833,18 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                 listRelease(move_seq);
                 listEmpty(par_move);
 
-                assert(func_call->to.type == RTmp);
-                Tmp *t = listNodeValue(func_call->to.val.tmp_node);
-
-                if (!LOCATION_EQ(a0, t->i->assign)) {
-                    move_from src = {
-                        .type = LOCATION,
-                        .as.loc = a0
-                    };
-                    Ins *ins = alloc_copy(&t->i->assign, &src);
-                    listInsertNodeAfter(b->ins_list, call_node, ins);
+                if (func_call->to.type == RTmp && func_call->to.val.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(func_call->to.val.tmp_node);
+                    if (!LOCATION_EQ(a0, t->i->assign)) {
+                        move_from src = {
+                            .type = LOCATION,
+                            .as.loc = a0
+                        };
+                        Ins *ins = alloc_copy(&t->i->assign, &src);
+                        listInsertNodeAfter(b->ins_list, call_node, ins);
+                    }
+                    func_call->to = UNDEF_TMP_REF;
                 }
-                func_call->to = UNDEF_TMP_REF;
             }
         }
 
@@ -832,6 +920,14 @@ void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr) {
     handle_register_constraints(f, sorted_intervals);
     resolve_ssa(f);
     to_lower_level_ir(f);
+    for (unsigned int i = 0; sorted_intervals[i] != NULL; i++) {
+        for (unsigned int j = 0; j < i; j++) {
+            if (sorted_intervals[i] == sorted_intervals[j]) {
+                assert(0);
+            }
+        }
+    }
+
     for (unsigned int j = 0; sorted_intervals[j] != NULL; j++) {
         free(sorted_intervals[j]);
     }
