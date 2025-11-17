@@ -399,6 +399,10 @@ static void compile_instr_br(func_compile_ctx_t *ctx) {
         listPush(label->results, p);
         free(result);
     }
+    Blk *b = label->qbe_block;
+    if (b->is_loop_header) {
+        listAddNodeTail(b->loop_end_blk_list, ctx->curr_block);
+    }
     jmp(ctx->qbe_func, ctx->curr_block, label->qbe_block);
     ctx->skip_flag = BR_FLAG;
     ctx->curr_block = NULL;
@@ -427,6 +431,10 @@ static void compile_instr_br_if(func_compile_ctx_t *ctx) {
         listPush(label->results, p);
     }
 
+    Blk *b = label->qbe_block;
+    if (b->is_loop_header) {
+        listAddNodeTail(b->loop_end_blk_list, ctx->curr_block);
+    }
     Blk *continue_blk = newBlock(ctx->locals_len);
     jnz(ctx->qbe_func, ctx->curr_block, ifcond_qbe_temp, label->qbe_block, continue_blk);
     seal_block(ctx, continue_blk);
@@ -662,6 +670,9 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     listPush(ctx->value_stack, &bottom_block_stack);
 
     Blk *loop_header = newBlock(ctx->locals_len);
+    loop_header->is_loop_header = TRUE;
+    loop_header->loop_end_blk_list = listCreate();
+
     jmp(ctx->qbe_func, ctx->curr_block, loop_header);
     ctx->curr_block = loop_header;
 
@@ -697,6 +708,12 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     assert(label == listPop(ctx->label_stack));
     free_label(label);
     seal_block(ctx, loop_header);
+
+    if (listLength(loop_header->loop_end_blk_list) == 0) {
+        listRelease(loop_header->loop_end_blk_list);
+        loop_header->loop_end_blk_list = NULL;
+        loop_header->is_loop_header = FALSE;
+    }
 }
 
 static void compile_control_instr(func_compile_ctx_t *ctx, unsigned char opcode) {

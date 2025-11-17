@@ -2,36 +2,6 @@
 #include <assert.h>
 #include <string.h>
 
-static void loop_detection(Fn *f) {
-    list *stack = listCreate();
-    f->start->visited = TRUE;
-    listAddNodeTail(stack, f->start);
-
-    while (listLength(stack) != 0) {
-        Blk *b = listNodeValue(listLast(stack));
-        if (!b->active) {
-            b->active = TRUE;
-            for (unsigned int i = 0; i < 2; i++) {
-                Blk *s = b->succ[i];
-                if (s == NULL) continue;
-                if (!s->visited) {
-                    s->visited = TRUE;
-                    listAddNodeTail(stack, s);
-                } else if (s->active) {
-                    s->is_loop_header = TRUE;
-                    if (s->loop_end_blk_list == NULL) {
-                        s->loop_end_blk_list = listCreate();
-                    }
-                    listAddNodeTail(s->loop_end_blk_list, b);
-                }
-            }
-        } else {
-            listDelNodeTail(stack);
-            b->active = FALSE;
-        }
-    }
-}
-
 static Ref *input_of(Phi *phi, Blk *b) {
     listNode *phi_arg_node;
     listNode *phi_arg_iter = listFirst(phi->phi_arg_list);
@@ -428,7 +398,6 @@ static void fill_register_hints(Fn *f) {
 }
 
 static live_interval **build_intervals(Fn *f) {
-    loop_detection(f);
     number_instrs(f);
     unsigned int n = listLength(f->tmp_list) + 1;
     live_interval **sorted_intervals = xcalloc(n, sizeof(struct live_interval *));
@@ -544,6 +513,8 @@ static live_interval **build_intervals(Fn *f) {
                     max = b->jmp.id;
                 }
             }
+            listRelease(b->loop_end_blk_list);
+            b->loop_end_blk_list = NULL;
 
             listNode *live_node;
             listNode *live_iter = listFirst(live);

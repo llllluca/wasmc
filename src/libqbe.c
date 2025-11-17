@@ -298,8 +298,6 @@ Blk *newBlock(uint32_t nlocals) {
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
-    b->visited = FALSE;
-    b->active = FALSE;
     b->is_loop_header = FALSE;
     b->loop_end_blk_list = NULL;
     b->live_in = NULL;

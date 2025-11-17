@@ -174,8 +174,6 @@ struct Blk {
     list *live_in;
     unsigned int id;
 
-    boolean visited;
-    boolean active;
     boolean is_loop_header;
     list* loop_end_blk_list;
 };
