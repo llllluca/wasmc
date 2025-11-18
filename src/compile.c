@@ -924,7 +924,7 @@ static void compile_memory_instr(func_compile_ctx_t *ctx, unsigned char opcode) 
 
     switch (opcode) {
         case I32_LOAD_OPCODE:
-            compile_i32_load_instr_generic(ctx, LOADUW_INSTR);
+            compile_i32_load_instr_generic(ctx, LOADW_INSTR);
             break;
         case I32_STORE_OPCODE:
             compile_i32_store_instr_generic(ctx, STOREW_INSTR);
@@ -1085,8 +1085,8 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         argr.pool[rv32_arg_reg[i]] = 1;
     }
-    //printfn(qbe_func, stdout);
     linear_scan(qbe_func, &gpr, &argr);
+    //printfn(qbe_func, stdout);
     rv32_emitfn(qbe_func, stdout);
     /*
     listNode *tmp_node;

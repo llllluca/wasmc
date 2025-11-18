@@ -36,8 +36,7 @@ const char *optab[] = {
     [STOREB_INSTR] = "storeb",
     [STOREW_INSTR] = "storew",
     [LOADUB_INSTR] = "loadub",
-    [LOADSW_INSTR] = "loadsw",
-    [LOADUW_INSTR] = "loaduw",
+    [LOADW_INSTR] = "loadw",
     /* Conversions */
     [EXTSW_INSTR] = "extsw",
     /* Cast and Copy */
@@ -179,7 +178,7 @@ void printdata(Data *d, FILE *f) {
 static void printcon(Con *c, FILE *f) {
     switch (c->type) {
         case CInt64:
-            fprintf(f, "%"PRIi64, c->val.i);
+            fprintf(f, "%"PRId64, c->val.i);
             break;
         case CAddr:
             fprintf(f, "$%s", c->val.addr);

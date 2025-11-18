@@ -246,8 +246,7 @@ typedef enum instr_opcode {
     CSLTW_INSTR,
     CULTW_INSTR,
     STOREW_INSTR,
-    LOADSW_INSTR,
-    LOADUW_INSTR,
+    LOADW_INSTR,
     LOADUB_INSTR,
     STOREB_INSTR,
     CALL_INSTR,
@@ -348,7 +347,7 @@ struct Use {
     instr((b), UNDEF_TMP_REF, WORD_TYPE, STOREW_INSTR, (fromRef), (toRef))
 
 #define LOADW(b, temp, addr) \
-    instr((b), (temp), WORD_TYPE, LOADSW_INSTR, (addr), UNDEF_TMP_REF)
+    instr((b), (temp), WORD_TYPE, LOADW_INSTR, (addr), UNDEF_TMP_REF)
 
 /* Conversions */
 #define EXTSW(b, temp, ref) \
