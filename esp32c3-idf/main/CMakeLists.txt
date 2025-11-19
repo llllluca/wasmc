@@ -8,4 +8,6 @@ idf_component_register(SRCS
     "${WASMC_SRC_DIR}/utils.c"
     "${WASMC_SRC_DIR}/ssa.c"
     "${WASMC_SRC_DIR}/libqbe.c"
+    "${WASMC_SRC_DIR}/rega.c"
+    "${WASMC_SRC_DIR}/rv32/emit.c"
     INCLUDE_DIRS "${WASMC_SRC_DIR}")
