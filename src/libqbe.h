@@ -408,7 +408,6 @@ int req(Ref a, Ref b);
 void freeFunc(Fn *f);
 void freeTemp(Tmp *tmp);
 void freePhi(Phi *phi);
-void freePhi_arg(Phi_arg *arg);
 void freeBlock(Blk *b);
 void freeData(Data *d);
 void freeDataField(DataField *df);

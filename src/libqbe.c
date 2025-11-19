@@ -65,28 +65,30 @@ void printfn(Fn *fn, FILE *f) {
         Blk *b = listNodeValue(blk_node);
         fprintf(f, "@%s\n", b->name);
         listNode *phi_node;
-        listNode *phi_iter = listFirst(b->phi_list);
-        while ((phi_node = listNext(&phi_iter)) != NULL) {
-            Phi *p = listNodeValue(phi_node);
-            fprintf(f, "\t");
-            printref(p->to, f);
-            fprintf(f, " =%c phi ", ktoc[p->type]);
-            n = 0;
-            listNode *phi_arg_node;
-            listNode *phi_arg_iter = listFirst(p->phi_arg_list);
-            while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
-                Phi_arg *pa = listNodeValue(phi_arg_node);
-                fprintf(f, "@%s ", pa->b->name);
-                printref(pa->r, f);
-                if (n == listLength(p->phi_arg_list)-1) {
-                    fprintf(f, "\n");
-                    break;
-                } else {
-                    fprintf(f, ", ");
+        if (b->phi_list != NULL) {
+            listNode *phi_iter = listFirst(b->phi_list);
+            while ((phi_node = listNext(&phi_iter)) != NULL) {
+                Phi *p = listNodeValue(phi_node);
+                fprintf(f, "\t");
+                printref(p->to, f);
+                fprintf(f, " =%c phi ", ktoc[p->type]);
+                n = 0;
+                listNode *phi_arg_node;
+                listNode *phi_arg_iter = listFirst(p->phi_arg_list);
+                while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
+                    Phi_arg *pa = listNodeValue(phi_arg_node);
+                    fprintf(f, "@%s ", pa->b->name);
+                    printref(pa->r, f);
+                    if (n == listLength(p->phi_arg_list)-1) {
+                        fprintf(f, "\n");
+                        break;
+                    } else {
+                        fprintf(f, ", ");
+                    }
+                    n++;
                 }
-                n++;
+                fprintf(f, "\n");
             }
-            fprintf(f, "\n");
         }
         listNode *ins_node;
         listNode *ins_iter = listFirst(b->ins_list);
@@ -479,7 +481,7 @@ listNode *newPhi(Blk *b, Ref temp, simple_type type) {
     phi->type = type;
     phi->block = b;
     phi->phi_arg_list = listCreate();
-    listSetFreeMethod(phi->phi_arg_list, (void (*)(void *))freePhi_arg);
+    listSetFreeMethod(phi->phi_arg_list, free);
     listAddNodeTail(b->phi_list, phi);
     return listLast(b->phi_list);
 }
@@ -493,10 +495,6 @@ void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg) {
     if (arg.type == RTmp && arg.val.tmp_node != NULL) {
         addUsage(listNodeValue(arg.val.tmp_node), UPhi, (Use_ptr) { .phi = phi_node });
     }
-}
-
-void freePhi_arg(Phi_arg *arg) {
-    free(arg);
 }
 
 void freePhi(Phi *phi) {

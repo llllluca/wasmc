@@ -114,30 +114,30 @@ static list *phi_parallel_moves(Blk *pred, Blk *succ) {
         Phi *phi = listNodeValue(phi_node);
         Ref *r = input_of(phi, pred);
         if (r == NULL) continue;
-        move *move = xmalloc(sizeof(struct move));
+        move_from from;
         switch (r->type) {
             case RTmp: {
                 Tmp *t = listNodeValue(r->val.tmp_node);
-                move->from.type = LOCATION;
-                move->from.as.loc = t->i->assign;
+                from.type = LOCATION;
+                from.as.loc = t->i->assign;
             } break;
             case RCon: {
-                move->from.type = CONST;
-                move->from.as.con = r->val.con;
+                from.type = CONST;
+                from.as.con = r->val.con;
             } break;
             default:
-                free(move);
                 panic();
         }
 
         if (phi->to.type != RTmp) {
-            free(move);
             panic();
         }
         Tmp *t = listNodeValue(phi->to.val.tmp_node);
-        move->to = t->i->assign;
-
-        if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+        location to =  t->i->assign;
+        if (!MOVE_FROM_EQ_TO(from, to)) {
+            move *move = xmalloc(sizeof(struct move));
+            move->from = from;
+            move->to = to;
             listAddNodeTail(mappings, move);
         }
     }
@@ -314,10 +314,12 @@ static void resolve_ssa(Fn *f) {
         resolve_edge(f, pred, pred->succ[1]);
     }
 
+    /* free phi_list for all block b */
     blk_iter = listFirst(f->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        listEmpty(b->phi_list);
+        listRelease(b->phi_list);
+        b->phi_list = NULL;
     }
 }
 
@@ -681,6 +683,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         .as.reg = A0,
     };
     list *par_move = listCreate();
+    listSetFreeMethod(par_move, free);
     unsigned int arg_index = 0;
 
     listNode *ins_node;
@@ -690,14 +693,19 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         if (ins->op != PAR_INSTR) break;
         assert(ins->to.type == RTmp);
         Tmp *t = listNodeValue(ins->to.val.tmp_node);
-        move *move = xmalloc(sizeof(struct move));
-        move->from.type = LOCATION;
-
-        move->from.as.loc.type = REGISTER;
         if (arg_index >= RV32_ARG_NUM_REG) panic();
-        move->from.as.loc.as.reg = rv32_arg_reg[arg_index++];
-        move->to = t->i->assign;
-        if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+        move_from from = {
+            .type = LOCATION,
+            .as.loc = {
+                .type = REGISTER,
+                .as.reg = rv32_arg_reg[arg_index++],
+            },
+        };
+        location to = t->i->assign;
+        if (!MOVE_FROM_EQ_TO(from, to)) {
+            move *move = xmalloc(sizeof(struct move));
+            move->from = from;
+            move->to = to;
             listAddNodeTail(par_move, move);
         }
         listDelNode(f->start->ins_list, ins_node);
@@ -725,27 +733,31 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
             Ins *ins = listNodeValue(ins_node);
             if (ins->op == ARG_INSTR) {
                 Ref *r = &ins->arg[0];
-                move *move = xmalloc(sizeof(struct move));
+                move_from from;
                 switch (r->type) {
                     case RTmp: {
                         Tmp *t = listNodeValue(r->val.tmp_node);
-                        move->from.type = LOCATION;
-                        move->from.as.loc = t->i->assign;
+                        from.type = LOCATION;
+                        from.as.loc = t->i->assign;
                     } break;
                     case RCon: {
-                        move->from.type = CONST;
-                        move->from.as.con = r->val.con;
+                        from.type = CONST;
+                        from.as.con = r->val.con;
                     } break;
                     default:
                         assert(0);
                 }
                 listDelNode(b->ins_list, ins_node);
 
-                move->to.type = REGISTER;
+                location to;
+                to.type = REGISTER;
                 if (arg_index >= RV32_ARG_NUM_REG) panic();
-                move->to.as.reg = rv32_arg_reg[arg_index++];
+                to.as.reg = rv32_arg_reg[arg_index++];
 
-                if (!MOVE_FROM_EQ_TO(move->from, move->to)) {
+                if (!MOVE_FROM_EQ_TO(from, to)) {
+                    move *move = xmalloc(sizeof(struct move));
+                    move->from = from;
+                    move->to = to;
                     listAddNodeTail(par_move, move);
                 }
             }

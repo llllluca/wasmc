@@ -1073,6 +1073,18 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     listRelease(ctx.value_stack);
     listRelease(ctx.label_stack);
 
+
+    /* free locals and incomplete_phis for all block b */
+    listNode *blk_node;
+    listNode *blk_iter = listFirst(qbe_func->blk_list);
+    while ((blk_node = listNext(&blk_iter)) != NULL) {
+        Blk *b = listNodeValue(blk_node);
+        free(b->locals);
+        b->locals = NULL;
+        free(b->incomplete_phis);
+        b->incomplete_phis = NULL;
+    }
+
     rv32_reg_pool gpr;
     memset(gpr.pool, FALSE, RV32_NUM_REG);
     gpr.size = RV32_GP_NUM_REG;
@@ -1085,6 +1097,7 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         argr.pool[rv32_arg_reg[i]] = 1;
     }
+
     linear_scan(qbe_func, &gpr, &argr);
     //printfn(qbe_func, stdout);
     rv32_emitfn(qbe_func, stdout);
