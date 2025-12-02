@@ -4,15 +4,6 @@
 #include <string.h>
 #include <assert.h>
 
-#if ESP_HEAP_DEBUG != 0
-#include "esp_system.h"
-#endif
-
-extern void loop_detection(Fn *f);
-
-extern void rv32_emitfn(Fn *fn, FILE *f);
-extern void rv32_emitdata(Data *d, FILE *f);
-
 static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode);
 
 stack_entry_t bottom_block_stack = {
@@ -336,7 +327,7 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
     if (funcidx >= ctx->m->num_funcs) {
         panic();
     }
-    wasm_func_type_t *called_type = ctx->m->func_decls[funcidx].type;
+    wasm_func_type *called_type = ctx->m->func_decls[funcidx].type;
     if (listLength(ctx->value_stack) < called_type->num_params) {
         panic();
     }
@@ -456,7 +447,7 @@ static void compile_instr_return(func_compile_ctx_t *ctx) {
     ctx->curr_block = NULL;
 }
 
-static boolean compile_then_branch(func_compile_ctx_t *ctx) {
+static bool compile_then_branch(func_compile_ctx_t *ctx) {
    
     read_struct_t *r = &ctx->wasm_func_body->expr;
     listPush(ctx->value_stack, &bottom_block_stack);
@@ -491,7 +482,7 @@ static boolean compile_then_branch(func_compile_ctx_t *ctx) {
     return opcode == ELSE_OPCODE;
 }
 
-static boolean compile_else_branch(func_compile_ctx_t *ctx) {
+static bool compile_else_branch(func_compile_ctx_t *ctx) {
 
     read_struct_t *r = &ctx->wasm_func_body->expr;
     listPush(ctx->value_stack, &bottom_block_stack);
@@ -552,10 +543,10 @@ static void compile_instr_if(func_compile_ctx_t *ctx) {
     seal_block(ctx, otherwise);
 
     ctx->curr_block = then;
-    boolean matching_else = compile_then_branch(ctx);
+    bool matching_else = compile_then_branch(ctx);
 
     ctx->curr_block = otherwise;
-    boolean br = FALSE;
+    bool br = false;
     if (matching_else) {
         br = compile_else_branch(ctx);
     }
@@ -670,7 +661,7 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     listPush(ctx->value_stack, &bottom_block_stack);
 
     Blk *loop_header = newBlock(ctx->locals_len);
-    loop_header->is_loop_header = TRUE;
+    loop_header->is_loop_header = true;
     loop_header->loop_end_blk_list = listCreate();
 
     jmp(ctx->qbe_func, ctx->curr_block, loop_header);
@@ -712,7 +703,7 @@ static void compile_instr_loop(func_compile_ctx_t *ctx) {
     if (listLength(loop_header->loop_end_blk_list) == 0) {
         listRelease(loop_header->loop_end_blk_list);
         loop_header->loop_end_blk_list = NULL;
-        loop_header->is_loop_header = FALSE;
+        loop_header->is_loop_header = false;
     }
 }
 
@@ -1008,8 +999,8 @@ static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
     }
 }
 
-static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *body) {
-    wasm_func_type_t *t = decl->type;
+static Fn *compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *body) {
+    wasm_func_type *t = decl->type;
 
     uint32_t locals_len = t->num_params + body->num_locals;
 
@@ -1085,47 +1076,11 @@ static void compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *b
         b->incomplete_phis = NULL;
     }
 
-    rv32_reg_pool gpr;
-    memset(gpr.pool, FALSE, RV32_NUM_REG);
-    gpr.size = RV32_GP_NUM_REG;
-    for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
-        gpr.pool[rv32_gp_reg[i]] = 1;
-    }
-    rv32_reg_pool argr;
-    memset(argr.pool, FALSE, RV32_NUM_REG);
-    argr.size = RV32_ARG_NUM_REG;
-    for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
-        argr.pool[rv32_arg_reg[i]] = 1;
-    }
-
-    linear_scan(qbe_func, &gpr, &argr);
-    //printfn(qbe_func, stdout);
-    rv32_emitfn(qbe_func, stdout);
-    /*
-    listNode *tmp_node;
-    listNode *tmp_iter = listFirst(qbe_func->tmp_list);
-    while ((tmp_node = listNext(&tmp_iter)) != NULL) {
-        Tmp *t = listNodeValue(tmp_node);
-        printf("%s: i->start = %d, i->end = %d ",
-               t->name, t->i->start, t->i->end);
-        switch(t->i->assign.type) {
-            case ARG_REGISTER:
-                printf("ARG REGISTER %d\n", t->i->assign.as.reg);
-                break;
-            case GP_REGISTER:
-                printf("GP REGISTER %d\n", t->i->assign.as.reg);
-                break;
-            case STACK_SLOT:
-                printf("STACK SLOT %d\n", t->i->assign.as.stack_slot);
-                break;
-            default:
-                panic();
-        }
-    }
-    */
-    freeFunc(qbe_func);
+    return qbe_func;
 }
 
+
+/*
 static void compile_globals(wasm_module *m) {
     for (uint32_t i = 0; i < m->globals_len; i++) {
         global_t *g = &m->globals[i];
@@ -1185,26 +1140,64 @@ static void compile_data_segments(wasm_module *m) {
     //printdata(d, stdout);
     freeData(d);
 }
+*/
 
-void compile(wasm_module *m) {
+static void register_allocation(Fn *fn) {
+    rv32_reg_pool gpr;
+    memset(gpr.pool, false, RV32_NUM_REG);
+    gpr.size = RV32_GP_NUM_REG;
+    for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
+        gpr.pool[rv32_gp_reg[i]] = true;
+    }
+    rv32_reg_pool argr;
+    memset(argr.pool, false, RV32_NUM_REG);
+    argr.size = RV32_ARG_NUM_REG;
+        for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
+        argr.pool[rv32_arg_reg[i]] = true;
+    }
+    linear_scan(fn, &gpr, &argr);
+}
+
+extern Target rv32;
+
+void compile(wasm_module *m, uint8_t **out_buf, uint32_t *out_len) {
+    /*
     compile_data_segments(m);
-    /* m->data_segments is not used anymore. */
+    // m->data_segments is not used anymore.
     if (m->data_segments != NULL) {
         free(m->data_segments);
         m->data_segments = NULL;
         m->num_data_segments = 0;
     }
     compile_globals(m);
+    */
+
+
+    AOTModule aot_mod;
+    rv32.init(&aot_mod);
+    rv32.emit_target_info(&aot_mod);
+    AOTInitData init_data = {
+        .types = m->types,
+        .types_len = m->types_len,
+        .func_count = m->num_funcs,
+    };
+    rv32.emit_init_data(&aot_mod, &init_data);
+
+    rv32.init_text(&aot_mod);
     for (unsigned int i = 0; i < m->num_funcs; i++) {
-        #if ESP_HEAP_DEBUG != 0
-        printf("free heap: before compile_func %ld\n", esp_get_free_heap_size());
-        #endif 
         wasm_func_decl *decl = &m->func_decls[i];
         wasm_func_body *body = parse_next_func_body(m);
-        compile_func(m, decl, body);
+        Fn *fn = compile_func(m, decl, body);
         free(body);
-        #if ESP_HEAP_DEBUG != 0
-        printf("free heap after compile_func: %ld\n", esp_get_free_heap_size());
-        #endif 
+        register_allocation(fn);
+        //printfn(fn, stdout);
+        //rv32_emitfn(fn);
+        rv32.emit_fn_text(&aot_mod, fn);
+        freeFunc(fn);
     }
+    rv32.finalize_text(&aot_mod);
+    rv32.emit_function(&aot_mod);
+    rv32.emit_export(&aot_mod);
+    rv32.emit_relocation(&aot_mod);
+    rv32.finalize(&aot_mod, out_buf, out_len);
 }

@@ -72,7 +72,10 @@ int main(int argc, char **argv) {
     fclose(input);
 
     wasm_module *m = parse(wasm_buf, wasm_len);
-    compile(m);
+    uint8_t *buf;
+    uint32_t len;
+    compile(m, &buf, &len);
+    fwrite(buf, len, 1, stdout);
 
     free_wasm_module(m);
     free(wasm_buf);

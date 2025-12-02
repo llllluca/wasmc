@@ -353,7 +353,9 @@ static void set_start(Tmp *t, unsigned int start) {
 
 static void fill_register_hints(Fn *f) {
 
-    unsigned int arg_index = 0;
+    /* Skip register A0 because in the wamr AOT execution enviroment
+     * it hold a pointer to the execution context */
+    unsigned int arg_index = 1;
     listNode *ins_node;
     listNode *ins_iter = listFirst(f->start->ins_list);
     while ((ins_node = listNext(&ins_iter)) != NULL) {
@@ -552,13 +554,13 @@ static live_interval **build_intervals(Fn *f) {
     return sorted_intervals;
 }
 
-static boolean is_arg_reg(rv32_reg reg) {
+static bool is_arg_reg(rv32_reg reg) {
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         if (reg == rv32_arg_reg[i]) {
-            return TRUE;
+            return true;
         }
     }
-    return FALSE;
+    return false;
 }
 
 
@@ -573,10 +575,10 @@ static void expire_old_intervals(list *active, live_interval *i,
         listDelNode(active, active_node);
         assert(j->assign.type == REGISTER);
         if (is_arg_reg(j->assign.as.reg)) {
-            argr->pool[j->assign.as.reg] = TRUE;
+            argr->pool[j->assign.as.reg] = true;
             argr->size++;
         } else {
-            gpr->pool[j->assign.as.reg] = TRUE;
+            gpr->pool[j->assign.as.reg] = true;
             gpr->size++;
         }
     }
@@ -623,35 +625,35 @@ static void spill_at_interval(list *active,
     }
 }
 
-static boolean try_assign_reg(live_interval *i, rv32_reg_pool *r) {
+static bool try_assign_reg(live_interval *i, rv32_reg_pool *r) {
     for (unsigned int j = 0; j < RV32_NUM_REG; j++) {
         if (r->pool[j]) {
-            r->pool[j] = FALSE;
+            r->pool[j] = false;
             r->size--;
             i->assign.as.reg = j;
-            return FALSE;
+            return false;
         }
     }
-    return TRUE;
+    return true;
 }
 
 static void assign_reg(live_interval *i,
     rv32_reg_pool *gpr, rv32_reg_pool *argr) {
 
-    boolean err;
+    bool err;
     i->assign.type = REGISTER;
     rv32_reg h = i->register_hint;
     if (h != ZERO) {
         if (is_arg_reg(h)) {
             if (argr->pool[h]) {
-                argr->pool[h] = FALSE;
+                argr->pool[h] = false;
                 argr->size--;
                 i->assign.as.reg = h;
                 return;
             }
         } else {
             if (gpr->pool[h]) {
-                gpr->pool[h] = FALSE;
+                gpr->pool[h] = false;
                 gpr->size--;
                 i->assign.as.reg = h;
                 return;
@@ -684,7 +686,9 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
     };
     list *par_move = listCreate();
     listSetFreeMethod(par_move, free);
-    unsigned int arg_index = 0;
+    /* Skip register A0 because in the wamr AOT execution enviroment
+     * it hold a pointer to the execution context */
+    unsigned int arg_index = 1;
 
     listNode *ins_node;
     listNode *ins_iter = listFirst(f->start->ins_list);

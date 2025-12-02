@@ -1,9 +1,28 @@
-// gcc -o readaot readaot.c
+/* - How to compile:
+ *      $gcc -o readaot readaot.c
+ *
+ * - How to generate AOT format from WASM module:
+ *      $./wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 -o add2.aot test/add2.wasm
+ *
+ * - How to generate object ELF format from WASM module:
+ *      $./wamrc --target=riscv32 --format=object --stack-bounds-checks=0 -o add2.o test/add2.wasm
+ *
+ * - How to disassemble text section of a object file
+ *      $riscv32-unknown-linux-gnu-objdump -d add2.o
+ *
+ * - How to display the relocation entries in the object file
+ *      $riscv32-unknown-linux-gnu-objdump -r add2.o
+ *
+ * - How to disassembling a flat binary file using objdump
+ *      $riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
+ */
 #include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define MAX_LINEAR_MEMORY_SIZE ((uint64_t)4 * 1024 * 1024 * 1024)
 
@@ -119,7 +138,9 @@ typedef struct AOTObjectDataSection {
 } AOTObjectDataSection;
 
 typedef struct AOTInitData {
+    /* number of imported memory in the WASM module */
     uint32_t import_memory_count;
+    /* number of memory in the WASM module */
     uint32_t memory_count;
     WASMMemory *memories;
     uint32_t mem_init_data_count;
@@ -223,14 +244,6 @@ static inline uint64_t GET_U64_FROM_ADDR(uint32_t *addr) {
     u.parts[1] = addr[1];
     return u.val;
 }
-/*
-#define TEMPLATE_READ(p, p_end, out_ptr, type) \
-    do { \
-        assert((p_end) - (p) >= sizeof(type)); \
-        *(out_ptr) = *((type *) (p)); \
-        (p) += sizeof(type); \
-    } while(0);
-*/
 
 #define TEMPLATE_READ(p, p_end, res, type) \
     do { \
@@ -347,6 +360,7 @@ void print_target_info_section(AOTSection *s) {
     printf("object file version: %"PRIu16"\n", target_info.e_version);
     printf("processor-specific flag: %"PRIu16"\n", target_info.e_flags);
     printf("wasm features flag: %"PRIu64"\n", target_info.feature_flags);
+    printf("reserved: %"PRIu64"\n", target_info.reserved);
     if (target_info.arch[sizeof(target_info.arch) - 1] != '\0') {
         fprintf(stderr, "Error: invalid arch name\n");
     } else {
@@ -499,6 +513,9 @@ void print_init_data_section(AOTSection *s) {
 
         printf("type[%"PRIu32"].param_count %"PRIu32"\n", i, param_count);
         printf("type[%"PRIu32"].result_count %"PRIu32"\n", i, result_count);
+        for (uint32_t j = 0; j < type_size; j++) {
+            printf("%x\n", data.types[i]->types[j]);
+        }
     }
 
     //----- Import Global Info -----
@@ -555,6 +572,14 @@ void print_init_data_section(AOTSection *s) {
     if (data.aux_stack_bottom >= MAX_LINEAR_MEMORY_SIZE) {
         fprintf(stderr, "Error: invalid range of aux_stack_bottom");
     }
+    printf("data.aux_data_end_global_index = %"PRIu32"\n", data.aux_data_end_global_index);
+    printf("data.aux_data_end = %"PRIu64"\n", data.aux_data_end);
+    printf("data.aux_heap_base_global_index = %"PRIu32"\n", data.aux_heap_base_global_index);
+    printf("data.aux_heap_base = %"PRIu64"\n", data.aux_heap_base);
+    printf("data.aux_stack_top_global_index = %"PRIu32"\n", data.aux_stack_top_global_index);
+    printf("data.aux_stack_bottom = %"PRIu64"\n", data.aux_stack_bottom);
+    printf("data.aux_stack_size = %"PRIu32"\n", data.aux_stack_size);
+
 
     read_uint32(p, p_end, &data.data_section_count);
     printf("data section count: %"PRIu32"\n", data.data_section_count);
@@ -606,18 +631,31 @@ void print_text_section(AOTSection *s) {
     }
     text.code = p;
     text.code_size = p_end - text.code;
+    char *tmp_file_path = "readaot-text.bin";
+    FILE *tmp_file;
+    if ((tmp_file = fopen(tmp_file_path, "w")) == NULL) {
+        fprintf(stderr, "Error: cannot open %s\n", tmp_file_path);
+        exit(EXIT_FAILURE);
+    }
+    if (fwrite(p, 1, text.code_size, tmp_file) != text.code_size) {
+        fprintf(stderr, "Error: cannot write to %s\n", tmp_file_path);
+        exit(EXIT_FAILURE);
+    }
+    fclose(tmp_file);
+    tmp_file = NULL;
 
-    char *output_path = "text-section.bin";
+    printf("literal size: %"PRIu32"\n", text.literal_size);
+    printf("code size: %"PRIu32"\n", text.code_size);
+
+
+    char *output_path = "text.bin";
     FILE *f;
-    if ((f = fopen(output_path, "wb")) == NULL) {
+    if ((f = fopen(output_path, "w")) == NULL) {
         fprintf(stderr, "Error: cannot open %s\n", output_path);
         exit(EXIT_FAILURE);
     }
     fwrite(text.code, text.code_size, 1, f);
     fclose(f);
-
-    printf("literal size: %"PRIu32"\n", text.literal_size);
-    printf("code size: %"PRIu32"\n", text.code_size);
 }
 
 void print_function_section(AOTSection *s) {
@@ -648,8 +686,15 @@ void print_function_section(AOTSection *s) {
         printf("func[%"PRIu32"] type index: %"PRIu32"\n", i, func_type_indexes);
     }
 
-    // Ignore max_local_cell_num and max_stack_cell_num of each function
-    p += sizeof(uint32_t) * data.func_count * 2;
+    for (uint32_t i = 0; i < data.func_count; i++) {
+        // Ignore max_local_cell_num and max_stack_cell_num of each function
+        uint32_t max_local_cell_num;
+        uint32_t max_stack_cell_num;
+        read_uint32(p, p_end, &max_local_cell_num);
+        read_uint32(p, p_end, &max_stack_cell_num);
+        printf("func[%"PRIu32"] max local cell num: %"PRIu32"\n", i, max_local_cell_num);
+        printf("func[%"PRIu32"] max stack cell num: %"PRIu32"\n", i, max_stack_cell_num);
+    }
 
     if (p != p_end) {
         fprintf(stderr, "Error: invalid function section size\n");
@@ -866,7 +911,7 @@ int main(int argc, char **argv) {
     uint32_t magic_number;
     read_uint32(p, p_end, &magic_number);
     if (magic_number != AOT_MAGIC_NUMBER) {
-        fprintf(stderr, "Error: wrong magic header number\n");
+        fprintf(stderr, "Error: wrong magic header number, expected %x, got %x\n", AOT_MAGIC_NUMBER, magic_number);
         return EXIT_FAILURE;
     }
 
@@ -879,8 +924,13 @@ int main(int argc, char **argv) {
     printf("version: %"PRIu32"\n", version);
 
     AOTSection *sec_list = parse_sections(p, p_end);
+    for (AOTSection *s = sec_list; s != NULL; s = s->next) {
+        printf("section: %s, body_size: %"PRIu32"\n", AOTSectionType_to_string(s->type), s->body_size);
+    }
+
     if (!check_sections_order(sec_list)) {
         fprintf(stderr, "Error: wrong section order\n");
+        return EXIT_FAILURE;
     }
     print_sections(sec_list);
 

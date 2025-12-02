@@ -7,12 +7,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
-#include "libqbe.h"
+#include <stdbool.h>
 #include "adlist.h"
-
-typedef int err_t;
-#define OK    0
-#define FAIL -1
+#include "rv32/rv32i.h"
+#include "libqbe.h"
 
 typedef struct {
     /* It is needed at least min_page_num page of memory
@@ -50,18 +48,18 @@ typedef struct {
     unsigned int len;
 } read_struct_t;
 
-typedef struct {
+typedef struct wasm_func_type {
     wasm_valtype return_type;
     /* heap allocated array of length num_params. If a function has
      * no parameters params_type is NULL and num_params is 0. */
     wasm_valtype *params_type;
     uint32_t num_params;
-} wasm_func_type_t;
+} wasm_func_type;
 
 typedef struct wasm_func_decl {
-    wasm_func_type_t *type;
+    wasm_func_type *type;
     char *name;
-    boolean is_exported;
+    bool is_exported;
 } wasm_func_decl;
 
 typedef struct wasm_func_body {
@@ -83,7 +81,7 @@ typedef struct {
 #define GLOBAL_NAME_LEN 16
 typedef struct {
     const_expr_t expr;
-    boolean is_mutable;
+    bool is_mutable;
     char *name[GLOBAL_NAME_LEN];
 } global_t;
 
@@ -100,7 +98,7 @@ typedef struct wasm_module {
 
     /* Heap allocated array of length types_len. If a module has no functions
      * types in the type section, types is NULL and types_len is 0. */
-    wasm_func_type_t *types;
+    wasm_func_type *types;
     uint32_t types_len;
 
     uint32_t num_funcs;
@@ -175,6 +173,37 @@ typedef struct {
     skip_flag skip_flag;
     Blk *curr_block;
 } func_compile_ctx_t;
+
+typedef struct AOTModule {
+    uint8_t *buf;
+    uint32_t buf_len;
+    uint8_t *p;
+    uint8_t *p_end;
+    uint8_t *text_size;
+    uint8_t *text_start;
+} AOTModule;
+
+typedef struct AOTInitData {
+    const wasm_func_type *types;
+    const uint32_t types_len;
+    const uint32_t func_count;
+} AOTInitData;
+
+typedef struct Target {
+    char name[16];
+    void (*init)(AOTModule *);
+    void (*emit_target_info)(AOTModule *);
+    void (*emit_init_data)(AOTModule *, const AOTInitData *);
+    void (*init_text)(AOTModule *);
+    void (*emit_fn_text)(AOTModule *, Fn *);
+    void (*finalize_text)(AOTModule *);
+    void (*emit_function)(AOTModule *);
+    void (*emit_export)(AOTModule *);
+    void (*emit_relocation)(AOTModule *);
+    void (*finalize)(AOTModule *, uint8_t **, uint32_t *);
+} Target;
+
+
 
 #define WASM_MAGIC_NUMBER 0x6d736100
 #define WASM_VERSION 1
@@ -268,15 +297,14 @@ typedef struct {
 #define BOTH_MIN_AND_MAX_MEMORY_LIMIT 0x01
 #define UNLIMITED_MAX_PAGE_NUM 0
 
-
+/* parse.c */
 wasm_func_body *parse_next_func_body(wasm_module *m);
 wasm_module* parse(unsigned char *start, unsigned int len);
 void free_wasm_module(wasm_module *m);
 void panic(void);
 void *xcalloc(size_t nmemb, size_t size);
 void *xmalloc(size_t size);
-void compile(wasm_module *m);
-
+void compile(wasm_module *m, uint8_t **out_buf, uint32_t *out_len);
 
 /* ssa.c */
 void write_local(Blk *b, uint32_t index, Ref value);
@@ -290,5 +318,9 @@ unsigned int readULEB128_u32(read_struct_t *r, uint32_t *out);
 unsigned int readILEB128_i32(read_struct_t *r, int32_t *out);
 wasm_valtype local_type(func_compile_ctx_t *ctx, uint32_t index);
 simple_type cast(wasm_valtype t);
+
+/* rega.c */
+void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *arg);
+
 
 #endif

@@ -11,6 +11,41 @@ static unsigned int next_temp_id = 0;
 
 void printref(Ref r, FILE *f);
 
+char *rname[] = {
+    [ZERO] = "zero",
+    [RA] = "ra",
+    [SP] = "sp",
+    [GP] = "gp",
+    [TP] = "tp",
+    [T0] = "t0",
+    [T1] = "t1",
+    [T2] = "t2",
+    [FP] = "fp",
+    [S1] = "s1",
+    [A0] = "a0",
+    [A1] = "a1",
+    [A2] = "a2",
+    [A3] = "a3",
+    [A4] = "a4",
+    [A5] = "a5",
+    [A6] = "a6",
+    [A7] = "a7",
+    [S2] = "s2",
+    [S3] = "s3",
+    [S4] = "s4",
+    [S5] = "s5",
+    [S6] = "s6",
+    [S7] = "s7",
+    [S8] = "s8",
+    [S9] = "s9",
+    [S10] = "s10",
+    [S11] = "s11",
+    [T3] = "t3",
+    [T4] = "t4",
+    [T5] = "t5",
+    [T6] = "t6",
+};
+
 const char *optab[] = {
     /* Arithmetic and Bits */
     [ADD_INSTR] = "add",
@@ -299,7 +334,7 @@ Blk *newBlock(uint32_t nlocals) {
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
-    b->is_loop_header = FALSE;
+    b->is_loop_header = false;
     b->loop_end_blk_list = NULL;
     b->live_in = NULL;
     b->jmp.type = NONE_JUMP_TYPE;
@@ -318,7 +353,7 @@ Blk *newBlock(uint32_t nlocals) {
             b->incomplete_phis[i] = NULL;
         }
     }
-    b->is_sealed = FALSE;
+    b->is_sealed = false;
     return b;
 }
 

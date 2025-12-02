@@ -165,5 +165,5 @@ void seal_block(func_compile_ctx_t *ctx, Blk *b) {
         if (b->incomplete_phis[i] == NULL) continue;
         add_phi_operands(ctx, b->incomplete_phis[i], i);
     }
-    b->is_sealed = TRUE;
+    b->is_sealed = true;
 }

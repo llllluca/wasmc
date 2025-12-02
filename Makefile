@@ -16,7 +16,8 @@ OBJ = \
 	src/main.o \
 	src/ssa.o \
 	src/rega.o \
-	src/rv32/emit.o \
+	src/rv32/emit_aot.o \
+	src/rv32/target.o \
 
 ALL_OBJ = \
 	$(OBJ) \

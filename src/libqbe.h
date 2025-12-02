@@ -1,11 +1,11 @@
 #ifndef LIBQBE_H_INCLUDED
 #define LIBQBE_H_INCLUDED
 
-#include <stdint.h>
+#include <inttypes.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include "adlist.h"
-
-#define NString 80
+#include "rv32/rv32i.h"
 
 typedef struct Phi Phi;
 typedef struct Ins Ins;
@@ -26,66 +26,6 @@ typedef struct Lnk {
     char align;
 } Lnk;
 
-typedef enum {
-    ZERO = 0,
-    RA  = 1,
-    SP  = 2,
-    GP  = 3,
-    TP  = 4,
-    T0  = 5,
-    T1  = 6,
-    T2  = 7,
-    FP  = 8,
-    S1  = 9,
-    A0  = 10,
-    A1  = 11,
-    A2  = 12,
-    A3  = 13,
-    A4  = 14,
-    A5  = 15,
-    A6  = 16,
-    A7  = 17,
-    S2  = 18,
-    S3  = 19,
-    S4  = 20,
-    S5  = 21,
-    S6  = 22,
-    S7  = 23,
-    S8  = 24,
-    S9  = 25,
-    S10 = 26,
-    S11 = 27,
-    T3  = 28,
-    T4  = 29,
-    T5  = 30,
-    T6  = 31,
-    RV32_NUM_REG
-} rv32_reg;
-
-#define RV32_GP_NUM_REG 16
-extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
-
-#define RV32_ARG_NUM_REG 8
-extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
-
-#define RV32_RESERVED_NUM_REG 2
-extern const rv32_reg rv32_reserved_reg[RV32_RESERVED_NUM_REG];
-
-typedef uint8_t boolean;
-#define TRUE 1
-#define FALSE 0
-
-typedef struct rv32_reg_pool {
-    boolean pool[RV32_NUM_REG];
-    unsigned int size;
-} rv32_reg_pool;
-
-typedef enum location_type {
-    LOCATION_NONE,
-    REGISTER,
-    STACK_SLOT,
-} location_type;
-
 typedef struct location {
     location_type type;
     union {
@@ -101,6 +41,7 @@ typedef struct live_interval {
     rv32_reg register_hint;
 } live_interval;
 
+#define NString 80
 struct Tmp {
     char name[NString];
     simple_type cls; // TODO: when cls is used?
@@ -169,12 +110,12 @@ struct Blk {
     char name[NString];
     Ref *locals;
     listNode **incomplete_phis;
-    boolean is_sealed;
+    bool is_sealed;
 /* list of variable that are live at the beginning of the block */
     list *live_in;
     unsigned int id;
 
-    boolean is_loop_header;
+    bool is_loop_header;
     list* loop_end_blk_list;
 };
 
@@ -370,12 +311,12 @@ struct Use {
 #define ADD_ZEROS_DATA_FIELD(num) addNumDataField(DZ, (num))
 #define ADD_STR_DATA_FIELD(str) addStrDataField(DB, (str))
 
+
+/* libqbe.c */
 void printfn(Fn *fn, FILE *f);
 void printdata(Data *d, FILE *f);
-
 Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start);
 Ref newFuncParam(Fn *f, simple_type type);
-
 Ref newTemp(Fn *func);
 Blk *newBlock(uint32_t nlocals);
 Ref newIntConst(Fn *f, int64_t value);
@@ -390,28 +331,22 @@ void retRef(Fn *f, Blk *b, Ref r);
 void halt(Fn *f, Blk *b);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
-
 Data *newData(Lnk *link_info, char *name);
 void dataAppendByteField(Data *d, unsigned char b);
 void dataAppendWordField(Data *d, int32_t w);
 void dataAppendLongField(Data *d, int64_t l);
 void dataAppendZerosField(Data *d, uint64_t z);
 void dataAppendStringField(Data *d, char *s, unsigned int len);
-
 listNode *newPhi(Blk *b, Ref temp, simple_type type);
 void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg);
 void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
 void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
-
 int req(Ref a, Ref b);
-
 void freeFunc(Fn *f);
 void freeTemp(Tmp *tmp);
 void freePhi(Phi *phi);
 void freeBlock(Blk *b);
 void freeData(Data *d);
 void freeDataField(DataField *df);
-
-void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *arg);
 
 #endif 

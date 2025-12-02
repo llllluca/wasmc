@@ -42,5 +42,3 @@ make
 cc -o qsort test/qsort.s
 ```
 
-./wamrc --target=riscv32 --format=object --stack-bounds-checks=0 -o add.o test/add.wasm
-./wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 -o add.aot test/add.wasm

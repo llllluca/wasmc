@@ -1,7 +1,7 @@
 set(WASMC_SRC_DIR "../../src/")
 
 idf_component_register(SRCS
-    "wasmc.c"
+    "wamr.c"
     "${WASMC_SRC_DIR}/parse.c"
     "${WASMC_SRC_DIR}/compile.c"
     "${WASMC_SRC_DIR}/adlist.c"
@@ -9,5 +9,7 @@ idf_component_register(SRCS
     "${WASMC_SRC_DIR}/ssa.c"
     "${WASMC_SRC_DIR}/libqbe.c"
     "${WASMC_SRC_DIR}/rega.c"
-    "${WASMC_SRC_DIR}/rv32/emit.c"
+    "${WASMC_SRC_DIR}/rv32/emit_aot.c"
+    "${WASMC_SRC_DIR}/rv32/target.c"
     INCLUDE_DIRS "${WASMC_SRC_DIR}")
+

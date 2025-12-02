@@ -43,7 +43,7 @@ static void parse_type_section_if_exists(wasm_module *m) {
     /* read the length of the vector of function types */
     readULEB128_u32(&m->module, &types_len);
     if (types_len == 0) return;
-    m->types = xcalloc(types_len, sizeof(wasm_func_type_t));
+    m->types = xcalloc(types_len, sizeof(struct wasm_func_type));
     m->types_len = types_len;
     unsigned char fun_start_code;
     uint32_t params_len, return_len;
@@ -183,7 +183,7 @@ static void parse_global_section_if_exists(wasm_module *m) {
         global_t *g = &m->globals[i];
         enum wasm_valtype type;
         read_value_type(&m->module, &type);
-        read_u8(r, &g->is_mutable);
+        read_u8(r, (unsigned char *)&g->is_mutable);
         if (g->is_mutable != 0 && g->is_mutable != 1) {
             panic();
         }
@@ -224,7 +224,7 @@ static void parse_export_section_if_exists(wasm_module *m) {
                 if (funcidx >= m-> num_funcs) {
                     panic();
                 }
-                m->func_decls[funcidx].is_exported = TRUE;
+                m->func_decls[funcidx].is_exported = true;
                 if (m->func_decls[funcidx].name != NULL) {
                     free(m->func_decls[funcidx].name);
                 }
@@ -432,7 +432,7 @@ wasm_func_body *parse_next_func_body(wasm_module *m) {
 }
 
 void free_wasm_module(wasm_module *m) {
-    wasm_func_type_t *type;
+    wasm_func_type *type;
 
     for (unsigned int i = 0; i < m->types_len; i++) {
         type = &m->types[i];
