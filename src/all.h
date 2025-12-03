@@ -11,6 +11,7 @@
 #include "adlist.h"
 #include "rv32/rv32i.h"
 #include "libqbe.h"
+#include "aot.h"
 
 typedef struct {
     /* It is needed at least min_page_num page of memory
@@ -58,8 +59,8 @@ typedef struct wasm_func_type {
 
 typedef struct wasm_func_decl {
     wasm_func_type *type;
+    uint32_t type_index;
     char *name;
-    bool is_exported;
 } wasm_func_decl;
 
 typedef struct wasm_func_body {
@@ -67,6 +68,18 @@ typedef struct wasm_func_body {
     uint32_t num_locals;
     wasm_valtype locals_type[];
 } wasm_func_body;
+
+typedef struct WASMExport {
+    uint32_t name_len;
+    char *name;
+    enum {
+        EXPORT_TYPE_FUNC,
+        EXPORT_TYPE_TABLE,
+        EXPORT_TYPE_MEM,
+        EXPORT_TYPE_GLOBAL,
+    } export_desc;
+    uint32_t index;
+} WASMExport;
 
 typedef struct {
     wasm_valtype type;
@@ -118,6 +131,9 @@ typedef struct wasm_module {
      * num_data_segments is 0. */
     data_segment_t *data_segments;
     uint32_t num_data_segments;
+
+    uint32_t num_exports;
+    WASMExport *exports;
 
 } wasm_module;
 
@@ -174,15 +190,6 @@ typedef struct {
     Blk *curr_block;
 } func_compile_ctx_t;
 
-typedef struct AOTModule {
-    uint8_t *buf;
-    uint32_t buf_len;
-    uint8_t *p;
-    uint8_t *p_end;
-    uint8_t *text_size;
-    uint8_t *text_start;
-} AOTModule;
-
 typedef struct AOTInitData {
     const wasm_func_type *types;
     const uint32_t types_len;
@@ -195,10 +202,10 @@ typedef struct Target {
     void (*emit_target_info)(AOTModule *);
     void (*emit_init_data)(AOTModule *, const AOTInitData *);
     void (*init_text)(AOTModule *);
-    void (*emit_fn_text)(AOTModule *, Fn *);
+    void (*emit_fn_text)(AOTModule *, Fn *, uint32_t);
     void (*finalize_text)(AOTModule *);
     void (*emit_function)(AOTModule *);
-    void (*emit_export)(AOTModule *);
+    void (*emit_export)(AOTModule *, uint32_t, WASMExport *);
     void (*emit_relocation)(AOTModule *);
     void (*finalize)(AOTModule *, uint8_t **, uint32_t *);
 } Target;

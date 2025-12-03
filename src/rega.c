@@ -722,7 +722,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         listUnlinkNode(move_seq, copy_node);
         listLinkNodeHead(f->start->ins_list, copy_node);
     }
-    arg_index = 0;
+    arg_index = 1;
     listRelease(move_seq);
     listEmpty(par_move);
 

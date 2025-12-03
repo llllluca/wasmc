@@ -3,123 +3,7 @@
 #include "rv32i.h"
 #include "../libqbe.h"
 #include "../all.h"
-
-#define AOT_MAGIC_NUMBER 0x746f6100
-#define AOT_CURRENT_VERSION 5
-
-typedef enum AOTSectionType {
-    /* These six sections are mandatory and must appear in the following order,
-     * between each mandatory section there can be zero one or more custom sections. */
-    AOT_SECTION_TYPE_TARGET_INFO = 0,
-    AOT_SECTION_TYPE_INIT_DATA = 1,
-    AOT_SECTION_TYPE_TEXT = 2,
-    AOT_SECTION_TYPE_FUNCTION = 3,
-    AOT_SECTION_TYPE_EXPORT = 4,
-    AOT_SECTION_TYPE_RELOCATION = 5,
-    /* Note: We haven't had anything to use AOT_SECTION_TYPE_SIGNATURE.
-     * It's just reserved for possible module signing features. */
-    AOT_SECTION_TYPE_SIGNATURE = 6,
-    AOT_SECTION_TYPE_CUSTOM = 100,
-} AOTSectionType;
-
-/* Legal values for bin_type */
-#define BIN_TYPE_ELF32L 0 /* 32-bit little endian */
-#define BIN_TYPE_ELF32B 1 /* 32-bit big endian */
-#define BIN_TYPE_ELF64L 2 /* 64-bit little endian */
-#define BIN_TYPE_ELF64B 3 /* 64-bit big endian */
-
-/* Legal values for e_type (object file type). */
-#define E_TYPE_NONE 0  /* No file type */
-#define E_TYPE_REL  1  /* Relocatable file */
-#define E_TYPE_EXEC 2  /* Executable file */
-#define E_TYPE_DYN  3  /* Shared object file */
-/* eXecute In Place file, it is not a standard ELF e_type,
- * see wasm-micro-runtime/doc/xip.md */
-#define E_TYPE_XIP  4
-
-/* Legal values for e_machine (architecture).  */
-#define E_MACHINE_RISCV 243         /* RISC-V 32/64 */
-
-/* Legal values for e_version */
-#define E_VERSION_CURRENT 1 /* Current version */
-
-/* Legal values for e_flags */
-#define EF_RISCV_FLOAT_ABI_DOUBLE  0x0004
-
-/* Wasm feature supported, legal value for feature_flags */
-#define WASM_FEATURE_SIMD_128BIT (1 << 0)
-#define WASM_FEATURE_BULK_MEMORY (1 << 1)
-#define WASM_FEATURE_MULTI_THREAD (1 << 2)
-#define WASM_FEATURE_REF_TYPES (1 << 3)
-#define WASM_FEATURE_GARBAGE_COLLECTION (1 << 4)
-#define WASM_FEATURE_EXCEPTION_HANDLING (1 << 5)
-#define WASM_FEATURE_TINY_STACK_FRAME (1 << 6)
-#define WASM_FEATURE_MULTI_MEMORY (1 << 7)
-#define WASM_FEATURE_DYNAMIC_LINKING (1 << 8)
-#define WASM_FEATURE_COMPONENT_MODEL (1 << 9)
-#define WASM_FEATURE_RELAXED_SIMD (1 << 10)
-#define WASM_FEATURE_FLEXIBLE_VECTORS (1 << 11)
-/* Stack frame is created at the beginning of the function,
- * and not at the beginning of each function call */
-#define WASM_FEATURE_FRAME_PER_FUNCTION (1 << 12)
-#define WASM_FEATURE_FRAME_NO_FUNC_IDX (1 << 13)
-
-
-/* Target info, read from ELF header of object file */
-typedef struct AOTTargetInfo {
-    /* Binary type (elf32l/elf32b/elf64l/elf64b). The only two least significant bits
-     * of bin_type has a meaning, the other bit are useless.
-
-     * target_info.bin_type & 1 identifies the architecture for this binary.(This
-     * bit has the same meaning as the EI_CLASS field of e_ident in the ELF header).
-     * - If target_info.bin_type & 1 == 1 then this binary is for 64-bit machine.
-     * - If target_info.bin_type & 1 == 1 then this binary is for 32-bit machine.
-
-     * target_info.bin_type & 2 specifies the data encoding of the processor-specific
-     * data in the file. (This bit has the same meaning as the EI_DATA field of
-     * e_ident in the ELF header).
-     * - If target_info.bin_type & 2 == 0 then the data encoding is two's complement,
-     * little-endian.
-     * - If target_info.bin_type & 2 == 1 then the data encoding is two's complement,
-     * big-endian. */
-    uint16_t bin_type;
-
-    /* Not used by WAMR, can be any value */
-    uint16_t abi_type;
-
-    /* e_type identifies the object file type. This field has the same meaning as the
-     * e_type field in the ELF header */
-    uint16_t e_type;
-
-    /* e_machine specifies the architecture for which this file is intended,
-     * indicating the type of machine that the executable is designed to run on */
-    uint16_t e_machine;
-
-    /* Object file version */
-    uint32_t e_version;
-
-    /* e_flags holds processor-specific flags. See chapter 8 of riscv-abi.pdf */
-    uint32_t e_flags;
-
-    /* Specify wasm features supported */
-    uint64_t feature_flags;
-
-    /* Reserved, always zero */
-    uint64_t reserved;
-
-    /* Architecture string name, must be set consistence with e_machine.
-     * Legal value for arch are:
-     * - "x86_64"
-     * - "i386"
-     * - "arm64"
-     * - "aarch64"
-     * - "mips"
-     * - "xtensa"
-     * - "riscv32"
-     * - "riscv64"
-     * - "arc" */
-    char arch[16];
-} AOTTargetInfo;
+#include "../aot.h"
 
 #define ALIGN_PTR(p, align) ((void *)((((uintptr_t)p) + (align-1)) & ~(align-1)))
 
@@ -162,7 +46,7 @@ static void emit_li(uint32_t rd, int32_t imm, uint8_t **p, uint8_t *p_end);
 static bool is_imm(Ref *r, int imm_min, int imm_max);
 static void fix_arg(Ref *arg, rv32_reg r, uint8_t **p, uint8_t *p_end);
 static void fix_ins_args(Ins *i, uint8_t **p, uint8_t *p_end);
-static void emitins(Ins *i, uint8_t **p, uint8_t *p_end);
+static void emitins(AOTModule *aotm, Ins *i);
 
 typedef struct instr_info_elem {
     /* TRUE if the instr can be a register-immediate instruction,
@@ -344,18 +228,22 @@ static const instr_info_elem instr_info[] = {
     },
 };
 
-static void emitins(Ins *i, uint8_t **p, uint8_t *p_end) {
+static void emitins(AOTModule *aotm, Ins *i) {
+
+    uint8_t *p = aotm->p;
+    uint8_t *p_end = aotm->p_end;
+
     switch (i->op) {
         case ADD_INSTR: {
-            fix_ins_args(i, p, p_end);
+            fix_ins_args(i, &p, p_end);
             rv32_reg rd = i->to.val.loc.as.reg;
             rv32_reg rs1 = i->arg[0].val.loc.as.reg;
             if (i->arg[1].type == RCon) {
                 uint64_t imm = i->arg[1].val.con->val.i;
-                EMIT(RV32_ADDI(rd, rs1, imm), *p, p_end);
+                EMIT(RV32_ADDI(rd, rs1, imm), p, p_end);
             } else {
                 rv32_reg rs2 = i->arg[1].val.loc.as.reg;
-                EMIT(RV32_ADD(rd, rs1, rs2), *p, p_end);
+                EMIT(RV32_ADD(rd, rs1, rs2), p, p_end);
             }
         } break;
         case SUB_INSTR: {
@@ -364,16 +252,64 @@ static void emitins(Ins *i, uint8_t **p, uint8_t *p_end) {
             rv32_reg rs1 = i->arg[0].val.loc.as.reg;
             if (is_imm(&i->arg[1], e->imm_min, e->imm_max)) {
                 uint64_t imm = -1 * i->arg[1].val.con->val.i;
-                EMIT(RV32_ADDI(rd, rs1, imm), *p, p_end);
+                EMIT(RV32_ADDI(rd, rs1, imm), p, p_end);
             } else {
                 rv32_reg rs2 = i->arg[1].val.loc.as.reg;
-                EMIT(RV32_SUB(rd, rs1, rs2), *p, p_end);
+                EMIT(RV32_SUB(rd, rs1, rs2), p, p_end);
             }
+        } break;
+        case COPY_INSTR: {
+            assert(i->to.type == RLoc);
+            if (i->to.val.loc.type == REGISTER) {
+                /* the copy destination is a register */
+                location *loc = &i->arg[0].val.loc;
+                if (i->arg[0].type == RLoc && loc->type == REGISTER) {
+                    /* the copy source is a register */
+                    if (i->to.val.loc.as.reg != loc->as.reg) {
+                        /* the copy destination is not equal to the copy source */
+                        EMIT(RV32_MV(i->to.val.loc.as.reg, loc->as.reg), p, p_end);
+                    }
+                }
+                else if (i->arg[0].type == RLoc && loc->type == STACK_SLOT) {
+                    /* the copy source is a stack slot */
+                    assert(0 && "STACK_SLOT as a copy source is not implemented");
+                }
+                else if (i->arg[0].type == RCon) {
+                    /* the copy source is a constant */
+                    assert(i->arg[0].val.con->type == CInt64);
+                    emit_li(i->to.val.loc.as.reg, i->arg[0].val.con->val.i, &p, p_end);
+                }
+                else assert(0);
+            }
+            else if (i->to.val.loc.type == STACK_SLOT) {
+                /* the copy destination is a stack slot */
+                assert(0 && "STACK_SLOT as a copy destination is not implemented");
+            }
+            else assert(0);
+        } break;
+        case CALL_INSTR: {
+            assert(i->arg[0].type == RCon);
+            assert(i->arg[0].val.con->type == CAddr);
+
+            AOTRelocation *reloc = xmalloc(sizeof(struct AOTRelocation));
+            reloc->offset = p - aotm->text_start;
+            reloc->addend = 0;
+            reloc->type = R_RISCV_CALL;
+            /* symbol_name points in the array func_decls in the wasm_module struct */
+            reloc->symbol_name = i->arg[0].val.con->val.addr;
+            reloc->next = aotm->reloc_list;
+            aotm->reloc_list = reloc;
+            aotm->reloc_count++;
+
+            EMIT(RV32_AUIPC(RA, 0), p, p_end);
+            EMIT(RV32_JARL(RA, RA, 0), p, p_end);
         } break;
         default:
             fprintf(stderr, "Error: opcode %d not implemented!\n", i->op);
             assert(0);
     }
+
+    aotm->p = p;
     return;
 
 ERROR:
@@ -501,19 +437,16 @@ ERROR:
 
 */
 
-/*
-#define LEN (10 * 1024)
-static uint8_t buf[LEN];
-static uint8_t *p = buf;
-static uint8_t *p_end = buf + LEN;
-static uint8_t *text_section_size;
-static uint8_t *text_section_start;
-*/
-
-void rv32_emit_fn_text(AOTModule *aotm, Fn *fn) {
+void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
+
+    uint32_t next_func = aotm->next_func;
+    assert(next_func < aotm->func_count);
+    aotm->funcs[next_func].text_offset = p - aotm->text_start;
+    aotm->funcs[next_func].type_index = type_index;
+    aotm->next_func++;
 
     /* store old fp on the current stack frame */
     EMIT(RV32_SW(FP, -8, SP), p, p_end);
@@ -547,7 +480,9 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
-            emitins(i, &p, p_end);
+            aotm->p = p;
+            emitins(aotm, i);
+            p = aotm->p;
         }
         lbl = true;
         switch (b->jmp.type) {
@@ -592,6 +527,11 @@ void rv32_init(AOTModule *aotm) {
     aotm->p_end = aotm->buf + aotm->buf_len;
     aotm->text_size = NULL;
     aotm->text_start = NULL;
+    aotm->func_count = 0;
+    aotm->next_func = 0;
+    aotm->funcs = NULL;
+    aotm->reloc_count = 0;
+    aotm->reloc_list = NULL;
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
@@ -651,6 +591,12 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
     const uint32_t types_len = init_data->types_len;
     const uint32_t func_count = init_data->func_count;
 
+    aotm->func_count = func_count;
+    aotm->funcs = calloc(func_count, sizeof(struct AOTFuncSecEntry));
+    for (uint32_t i = 0; i < func_count; i++) {
+        aotm->funcs[i].text_offset = -1;
+        aotm->funcs[i].type_index = -1;
+    }
 
     WRITE_UINT32(AOT_SECTION_TYPE_INIT_DATA, p, p_end);
     uint8_t *section_size = p;
@@ -758,10 +704,10 @@ void rv32_init_text(AOTModule *aotm) {
     WRITE_UINT32(AOT_SECTION_TYPE_TEXT, p, p_end);
     aotm->text_size = p;
     p += sizeof(uint32_t);
-    aotm->text_start = p;
     const uint32_t literal_size = 0;
     WRITE_UINT32(literal_size, p, p_end);
-
+    p = ALIGN_PTR(p, sizeof(uint32_t));
+    aotm->text_start = p;
     aotm->p = p;
     return;
 
@@ -770,7 +716,7 @@ ERROR:
 }
 
 void rv32_finalize_text(AOTModule *aotm) {
-    *(aotm->text_size) = aotm->p - aotm->text_start;
+    *(aotm->text_size) = aotm->p - (aotm->text_size + sizeof(uint32_t));
 }
 
 void rv32_emit_function(AOTModule *aotm) {
@@ -783,19 +729,21 @@ void rv32_emit_function(AOTModule *aotm) {
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 
-    //TODO: fixme
-    uint32_t function_offset = 0;
-    WRITE_UINT32(function_offset, p, p_end);
+    for (uint32_t i = 0; i < aotm->func_count; i++) {
+        WRITE_UINT32(aotm->funcs[i].text_offset, p, p_end);
+    }
 
-    //TODO: fixme
-    uint32_t function_type_index = 0;
-    WRITE_UINT32(function_type_index, p, p_end);
-    
+    for (uint32_t i = 0; i < aotm->func_count; i++) {
+        WRITE_UINT32(aotm->funcs[i].type_index, p, p_end);
+    }
+
     /* not used */
     uint32_t max_local_cell_num = 0;
     uint32_t max_stack_cell_num = 0;
-    WRITE_UINT32(max_local_cell_num, p, p_end);
-    WRITE_UINT32(max_stack_cell_num, p, p_end);
+    for (uint32_t i = 0; i < aotm->func_count; i++) {
+        WRITE_UINT32(max_local_cell_num, p, p_end);
+        WRITE_UINT32(max_stack_cell_num, p, p_end);
+    }
 
     //Fix section size
     *section_size = p - section_start;
@@ -807,7 +755,7 @@ ERROR:
     panic();
 }
 
-void rv32_emit_export(AOTModule *aotm) {
+void rv32_emit_export(AOTModule *aotm, uint32_t num_exports, WASMExport *exports) {
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
@@ -817,19 +765,24 @@ void rv32_emit_export(AOTModule *aotm) {
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 
-    //TODO: fixme
-    uint32_t export_count = 1;
-    WRITE_UINT32(export_count, p, p_end);
-
-    //TODO: fixme
-    uint32_t export_func_index = 0;
-    #define EXPORT_FUNC_KIND 0x00
-    WRITE_UINT32(export_func_index, p, p_end);
-    WRITE_UINT8(EXPORT_FUNC_KIND, p, p_end);
-    char *name = "add";
-    uint32_t name_len = strlen(name)+1;
-    WRITE_UINT16(name_len, p, p_end);
-    WRITE_BYTE_ARRAY(p, p_end, "add", name_len);
+    WRITE_UINT32(num_exports, p, p_end);
+    for (uint32_t i = 0; i < num_exports; i++) {
+        WRITE_UINT32(exports[i].index, p, p_end);
+        WRITE_UINT8(exports[i].export_desc, p, p_end);
+        uint32_t name_len = exports[i].name_len;
+        if (exports[i].name[name_len-1] == '\0') {
+            WRITE_UINT16(name_len, p, p_end);
+            WRITE_BYTE_ARRAY(p, p_end, exports[i].name, name_len);
+        } else {
+            WRITE_UINT16(name_len + 1, p, p_end);
+            WRITE_BYTE_ARRAY(p, p_end, exports[i].name, name_len);
+            if ((long unsigned int)(p_end - p) < sizeof(char)) {
+                goto ERROR;
+            }
+            *p = '\0';
+            p += sizeof(char);
+        }
+    }
 
     //Fix section size
     *section_size = p - section_start;
@@ -852,13 +805,74 @@ void rv32_emit_relocation(AOTModule *aotm) {
     uint8_t *section_start = p;
 
     uint32_t symbol_count = 0;
+    for (AOTRelocation *i = aotm->reloc_list; i != NULL; i = i->next) {
+        i->representative = NULL;
+        for (AOTRelocation *j = aotm->reloc_list; j != i; j = j->next) {
+            if (i->symbol_name == j->symbol_name) {
+                i->representative = j;
+                break;
+            }
+        }
+        if (i->representative == NULL) {
+            symbol_count++;
+        }
+    }
+    if (aotm->reloc_list != NULL) {
+        symbol_count++;
+    }
     WRITE_UINT32(symbol_count, p, p_end);
+    uint32_t *symbol_offset = (uint32_t *)p;
+    uint32_t symbol_index = 0;
+    p += symbol_count * sizeof(uint32_t);
+    uint32_t *symbol_buf_size = (uint32_t *)p;
+    p += sizeof(uint32_t);
+    uint8_t *symbol_buf_start = p;
 
-    uint32_t total_string_len = 0;
-    WRITE_UINT32(total_string_len, p, p_end);
+    if (aotm->reloc_list != NULL) {
+        char *group_section_name = ".rela.text";
+        *symbol_offset = p - symbol_buf_start;
+        symbol_offset++;
+        symbol_index++;
+        uint16_t len = strlen(group_section_name) + 1;
+        WRITE_UINT16(len, p, p_end);
+        WRITE_BYTE_ARRAY(p, p_end, group_section_name, len);
+        p = ALIGN_PTR(p, 2);
+    }
 
-    uint32_t group_count = 0;
-    WRITE_UINT32(group_count, p, p_end);
+    for (AOTRelocation *i = aotm->reloc_list; i != NULL; i = i->next) {
+        if (i->representative != NULL) continue;
+        *symbol_offset = p - symbol_buf_start;
+        symbol_offset++;
+        i->symbol_index++;
+        uint16_t len = strlen(i->symbol_name) + 1;
+        WRITE_UINT16(len, p, p_end);
+        WRITE_BYTE_ARRAY(p, p_end, i->symbol_name, len);
+        p = ALIGN_PTR(p, 2);
+    }
+    *symbol_buf_size = p - symbol_buf_start;
+
+    if (aotm->reloc_list != NULL) {
+        uint32_t group_count = 1;
+        WRITE_UINT32(group_count, p, p_end);
+        /* group name index is 4 bytes aligned. */
+        p = ALIGN_PTR(p, sizeof(uint32_t));
+        uint32_t group_name_index = 0;
+        WRITE_UINT32(group_name_index, p, p_end);
+        WRITE_UINT32(aotm->reloc_count, p, p_end);
+        for (AOTRelocation *i = aotm->reloc_list; i != NULL; i = i->next) {
+            WRITE_UINT32(i->offset, p, p_end);
+            WRITE_UINT32(i->addend, p, p_end);
+            WRITE_UINT32(i->type, p, p_end);
+            if (i->representative != NULL) {
+                WRITE_UINT32(i->representative->symbol_index, p, p_end);
+            } else {
+                WRITE_UINT32(i->symbol_index, p, p_end);
+            }
+        }
+    } else {
+        uint32_t group_count = 0;
+        WRITE_UINT32(group_count, p, p_end);
+    }
 
     //Fix section size
     *section_size = p - section_start;

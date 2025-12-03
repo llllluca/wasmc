@@ -203,7 +203,7 @@ typedef struct ins_fmt {
  * Description: copy register (pseudoinstruction)
  * Use: mv rd, rs1
  * Result rd = rs1 */
-#define RV32_MV(RV, RS1) RV32_ADDI(RD, RS1, 0)
+#define RV32_MV(RD, RS1) RV32_ADDI(RD, RS1, 0)
 
 /* Instr: slli
  * Description: shift left logical immediate
@@ -293,7 +293,7 @@ typedef struct ins_fmt {
  * Description: add upper immediate to pc
  * Use: auipc rd, imm
  * Result: rd = pc + (imm << 12) */
-#define AUIPC_OPCODE 0x37
+#define AUIPC_OPCODE 0x17
 #define RV32_AUIPC(RD, IMM) \
     U_TYPE_INS_TEMPLATE(AUIPC_OPCODE, RD, IMM)
 

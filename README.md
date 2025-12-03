@@ -42,3 +42,9 @@ make
 cc -o qsort test/qsort.s
 ```
 
+## How to compile iwasm for riscv32
+```
+cd wasm-micro-runtime/product-mini/platforms/linux/
+mkdir build/ && cd build/
+cmake -DWAMR_BUILD_TARGET="RISCV32" -DCMAKE_C_COMPILER="riscv32-unknown-linux-gnu-gcc" -DCMAKE_C_FLAGS="-no-pie -static " -DBH_HAS_DLFCN=0  ..
+```

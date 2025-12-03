@@ -21,11 +21,6 @@ typedef enum __attribute__ ((__packed__)) simple_type {
     DOUBLE_PRECISION_TYPE,
 } simple_type;
 
-typedef struct Lnk {
-    char is_exported;
-    char align;
-} Lnk;
-
 typedef struct location {
     location_type type;
     union {
@@ -138,7 +133,6 @@ typedef struct Fn {
     char name[NString];
     Blk *start;
     simple_type ret_type;
-    Lnk lnk;
     unsigned int num_stack_slots;
 } Fn;
 
@@ -163,7 +157,6 @@ typedef struct DataField {
 
 typedef struct Data {
     char name[NString];
-	Lnk lnk;
     list *dataField_list;
 } Data;
 
@@ -315,7 +308,7 @@ struct Use {
 /* libqbe.c */
 void printfn(Fn *fn, FILE *f);
 void printdata(Data *d, FILE *f);
-Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start);
+Fn *newFunc(simple_type ret_type, char *name, Blk *start);
 Ref newFuncParam(Fn *f, simple_type type);
 Ref newTemp(Fn *func);
 Blk *newBlock(uint32_t nlocals);
@@ -331,7 +324,7 @@ void retRef(Fn *f, Blk *b, Ref r);
 void halt(Fn *f, Blk *b);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
-Data *newData(Lnk *link_info, char *name);
+Data *newData(char *name);
 void dataAppendByteField(Data *d, unsigned char b);
 void dataAppendWordField(Data *d, int32_t w);
 void dataAppendLongField(Data *d, int64_t l);

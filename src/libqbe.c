@@ -90,9 +90,6 @@ void printfn(Fn *fn, FILE *f) {
     char ktoc[] = " wlsd";
     unsigned int n = 0;
 
-    if (fn->lnk.is_exported) {
-        fprintf(f, "export ");
-    }
     fprintf(f, "function %c $%s() {\n", ktoc[fn->ret_type], fn->name);
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
@@ -177,9 +174,6 @@ void printfn(Fn *fn, FILE *f) {
 void printdata(Data *d, FILE *f) {
     
     unsigned int n = 1;
-    if (d->lnk.is_exported) {
-        fprintf(f, "export ");
-    }
     fprintf(f, "data $%s = { ", d->name);
     listNode *node;
     listNode *iter = listFirst(d->dataField_list);
@@ -266,10 +260,9 @@ static void err(char *s, ...) {
     exit(1);
 }
 
-Data *newData(Lnk *link_info, char *name) {
+Data *newData(char *name) {
     Data *d = xmalloc(sizeof(Data));
     strncpy(d->name, name, NString);
-    d->lnk = *link_info;
     d->dataField_list = listCreate();
     listSetFreeMethod(d->dataField_list, (void (*)(void *))freeDataField);
     return d;
@@ -357,7 +350,7 @@ Blk *newBlock(uint32_t nlocals) {
     return b;
 }
 
-Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start) {
+Fn *newFunc(simple_type ret_type, char *name, Blk *start) {
     next_temp_id = 0;
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
@@ -369,7 +362,6 @@ Fn *newFunc(Lnk *link_info, simple_type ret_type, char *name, Blk *start) {
     listAddNodeTail(f->blk_list, start);
     f->start = start;
     f->ret_type = ret_type;
-    f->lnk = *link_info;
     if (name == NULL) {
         err("function need a explicit name");
     }

@@ -6,10 +6,10 @@ extern void rv32_init(AOTModule *aotm);
 extern void rv32_emit_target_info(AOTModule *aotm);
 extern void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data);
 extern void rv32_init_text(AOTModule *aotm);
-extern void rv32_emit_fn_text(AOTModule *aotm, Fn *fn);
+extern void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index);
 extern void rv32_finalize_text(AOTModule *aotm);
 extern void rv32_emit_function(AOTModule *aotm);
-extern void rv32_emit_export(AOTModule *aotm);
+extern void rv32_emit_export(AOTModule *aotm, uint32_t num_exports, WASMExport *exports);
 extern void rv32_emit_relocation(AOTModule *aotm);
 extern void rv32_finalize(AOTModule *aotm, uint8_t **buf, uint32_t *buf_len);
 

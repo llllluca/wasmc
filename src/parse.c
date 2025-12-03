@@ -111,6 +111,7 @@ static void parse_function_section_if_exists(wasm_module *m) {
             panic();
         }
         m->func_decls[i].type = &m->types[index];
+        m->func_decls[i].type_index = index;
     }
 }
 
@@ -198,7 +199,7 @@ static void parse_global_section_if_exists(wasm_module *m) {
 
 static void parse_export_section_if_exists(wasm_module *m) {
     unsigned char id;
-    uint32_t size, num_exports;
+    uint32_t size;
 
     if (m->module.offset >= m->module.end) return;
     read_u8(&m->module, &id);
@@ -208,49 +209,36 @@ static void parse_export_section_if_exists(wasm_module *m) {
     }
 
     readULEB128_u32(&m->module, &size);
-    readULEB128_u32(&m->module, &num_exports);
-    for (unsigned int i = 0; i < num_exports; i++) {
+    readULEB128_u32(&m->module, &m->num_exports);
+    m->exports = xcalloc(m->num_exports, sizeof(struct WASMExport));
+    for (unsigned int i = 0; i < m->num_exports; i++) {
         uint32_t name_len;
         readULEB128_u32(&m->module, &name_len);
-        unsigned char *name = m->module.offset;
+        char *name = (char *)m->module.offset;
         m->module.offset += name_len;
         unsigned char export_desc;
         read_u8(&m->module, &export_desc);
-        // only functions export are implemented
+        uint32_t index;
+        readULEB128_u32(&m->module, &index);
         switch (export_desc) {
-            case 0x00: {
-                uint32_t funcidx;
-                readULEB128_u32(&m->module, &funcidx);
-                if (funcidx >= m-> num_funcs) {
+            case EXPORT_TYPE_FUNC: {
+                if (index >= m->num_funcs) {
                     panic();
                 }
-                m->func_decls[funcidx].is_exported = true;
-                if (m->func_decls[funcidx].name != NULL) {
-                    free(m->func_decls[funcidx].name);
-                }
-                m->func_decls[funcidx].name = xcalloc(name_len+1, sizeof(char));
-                memcpy(m->func_decls[funcidx].name, name, name_len);
-                m->func_decls[funcidx].name[name_len] = '\0';
-                // temporary hack
-                if (strcmp(m->func_decls[funcidx].name, "_start") == 0) {
-                    memcpy(m->func_decls[funcidx].name, "main", 4+1);
-                }
             } break;
-            case 0x01: {
-                uint32_t tableidx;
-                readULEB128_u32(&m->module, &tableidx);
+            case EXPORT_TYPE_TABLE: {
             } break;
-            case 0x02: {
-                uint32_t memidx;
-                readULEB128_u32(&m->module, &memidx);
+            case EXPORT_TYPE_MEM: {
             } break;
-            case 0x03: {
-                uint32_t globalidx;
-                readULEB128_u32(&m->module, &globalidx);
+            case EXPORT_TYPE_GLOBAL: {
             } break;
             default:
                 panic();
         }
+        m->exports[i].name_len = name_len;
+        m->exports[i].name = name;
+        m->exports[i].export_desc = export_desc;
+        m->exports[i].index = index;
     }
 }
 
@@ -361,17 +349,12 @@ wasm_module* parse(unsigned char *start, unsigned int len) {
     parse_code_section_if_exists(m);
     parse_data_section_if_exists(m);
 
-    /* Give an explicit name to not exported functions.
-     * It is not a good solution, internal names can clash with exported name */
-    unsigned int id = 0;
     for (uint32_t i = 0; i < m->num_funcs; i++) {
-        if (!m->func_decls[i].is_exported) {
-            int n = snprintf(NULL, 0, "_f%d", id);
-            if (n < 0) panic();
-            size_t size = n + 1;
-            m->func_decls[i].name = xcalloc(size, sizeof(char));
-            snprintf(m->func_decls[i].name, size, "_f%d", id++);
-        }
+        int n = snprintf(NULL, 0, "aot_func#%d", i);
+        if (n < 0) panic();
+        size_t size = n + 1;
+        m->func_decls[i].name = xcalloc(size, sizeof(char));
+        snprintf(m->func_decls[i].name, size, "aot_func#%d", i);
     }
 
     return m;

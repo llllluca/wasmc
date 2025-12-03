@@ -1004,14 +1004,12 @@ static Fn *compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *bo
 
     uint32_t locals_len = t->num_params + body->num_locals;
 
-    Lnk link_info = {0};
-    link_info.is_exported = decl->is_exported;
     simple_type ret_type = NO_TYPE;
     if (t->return_type != NO_VALTYPE) {
         ret_type = cast(t->return_type);
     }
     Blk *start = newBlock(locals_len);
-    Fn *qbe_func = newFunc(&link_info, ret_type, decl->name, start);
+    Fn *qbe_func = newFunc(ret_type, decl->name, start);
     Ref zero = newIntConst(qbe_func, 0);
 
     for (uint32_t i = 0; i < t->num_params; i++) {
@@ -1192,12 +1190,12 @@ void compile(wasm_module *m, uint8_t **out_buf, uint32_t *out_len) {
         register_allocation(fn);
         //printfn(fn, stdout);
         //rv32_emitfn(fn);
-        rv32.emit_fn_text(&aot_mod, fn);
+        rv32.emit_fn_text(&aot_mod, fn, decl->type_index);
         freeFunc(fn);
     }
     rv32.finalize_text(&aot_mod);
     rv32.emit_function(&aot_mod);
-    rv32.emit_export(&aot_mod);
+    rv32.emit_export(&aot_mod, m->num_exports, m->exports);
     rv32.emit_relocation(&aot_mod);
     rv32.finalize(&aot_mod, out_buf, out_len);
 }

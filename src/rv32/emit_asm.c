@@ -1,20 +1,21 @@
 #include "../all.h"
 #include <assert.h>
+#include <stdbool.h>
 
 
 typedef struct omap_elem {
     char *asm_instr;
-    /* TRUE if asm_instr can be a register-immediate instruction,
-     * FALSE otherwise. A register-immediate instruction can have
+    /* true if asm_instr can be a register-immediate instruction,
+     * false otherwise. A register-immediate instruction can have
      * one operand (narg == 1) or two operands (narg == 2),
      * the operand that hold the immediate value is the first operand
      * if narg == 1 and is the second operand if narg == 2. */
-    boolean can_be_reg_imm;
+    bool can_be_reg_imm;
     /* The immediate value v must be imm_min <= v <= imm_max */
     int imm_min;
     int imm_max;
-    /* TRUE if asm_instr is commutative, FALSE otherwise */
-    boolean is_commutative;
+    /* true if asm_instr is commutative, false otherwise */
+    bool is_commutative;
     /* argn can be only 1 or 2 */
     unsigned int argn;
 } omap_elem;
@@ -22,192 +23,192 @@ typedef struct omap_elem {
 const omap_elem omap[] = {
 	[ADD_INSTR] = {
         .asm_instr = "add%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = TRUE,
+        .is_commutative = true,
         .argn = 2,
     },
     [SUB_INSTR] = {
         .asm_instr = "sub %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [MUL_INSTR] = {
         .asm_instr = "mul %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = TRUE,
+        .can_be_reg_imm = false,
+        .is_commutative = true,
         .argn = 2,
     },
     [DIV_INSTR] = {
         .asm_instr = "div %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [UDIV_INSTR] = {
         .asm_instr = "divu %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [REM_INSTR] = {
         .asm_instr = "rem %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [UREM_INSTR] = {
         .asm_instr = "remu %=, %0, %1",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [AND_INSTR] = {
         .asm_instr = "and%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = TRUE,
+        .is_commutative = true,
         .argn = 2
     },
     [OR_INSTR] = {
         .asm_instr = "or%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = TRUE,
+        .is_commutative = true,
         .argn = 2,
     },
     [SHL_INSTR] = {
         .asm_instr = "sll%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = true,
+        .is_commutative = false,
         .imm_min = -16,
         .imm_max =  15,
         .argn = 2,
     },
     [SAR_INSTR] = {
         .asm_instr = "sra%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = true,
+        .is_commutative = false,
         .imm_min = -16,
         .imm_max =  15,
         .argn = 2,
     },
     [EQZW_INSTR] = {
         .asm_instr = "seqz %=, %0",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 1,
     },
     [XOR_INSTR] = {
         .asm_instr = "xor%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = TRUE,
+        .is_commutative = true,
         .argn = 2,
     },
     [CSLTW_INSTR] = {
         .asm_instr = "slt%k %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = FALSE,
+        .is_commutative = false,
         .argn = 2,
     },
     [CULTW_INSTR] = {
         .asm_instr = "slt%ku %=, %0, %1",
-        .can_be_reg_imm = TRUE,
+        .can_be_reg_imm = true,
         .imm_min = -2048,
         .imm_max =  2047,
-        .is_commutative = FALSE,
+        .is_commutative = false,
         .argn = 2,
     },
     [STOREW_INSTR] = {
         .asm_instr = "sw %0, 0(%1)",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 2,
     },
     [LOADW_INSTR] = {
         .asm_instr = "lw %=, 0(%0)",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 1,
     },
     [LOADUB_INSTR] = {
         .asm_instr = "lw %=, 0(%0)",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 1,
     },
     [STOREB_INSTR] = {
         .asm_instr = "sb %0, 0(%1)",
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 1,
     },
     [NEG_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [SHR_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [CNEW_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [CALL_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [PAR_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [ARG_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [EXTSW_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [COPY_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [PUSH_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
     [POP_INSTR] = {
         .asm_instr = NULL,
-        .can_be_reg_imm = FALSE,
-        .is_commutative = FALSE,
+        .can_be_reg_imm = false,
+        .is_commutative = false,
         .argn = 0,
     },
 };
@@ -299,23 +300,23 @@ static void fix_arg(Ref *arg, rv32_reg r, FILE *f) {
     }
 }
 
-static boolean is_immediate_val(Ref *r, int imm_min, int imm_max) {
+static bool is_immediate_val(Ref *r, int imm_min, int imm_max) {
     if (r->type == RCon) {
         Con *c = r->val.con;
         if (c->type == CInt64) {
             if (imm_min <= c->val.i && c->val.i <= imm_max) {
-                return TRUE;
+                return true;
             }
         }
     }
-    return FALSE;
+    return false;
 }
 
 static void fix_ins_args(Ins *i, FILE *f) {
     const omap_elem *e = &omap[i->op];
     if (e->can_be_reg_imm) {
         if (e->argn == 2) {
-            boolean imm = is_immediate_val(
+            bool imm = is_immediate_val(
                 &i->arg[1],
                 e->imm_min,
                 e->imm_max);
@@ -323,7 +324,7 @@ static void fix_ins_args(Ins *i, FILE *f) {
                 fix_arg(&i->arg[0], rv32_reserved_reg[0], f);
                 return;
             } else if (e->is_commutative) {
-                boolean imm = is_immediate_val(
+                bool imm = is_immediate_val(
                     &i->arg[0],
                     e->imm_min,
                     e->imm_max);
@@ -336,7 +337,7 @@ static void fix_ins_args(Ins *i, FILE *f) {
                 }
             }
         } else if (e->argn == 1) {
-            boolean imm = is_immediate_val(
+            bool imm = is_immediate_val(
                 &i->arg[0],
                 e->imm_min,
                 e->imm_max);
@@ -365,7 +366,7 @@ static void emitf(const omap_elem *e, Ins *i, FILE *f) {
         }
         switch ((c = *s++)) {
             case 'k': {
-                boolean imm = is_immediate_val(
+                bool imm = is_immediate_val(
                     &i->arg[e->argn-1],
                     e->imm_min,
                     e->imm_max);
@@ -553,7 +554,7 @@ void rv32_emitfn(Fn *fn, FILE *f) {
             frame);
     }
 
-    boolean lbl = FALSE;
+    bool lbl = false;
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
@@ -567,7 +568,7 @@ void rv32_emitfn(Fn *fn, FILE *f) {
             Ins *i = listNodeValue(ins_node);
             emitins(fn, i, f);
         }
-        lbl = TRUE;
+        lbl = true;
         switch (b->jmp.type) {
             case HALT_JUMP_TYPE: {
                 fprintf(f, "\tebreak\n");
@@ -598,7 +599,7 @@ void rv32_emitfn(Fn *fn, FILE *f) {
                 if (b->succ[0] != blk_next) {
                     fprintf(f, "\tj .L%s\n", b->succ[0]->name);
                 } else {
-                    lbl = FALSE;
+                    lbl = false;
                 }
             } break;
             case JNZ_JUMP_TYPE: {

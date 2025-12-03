@@ -718,14 +718,11 @@ void print_export_section(AOTSection *s) {
         read_uint8(p, p_end, &export.kind);
         uint16_t name_len;
         read_uint16(p, p_end, &name_len);
-        if (p[name_len-1] != '\0') {
-            fprintf(stderr, "Error: the string is not terminated with \\0.");
-            exit(EXIT_FAILURE);
-        }
         export.name = (char *)p;
         p += name_len;
 
-        printf("export[%"PRIu32"].name: %s\n", i, export.name);
+        printf("export[%"PRIu32"].name_len: %"PRIi32"\n", i, name_len);
+        printf("export[%"PRIu32"].name: %*s\n", i, name_len, export.name);
         printf("export[%"PRIu32"].kind: %"PRIu8"\n", i, export.kind);
         printf("export[%"PRIu32"].index: %"PRIu32"\n", i, export.index);
     }
