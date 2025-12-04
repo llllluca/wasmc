@@ -151,12 +151,6 @@ const omap_elem omap[] = {
         .is_commutative = false,
         .argn = 1,
     },
-    [NEG_INSTR] = {
-        .asm_instr = NULL,
-        .can_be_reg_imm = false,
-        .is_commutative = false,
-        .argn = 0,
-    },
     [SHR_INSTR] = {
         .asm_instr = NULL,
         .can_be_reg_imm = false,

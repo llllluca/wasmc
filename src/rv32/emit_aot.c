@@ -73,7 +73,9 @@ static const instr_info_elem instr_info[] = {
         .argn = 2,
     },
     [SUB_INSTR] = {
-        .can_be_reg_imm = false,
+        .can_be_reg_imm = true,
+        .imm_min = -2048,
+        .imm_max =  2047,
         .is_commutative = false,
         .argn = 2,
     },
@@ -176,11 +178,6 @@ static const instr_info_elem instr_info[] = {
         .is_commutative = false,
         .argn = 1,
     },
-    [NEG_INSTR] = {
-        .can_be_reg_imm = false,
-        .is_commutative = false,
-        .argn = 0,
-    },
     [SHR_INSTR] = {
         .can_be_reg_imm = false,
         .is_commutative = false,
@@ -228,36 +225,38 @@ static const instr_info_elem instr_info[] = {
     },
 };
 
+/* binary operation tempalte */
+#define BINOP(OP, OPI)                               \
+    {                                                \
+        fix_ins_args(i, &p, p_end);                  \
+        rv32_reg rd = i->to.val.loc.as.reg;          \
+        rv32_reg rs1 = i->arg[0].val.loc.as.reg;     \
+        if (i->arg[1].type == RCon) {                \
+            uint64_t imm = i->arg[1].val.con->val.i; \
+            EMIT(OPI(rd, rs1, imm), p, p_end);       \
+        } else {                                     \
+            rv32_reg rs2 = i->arg[1].val.loc.as.reg; \
+            EMIT(OP(rd, rs1, rs2), p, p_end);        \
+        }                                            \
+    } break
+
 static void emitins(AOTModule *aotm, Ins *i) {
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
 
     switch (i->op) {
-        case ADD_INSTR: {
+        case ADD_INSTR: BINOP(RV32_ADD, RV32_ADDI);
+        case SUB_INSTR: BINOP(RV32_SUB, RV32_SUBI);
+        case EQZW_INSTR: {
             fix_ins_args(i, &p, p_end);
             rv32_reg rd = i->to.val.loc.as.reg;
             rv32_reg rs1 = i->arg[0].val.loc.as.reg;
-            if (i->arg[1].type == RCon) {
-                uint64_t imm = i->arg[1].val.con->val.i;
-                EMIT(RV32_ADDI(rd, rs1, imm), p, p_end);
-            } else {
-                rv32_reg rs2 = i->arg[1].val.loc.as.reg;
-                EMIT(RV32_ADD(rd, rs1, rs2), p, p_end);
-            }
+            EMIT(RV32_SEQZ(rd, rs1), p, p_end);
         } break;
-        case SUB_INSTR: {
-            const instr_info_elem *e = &instr_info[ADD_INSTR];
-            rv32_reg rd = i->to.val.loc.as.reg;
-            rv32_reg rs1 = i->arg[0].val.loc.as.reg;
-            if (is_imm(&i->arg[1], e->imm_min, e->imm_max)) {
-                uint64_t imm = -1 * i->arg[1].val.con->val.i;
-                EMIT(RV32_ADDI(rd, rs1, imm), p, p_end);
-            } else {
-                rv32_reg rs2 = i->arg[1].val.loc.as.reg;
-                EMIT(RV32_SUB(rd, rs1, rs2), p, p_end);
-            }
-        } break;
+        case XOR_INSTR:   BINOP(RV32_XOR, RV32_XORI);
+        case CSLTW_INSTR: BINOP(RV32_SLT, RV32_SLTI);
+        case CULTW_INSTR: BINOP(RV32_SLTU, RV32_SLTIU);
         case COPY_INSTR: {
             assert(i->to.type == RLoc);
             if (i->to.val.loc.type == REGISTER) {
@@ -272,7 +271,8 @@ static void emitins(AOTModule *aotm, Ins *i) {
                 }
                 else if (i->arg[0].type == RLoc && loc->type == STACK_SLOT) {
                     /* the copy source is a stack slot */
-                    assert(0 && "STACK_SLOT as a copy source is not implemented");
+                    /* STACK_SLOT as a copy destination is not implemented */
+                    assert(0);
                 }
                 else if (i->arg[0].type == RCon) {
                     /* the copy source is a constant */
@@ -283,7 +283,8 @@ static void emitins(AOTModule *aotm, Ins *i) {
             }
             else if (i->to.val.loc.type == STACK_SLOT) {
                 /* the copy destination is a stack slot */
-                assert(0 && "STACK_SLOT as a copy destination is not implemented");
+                /* STACK_SLOT as a copy destination is not implemented */
+                assert(0); 
             }
             else assert(0);
         } break;
@@ -437,10 +438,52 @@ ERROR:
 
 */
 
+typedef struct RV32JumpPatch {
+    struct RV32JumpPatch *next;
+    Blk *jump_target;
+    enum {
+        J_PATCH_TYPE,
+        BEQZ_PATCH_TYPE,
+        BNEZ_PATCH_TYPE,
+    } type;
+    uint8_t *jump_instr;
+} RV32JumpPatch;
+
+static void backpatch(list *patch_list, Blk *b) {
+    listNode *patch_node;
+    listNode *patch_iter = listFirst(patch_list);
+    while ((patch_node = listNext(&patch_iter)) != NULL) {
+        RV32JumpPatch *p = listNodeValue(patch_node);
+        if (b != p->jump_target) {
+            continue;
+        }
+        int32_t imm = b->text_start - p->jump_instr;
+        switch (p->type) {
+            case J_PATCH_TYPE: {
+                *(uint32_t *)p->jump_instr = RV32_J(imm).as.u32;
+            } break;
+            case BEQZ_PATCH_TYPE: {
+                rv32_reg rs1 = ((b_ins_fmt *)p->jump_instr)->rs1;
+                *(uint32_t *)p->jump_instr = RV32_BEQZ(rs1, imm).as.u32;
+            } break;
+            case BNEZ_PATCH_TYPE: {
+                rv32_reg rs1 = ((b_ins_fmt *)p->jump_instr)->rs1;
+                *(uint32_t *)p->jump_instr = RV32_BNEZ(rs1, imm).as.u32;
+            } break;
+            default:
+                /* Unexpected patch type */
+                assert(0);
+        }
+        listDelNode(patch_list, patch_node);
+    }
+}
+
 void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
+    list *patch_list = listCreate();
+    listSetFreeMethod(patch_list, free);
 
     uint32_t next_func = aotm->next_func;
     assert(next_func < aotm->func_count);
@@ -468,14 +511,12 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
         EMIT(RV32_SUB(SP, SP, T6), p, p_end);
     }
 
-    bool lbl = false;
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        if (lbl || listLength(b->preds) > 1) {
-            assert(0 && "label unimplemented!");
-        }
+        b->text_start = p;
+        backpatch(patch_list, b);
         listNode *ins_node;
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
@@ -484,7 +525,6 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
             emitins(aotm, i);
             p = aotm->p;
         }
-        lbl = true;
         switch (b->jmp.type) {
             case HALT_JUMP_TYPE: {
                 EMIT(RV32_EBREAK, p, p_end);
@@ -503,13 +543,78 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
                 EMIT(RV32_RET, p, p_end);
             } break;
             case JMP_JUMP_TYPE: {
-                assert(0 && "JMP_JUMP_TYPE unimplemented!");
+                Blk *blk_next = NULL;
+                if (listNextNode(blk_node) != NULL) {
+                    blk_next = listNodeValue(listNextNode(blk_node));
+                }
+                Blk *jump_target = b->succ[0];
+                /* If the jump target is the next block to be processed,
+                 * don't emit the j instruction */
+                if (jump_target != blk_next) {
+                    int32_t imm = 0;
+                    if (jump_target->text_start != NULL) {
+                        /* jump_target was already processed, so we know where the
+                         * instructions of jump_target start in the text segment */
+                         imm = jump_target->text_start - p;
+                    } else {
+                        /* jump_target hasn't already been processed,
+                         * let's create a patch and fix it later */
+                        RV32JumpPatch *patch = xmalloc(sizeof(struct RV32JumpPatch));
+                        patch->jump_target = jump_target;
+                        patch->type = J_PATCH_TYPE;
+                        patch->jump_instr = p;
+                        listAddNodeTail(patch_list, patch);
+                    }
+                    EMIT(RV32_J(imm), p, p_end);
+                }
             } break;
             case JNZ_JUMP_TYPE: {
-                assert(0 && "JNZ_JUMP_TYPE unimplemented!");
+                fix_arg(&b->jmp.arg, rv32_reserved_reg[0], &p, p_end);
+                Blk *blk_next = NULL;
+                if (listNextNode(blk_node) != NULL) {
+                    blk_next = listNodeValue(listNextNode(blk_node));
+                }
+                if (blk_next == b->succ[0]) {
+                    /* The next block to be processed is the 'then' block, so jump
+                     * to the 'else' block is the argument of jnz is equal to zero */
+                    Blk *jump_target = b->succ[1];
+                    rv32_reg rs1 = b->jmp.arg.val.loc.as.reg;
+                    int32_t imm = 0;
+                    if (jump_target->text_start != NULL) {
+                        imm = jump_target->text_start - p;
+                    } else {
+                        RV32JumpPatch *patch = xmalloc(sizeof(struct RV32JumpPatch));
+                        patch->jump_target = jump_target;
+                        patch->type = BEQZ_PATCH_TYPE;
+                        patch->jump_instr = p;
+                        listAddNodeTail(patch_list, patch);
+                    }
+                    EMIT(RV32_BEQZ(rs1, imm), p, p_end);
+                } else if (blk_next == b->succ[1]) {
+                    /* The next block to be processed is the 'else' block, so jump
+                     * to the 'then' block is the argument of jnz is not equal to zero */
+                    Blk *jump_target = b->succ[0];
+                    rv32_reg rs1 = b->jmp.arg.val.loc.as.reg;
+                    int32_t imm = 0;
+                    if (jump_target->text_start != NULL) {
+                        imm = jump_target->text_start - p;
+                    } else {
+                        RV32JumpPatch *patch = xmalloc(sizeof(struct RV32JumpPatch));
+                        patch->jump_target = jump_target;
+                        patch->type = BNEZ_PATCH_TYPE;
+                        patch->jump_instr = p;
+                        listAddNodeTail(patch_list, patch);
+                    }
+                    EMIT(RV32_BNEZ(rs1, imm), p, p_end);
+                } else {
+                    /* The next block to be processed after a block ending with a jnz
+                     * must be a the 'else' block or the 'then' block of jnz. */
+                    assert(0);
+                }
             } break;
             default:
-                panic();
+                /* Unexpected jump type */
+                assert(0);
         }
     }
 

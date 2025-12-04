@@ -86,6 +86,17 @@ typedef struct s_ins_fmt {
     unsigned int imm2:7;
 } s_ins_fmt;
 
+typedef struct b_ins_fmt {
+    unsigned int op:7;
+    unsigned int imm_11:1;
+    unsigned int imm_4_1:4;
+    unsigned int func3:3;
+    unsigned int rs1:5;
+    unsigned int rs2:5;
+    unsigned int imm_10_5:6;
+    unsigned int imm_12:1;
+} b_ins_fmt;
+
 typedef struct u_ins_fmt {
     unsigned int op:7;
     unsigned int rd:5;
@@ -106,13 +117,17 @@ typedef struct ins_fmt {
         R_INS_FMT,
         I_INS_FMT,
         S_INS_FMT,
+        B_INS_FMT,
         U_INS_FMT,
+        J_INS_FMT,
     } kind;
     union {
         r_ins_fmt r;
         i_ins_fmt i;
         s_ins_fmt s;
+        b_ins_fmt b;
         u_ins_fmt u;
+        j_ins_fmt j;
         uint32_t u32;
     } as;
 
@@ -166,6 +181,21 @@ typedef struct ins_fmt {
         }                                     \
     }
 
+#define B_TYPE_INS_TEMPLATE(OPCODE, IMM_11, IMM_4_1, FUNC3, RS1, RS2, IMM_10_5, IMM_12) \
+    (ins_fmt) {                                                                         \
+        .kind = B_INS_FMT,                                                              \
+        .as.b = {                                                                       \
+            .op = (OPCODE),                                                             \
+            .imm_11 = (IMM_11),                                                         \
+            .imm_4_1 = (IMM_4_1),                                                       \
+            .func3 = (FUNC3),                                                           \
+            .rs1 = (RS1),                                                               \
+            .rs2 = (RS2),                                                               \
+            .imm_10_5 = (IMM_10_5),                                                     \
+            .imm_12 = (IMM_12),                                                         \
+        }                                                                               \
+    }
+
 #define J_TYPE_INS_TEMPLATE(OPCODE, RD, IMM_19_12, IMM_11, IMM_10_1, IMM_20) \
     (ins_fmt) {                                                              \
         .kind = J_INS_FMT,                                                   \
@@ -204,6 +234,12 @@ typedef struct ins_fmt {
  * Use: mv rd, rs1
  * Result rd = rs1 */
 #define RV32_MV(RD, RS1) RV32_ADDI(RD, RS1, 0)
+
+/* Instr: subi
+ * Description: sub immediate (pseudoinstruction)
+ * Use: subi rd, rs1, imm
+ * Result rd = rs1 - imm */
+#define RV32_SUBI(RD, RS1, IMM) RV32_ADDI(RD, RS1, -1 * IMM)
 
 /* Instr: slli
  * Description: shift left logical immediate
@@ -414,15 +450,15 @@ typedef struct ins_fmt {
  * Description: jump and link
  * Use: jal rd, imm
  * Result: rd = pc+4; pc += imm */
-#define JAL_OPCODE 0xF6
+#define JAL_OPCODE 0x6F
 #define RV32_JAL(RD, IMM) \
-    J_TYPE_INS_TEMPLATE(JAL_OPCODE, RD, (IMM) >> 12) & 0xFF, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0x3FF, ((IMM) >> 20) & 0x1)
+    J_TYPE_INS_TEMPLATE(JAL_OPCODE, RD, ((IMM) >> 12) & 0xFF, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0x3FF, ((IMM) >> 20) & 0x1)
 
 /* Instr: j
  * Description: Jump (pseudoinstruction)
  * Use: j imm
  * Result: pc += imm */
-#define RV32_J(IMM) JAL(ZERO, IMM)
+#define RV32_J(IMM) RV32_JAL(ZERO, IMM)
 
 /* Instr: jalr
  * Description: jump and link register
@@ -441,7 +477,115 @@ typedef struct ins_fmt {
 
 /* ----- Control Transfer Instructions, Conditional Jumps ----- */
 
+#define RV32_BRANCH_OPCODE 0x63
 
+/* Instr: beq
+ * Description: branch equal
+ * Use: beq rs1, rs2, imm
+ * Result: if(rs1 == rs2) pc += imm */
+#define BEQ_FUNC3 0x0
+#define RV32_BEQ(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BEQ_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: beqz
+ * Description: branch equal zero (pseudoinstruction)
+ * Use: beqz rs1, imm
+ * Result: if(rs1 == 0) pc += imm */
+#define RV32_BEQZ(RS1, IMM) RV32_BEQ(RS1, ZERO, IMM)
+
+/* Instr: bne
+ * Description: branch not equal
+ * Use: bne rs1, rs2, imm
+ * Result: if(rs1 != rs2) pc += imm */
+#define BNE_FUNC3 0x1
+#define RV32_BNE(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BNE_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: bnez
+ * Description: branch not equal zero (psuedoinstruction)
+ * Use: bnez rs1, rs2, imm
+ * Result: if(rs1 != 0) pc += imm */
+#define RV32_BNEZ(RS1, IMM) RV32_BNE(RS1, ZERO, IMM)
+
+/* Instr: blt
+ * Description: branch less than
+ * Use: blt rs1, rs2, imm
+ * Result: if(rs1 < rs2) pc += imm */
+#define BLT_FUNC3 0x4
+#define RV32_BLT(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BLT_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: bgt
+ * Description: branch greater than (pseudoinstruction)
+ * Use: bgt rs1, rs2, imm
+ * Result: if(rs1 > rs2) pc += imm */
+#define RV32_BGT(RS1, RS2, IMM) RV32_BLT(RS2, RS1, IMM)
+
+/* Instr: bge
+ * Description: branch greater or equal
+ * Use: bge rs1, rs2, imm
+ * Result: if(rs1 >= rs2) pc += imm */
+#define BGE_FUNC3 0x5
+#define RV32_BGE(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BGE_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: ble
+ * Description: branch less or equal (psuedoinstruction)
+ * Use: ble rs1, rs2, imm
+ * Result: if(rs1 <= rs2) pc += imm */
+#define RV32_BLE(RS1, RS2, IMM) RV32_BGE(RS2, RS1, IMM)
+
+/* Instr: bltu
+ * Description: branch less than unsigned
+ * Use: bltu rs1, rs2, imm
+ * Result: if(rs1 < rs2) pc += imm */
+#define BLTU_FUNC3 0x6
+#define RV32_BLTU(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BLTU_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: bltz
+ * Description: branch less than zero (pseudoinstructoin)
+ * Use: bltz rs1, imm
+ * Result: if(rs1 < 0) pc += imm */
+#define RV32_BLTZ(RS1, IMM) RV32_BLT(RS1, ZERO, IMM)
+
+/* Instr: bgtu
+ * Description: branch greater than unsigned (psuedoinstruction)
+ * Use: bgtu rs1, rs2, imm
+ * Result: if(rs1 > rs2) pc += imm */
+#define RV32_BGTU(RS1, RS2, IMM) RV32_BLTU(RS2, RS1, IMM)
+
+/* Instr: gtz
+ * Description: branch greater than zero (pseudoinstruction)
+ * Use: bgtz rs1, imm
+ * Result: if(rs1 > 0) pc += imm */
+#define RV32_GTZ(RS1, IMM) RV32_BGT(RS1, ZERO, IMM)
+
+/* Instr: bgeu
+ * Description: branch greater or equal unsigned
+ * Use: bgeu rs1, rs2, imm
+ * Result: if(rs1 >= rs2) pc += imm */
+#define BGEU_FUNC3 0x7
+#define RV32_BGEU(RS1, RS2, IMM) \
+    B_TYPE_INS_TEMPLATE(RV32_BRANCH_OPCODE, ((IMM) >> 11) & 0x1, ((IMM) >> 1) & 0xF, BGEU_FUNC3, RS1, RS2, ((IMM) >> 5) & 0x3F, ((IMM) >> 12) & 0x1)
+
+/* Instr: bleu
+ * Description: branch less or equal unsigned (pseudoinstruction)
+ * Use: bleu rs1, rs2, imm
+ * Result: if(rs1 <= rs2) pc += imm */
+#define RV32_BLEU(RS1, RS2, IMM) RV32_BGE(RS2, RS1, IMM)
+
+/* Instr: blez
+ * Description: branch less or equal zero (pseudoinstruction)
+ * Use: blez rs1, imm
+ * Result: if(rs1 <= 0) pc += imm */
+#define RV32_BLEZ(RS1, IMM) RV32_BLE(RS1, ZERO, IMM)
+
+/* Instr: bgez
+ * Description: branch greater or equal zero (pseudoinstruction)
+ * Use: bgez rs1, imm
+ * Result: if(rs1 >= 0) pc += imm */
+#define RV32_BGEZ(RS1, IMM) RV32_BGE(RS1, ZERO, IMM)
 
 /* ----- Load and Store Instructions ----- */
 

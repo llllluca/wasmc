@@ -112,6 +112,8 @@ struct Blk {
 
     bool is_loop_header;
     list* loop_end_blk_list;
+
+    uint8_t *text_start;
 };
 
 typedef struct Phi_arg {
@@ -163,7 +165,6 @@ typedef struct Data {
 typedef enum instr_opcode {
     ADD_INSTR,
     SUB_INSTR,
-    NEG_INSTR,
     DIV_INSTR,
     REM_INSTR,
     UDIV_INSTR,

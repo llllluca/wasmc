@@ -50,7 +50,6 @@ const char *optab[] = {
     /* Arithmetic and Bits */
     [ADD_INSTR] = "add",
     [SUB_INSTR] = "sub",
-    [NEG_INSTR] = "neg",
     [DIV_INSTR] = "div",
     [REM_INSTR] = "rem",
     [UDIV_INSTR] = "udiv",
@@ -347,6 +346,7 @@ Blk *newBlock(uint32_t nlocals) {
         }
     }
     b->is_sealed = false;
+    b->text_start = NULL;
     return b;
 }
 

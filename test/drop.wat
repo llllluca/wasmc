@@ -24,4 +24,4 @@
     i32.const 0
     drop
   )
-  (export "_start" (func 0)))
+  (export "main" (func 0)))

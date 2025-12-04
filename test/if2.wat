@@ -29,4 +29,4 @@
       )
     )
   )
-  (export "_start" (func 0)))
+  (export "main" (func 0)))

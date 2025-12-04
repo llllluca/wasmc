@@ -11,4 +11,4 @@
     i32.const 1
     select
   )
-  (export "_start" (func 0)))
+  (export "main" (func 0)))
