@@ -33,8 +33,8 @@ static void live_init(list *live, Blk* b, Blk *b_succ) {
     while ((phi_node = listNext(&phi_iter)) != NULL) {
         Phi *phi = listNodeValue(phi_node);
         Ref *r = input_of(phi, b);
-        if (r->type == RTmp) {
-            Tmp *t = listNodeValue(r->val.tmp_node);
+        if (r->type == REF_TYPE_TMP) {
+            Tmp *t = listNodeValue(r->as.tmp_node);
             listAddNodeTail(live, t);
         }
     }
@@ -85,7 +85,7 @@ typedef struct move_from {
     } type;
     union {
         location loc;
-        Con *con;
+        uint32_t int32_const;
     } as;
 } move_from;
 
@@ -94,13 +94,6 @@ typedef struct move {
     location to;
     move_status status;
 } move;
-
-#define LOCATION_EQ(a, b) ( \
-    ((a).type == LOCATION_NONE && (b).type == LOCATION_NONE) || \
-    ((a).type == REGISTER && (b).type == REGISTER && \
-     (a).as.reg == (b).as.reg) || \
-    ((a).type == STACK_SLOT && (b).type == STACK_SLOT && \
-     (a).as.stack_slot == (b).as.stack_slot))
 
 #define MOVE_FROM_EQ_TO(from, to) \
     (from.type != CONST && LOCATION_EQ(from.as.loc, to))
@@ -116,23 +109,23 @@ static list *phi_parallel_moves(Blk *pred, Blk *succ) {
         if (r == NULL) continue;
         move_from from;
         switch (r->type) {
-            case RTmp: {
-                Tmp *t = listNodeValue(r->val.tmp_node);
+            case REF_TYPE_TMP: {
+                Tmp *t = listNodeValue(r->as.tmp_node);
                 from.type = LOCATION;
                 from.as.loc = t->i->assign;
             } break;
-            case RCon: {
+            case REF_TYPE_INT32_CONST: {
                 from.type = CONST;
-                from.as.con = r->val.con;
+                from.as.int32_const = r->as.int32_const;
             } break;
             default:
                 panic();
         }
 
-        if (phi->to.type != RTmp) {
+        if (phi->to.type != REF_TYPE_TMP) {
             panic();
         }
-        Tmp *t = listNodeValue(phi->to.val.tmp_node);
+        Tmp *t = listNodeValue(phi->to.as.tmp_node);
         location to =  t->i->assign;
         if (!MOVE_FROM_EQ_TO(from, to)) {
             move *move = xmalloc(sizeof(struct move));
@@ -149,22 +142,22 @@ static Ins *alloc_copy(location *dst, move_from *src) {
     ins->op = COPY_INSTR;
     ins->type = WORD_TYPE;
 
-    ins->to.type = RLoc;
-    ins->to.val.loc = *dst;
+    ins->to.type = REF_TYPE_LOCATION;
+    ins->to.as.loc = *dst;
 
     switch (src->type) {
         case CONST:
-            ins->arg[0].type = RCon;
-            ins->arg[0].val.con = src->as.con;
+            ins->arg[0].type = REF_TYPE_INT32_CONST;
+            ins->arg[0].as.int32_const = src->as.int32_const;
             break;
         case LOCATION: {
-            ins->arg[0].type = RLoc;
-            ins->arg[0].val.loc = src->as.loc;
+            ins->arg[0].type = REF_TYPE_LOCATION;
+            ins->arg[0].as.loc = src->as.loc;
         } break;
         default:
             panic();
     }
-    ins->arg[1] = UNDEF_TMP_REF;
+    ins->arg[1] = UNDEFINED_REF;
     return ins;
 }
 
@@ -236,17 +229,6 @@ static void print_location(location *l) {
         default:
             panic();
     }
-}
-
-static void print_move(move *m) {
-    printf("from: ");
-    if (m->from.type == CONST) {
-        printf("%"PRIi64"\n", m->from.as.con->val.i);
-    } else {
-        print_location(&m->from.as.loc);
-    }
-    printf("to: ");
-    print_location(&m->to);
 }
 
 static void insert_move_at_start(Blk *b, list *ins_list) {
@@ -353,20 +335,18 @@ static void set_start(Tmp *t, unsigned int start) {
 
 static void fill_register_hints(Fn *f) {
 
-    /* Skip register A0 because in the wamr AOT execution enviroment
-     * it hold a pointer to the execution context */
-    unsigned int arg_index = 1;
+    unsigned int arg_index = 0;
     listNode *ins_node;
     listNode *ins_iter = listFirst(f->start->ins_list);
     while ((ins_node = listNext(&ins_iter)) != NULL) {
         Ins *ins = listNodeValue(ins_node);
         if (ins->op != PAR_INSTR) break;
-        if (ins->to.type == RTmp && ins->to.val.tmp_node != NULL) {
-            Tmp *t = listNodeValue(ins->to.val.tmp_node);
+        if (ins->to.type == REF_TYPE_TMP && ins->to.as.tmp_node != NULL) {
+            Tmp *t = listNodeValue(ins->to.as.tmp_node);
             t->i->register_hint = rv32_arg_reg[arg_index++];
         }
     }
-    arg_index = 0;
+    arg_index = 1;
 
     listNode *blk_node;
     listNode *blk_iter = listFirst(f->blk_list);
@@ -378,23 +358,23 @@ static void fill_register_hints(Fn *f) {
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
             if (ins->op == ARG_INSTR) {
-                if (ins->arg[0].type == RTmp && ins->arg[0].val.tmp_node != NULL) {
-                    Tmp *t = listNodeValue(ins->arg[0].val.tmp_node);
+                if (ins->arg[0].type == REF_TYPE_TMP && ins->arg[0].as.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(ins->arg[0].as.tmp_node);
                     t->i->register_hint = rv32_arg_reg[arg_index++];
                 }
             }
             else if (ins->op == CALL_INSTR) {
-                arg_index = 0;
-                if (ins->to.type == RTmp && ins->to.val.tmp_node != NULL) {
-                    Tmp *t = listNodeValue(ins->to.val.tmp_node);
+                arg_index = 1;
+                if (ins->to.type == REF_TYPE_TMP && ins->to.as.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(ins->to.as.tmp_node);
                     t->i->register_hint = A0;
                 }
             }
         }
 
         if (b->jmp.type == RET1_JUMP_TYPE) {
-            if (b->jmp.arg.type == RTmp && b->jmp.arg.val.tmp_node != NULL) {
-                Tmp *t = listNodeValue(b->jmp.arg.val.tmp_node);
+            if (b->jmp.arg.type == REF_TYPE_TMP && b->jmp.arg.as.tmp_node != NULL) {
+                Tmp *t = listNodeValue(b->jmp.arg.as.tmp_node);
                 t->i->register_hint = A0;
             }
         }
@@ -449,8 +429,8 @@ static live_interval **build_intervals(Fn *f) {
          * later. Additionally, the Tmp is added to the list of live Tmp.*/
 
         // The final jump can contain an input operand (i.e. a use of a Tmp).
-        listNode *tmp_node = b->jmp.arg.val.tmp_node;
-        if (b->jmp.arg.type == RTmp && tmp_node != NULL) {
+        listNode *tmp_node = b->jmp.arg.as.tmp_node;
+        if (b->jmp.arg.type == REF_TYPE_TMP && tmp_node != NULL) {
             Tmp *t = listNodeValue(tmp_node);
             add_range(t, b->id, b->jmp.id);
             listAddNodeHead(live, t);
@@ -461,8 +441,8 @@ static live_interval **build_intervals(Fn *f) {
         while ((ins_node = listPrev(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
             // Ins can contain a output operand (i.e. a definition of a Tmp).
-            listNode *tmp_node = ins->to.val.tmp_node;
-            if (ins->to.type == RTmp && tmp_node != NULL) {
+            listNode *tmp_node = ins->to.as.tmp_node;
+            if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
                 Tmp *t = listNodeValue(tmp_node);
                 set_start(t, ins->id);
                 live_remove(live, t);
@@ -477,8 +457,8 @@ static live_interval **build_intervals(Fn *f) {
             }
             // Ins can contain at most 2 input operands (i.e. a use of a Tmp).
             for (unsigned int i = 0; i < 2; i++) {
-                tmp_node = ins->arg[i].val.tmp_node;
-                if (ins->arg[i].type == RTmp && tmp_node != NULL) {
+                tmp_node = ins->arg[i].as.tmp_node;
+                if (ins->arg[i].type == REF_TYPE_TMP && tmp_node != NULL) {
                     Tmp *t = listNodeValue(tmp_node);
                     add_range(t, b->id, ins->id);
                     listAddNodeHead(live, t);
@@ -499,8 +479,8 @@ static live_interval **build_intervals(Fn *f) {
         listNode *phi_iter = listLast(b->phi_list);
         while ((phi_node = listPrev(&phi_iter)) != NULL) {
             Phi *phi = listNodeValue(phi_node);
-            listNode *tmp_node = phi->to.val.tmp_node;
-            assert(phi->to.type == RTmp && tmp_node != NULL);
+            listNode *tmp_node = phi->to.as.tmp_node;
+            assert(phi->to.type == REF_TYPE_TMP && tmp_node != NULL);
             Tmp *t = listNodeValue(tmp_node);
             live_remove(live, t);
             sorted_intervals[--n] = t->i;
@@ -669,13 +649,13 @@ static void assign_reg(live_interval *i,
 }
 
 static void tmpref_to_location(Ref *r) {
-    if (r->type == RTmp && r->val.tmp_node != NULL) {
-        Tmp *t = listNodeValue(r->val.tmp_node);
+    if (r->type == REF_TYPE_TMP && r->as.tmp_node != NULL) {
+        Tmp *t = listNodeValue(r->as.tmp_node);
         assert(t != NULL);
         live_interval *li = t->i;
         assert(li != NULL);
-        r->type = RLoc;
-        r->val.loc = li->assign;
+        r->type = REF_TYPE_LOCATION;
+        r->as.loc = li->assign;
     }
 }
 
@@ -686,17 +666,15 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
     };
     list *par_move = listCreate();
     listSetFreeMethod(par_move, free);
-    /* Skip register A0 because in the wamr AOT execution enviroment
-     * it hold a pointer to the execution context */
-    unsigned int arg_index = 1;
+    unsigned int arg_index = 0;
 
     listNode *ins_node;
     listNode *ins_iter = listFirst(f->start->ins_list);
     while ((ins_node = listNext(&ins_iter)) != NULL) {
         Ins *ins = listNodeValue(ins_node);
         if (ins->op != PAR_INSTR) break;
-        assert(ins->to.type == RTmp);
-        Tmp *t = listNodeValue(ins->to.val.tmp_node);
+        assert(ins->to.type == REF_TYPE_TMP);
+        Tmp *t = listNodeValue(ins->to.as.tmp_node);
         if (arg_index >= RV32_ARG_NUM_REG) panic();
         move_from from = {
             .type = LOCATION,
@@ -739,14 +717,14 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                 Ref *r = &ins->arg[0];
                 move_from from;
                 switch (r->type) {
-                    case RTmp: {
-                        Tmp *t = listNodeValue(r->val.tmp_node);
+                    case REF_TYPE_TMP: {
+                        Tmp *t = listNodeValue(r->as.tmp_node);
                         from.type = LOCATION;
                         from.as.loc = t->i->assign;
                     } break;
-                    case RCon: {
+                    case REF_TYPE_INT32_CONST: {
                         from.type = CONST;
-                        from.as.con = r->val.con;
+                        from.as.int32_const = r->as.int32_const;
                     } break;
                     default:
                         assert(0);
@@ -787,10 +765,10 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                     Ins *push_ins = xmalloc(sizeof(struct Ins));
                     push_ins->op = PUSH_INSTR;
                     push_ins->type = WORD_TYPE;
-                    push_ins->to = UNDEF_TMP_REF;
-                    push_ins->arg[0].type = RLoc;
-                    push_ins->arg[0].val.loc = li->assign;
-                    push_ins->arg[1] = UNDEF_TMP_REF;
+                    push_ins->to = UNDEFINED_REF;
+                    push_ins->arg[0].type = REF_TYPE_LOCATION;
+                    push_ins->arg[0].as.loc = li->assign;
+                    push_ins->arg[1] = UNDEFINED_REF;
                     listInsertNodeBefore(b->ins_list, call_node, push_ins);
                 }
 
@@ -800,10 +778,10 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                     Ins *pop_ins = xmalloc(sizeof(struct Ins));
                     pop_ins->op = POP_INSTR;
                     pop_ins->type = WORD_TYPE;
-                    pop_ins->to.type = RLoc;
-                    pop_ins->to.val.loc = li->assign;
-                    pop_ins->arg[0] = UNDEF_TMP_REF;
-                    pop_ins->arg[1] = UNDEF_TMP_REF;
+                    pop_ins->to.type = REF_TYPE_LOCATION;
+                    pop_ins->to.as.loc = li->assign;
+                    pop_ins->arg[0] = UNDEFINED_REF;
+                    pop_ins->arg[1] = UNDEFINED_REF;
                     listInsertNodeAfter(b->ins_list, call_node, pop_ins);
                 }
 
@@ -820,8 +798,8 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                 listRelease(move_seq);
                 listEmpty(par_move);
 
-                if (func_call->to.type == RTmp && func_call->to.val.tmp_node != NULL) {
-                    Tmp *t = listNodeValue(func_call->to.val.tmp_node);
+                if (func_call->to.type == REF_TYPE_TMP && func_call->to.as.tmp_node != NULL) {
+                    Tmp *t = listNodeValue(func_call->to.as.tmp_node);
                     if (!LOCATION_EQ(a0, t->i->assign)) {
                         move_from src = {
                             .type = LOCATION,
@@ -830,7 +808,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                         Ins *ins = alloc_copy(&t->i->assign, &src);
                         listInsertNodeAfter(b->ins_list, call_node, ins);
                     }
-                    func_call->to = UNDEF_TMP_REF;
+                    func_call->to = UNDEFINED_REF;
                 }
             }
         }
@@ -839,14 +817,14 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
             move_from src;
             Ref *r = &b->jmp.arg;
             switch (r->type) {
-                case RTmp: {
-                    Tmp *t = listNodeValue(r->val.tmp_node);
+                case REF_TYPE_TMP: {
+                    Tmp *t = listNodeValue(r->as.tmp_node);
                     src.type = LOCATION;
                     src.as.loc = t->i->assign;
                 } break;
-                case RCon: {
+                case REF_TYPE_INT32_CONST: {
                     src.type = CONST;
-                    src.as.con = r->val.con;
+                    src.as.int32_const = r->as.int32_const;
                 } break;
                 default:
                     assert(0);

@@ -29,6 +29,13 @@ typedef struct location {
     } as;
 } location;
 
+#define LOCATION_EQ(a, b) ( \
+    ((a).type == LOCATION_NONE && (b).type == LOCATION_NONE) || \
+    ((a).type == REGISTER && (b).type == REGISTER && \
+     (a).as.reg == (b).as.reg) || \
+    ((a).type == STACK_SLOT && (b).type == STACK_SLOT && \
+     (a).as.stack_slot == (b).as.stack_slot))
+
 typedef struct live_interval {
     unsigned int start;
     unsigned int end;
@@ -44,41 +51,41 @@ struct Tmp {
     live_interval *i;
 };
 
-typedef enum Con_type {
-    CInt64,
-    CDouble,
-    CSingle,
-    CAddr,
-} Con_type;
-
-typedef struct Con {
-    Con_type type;
-    union {
-        int64_t i;
-        double d;
-        float s;
-        char *addr;
-    } val;
-} Con;
-
-typedef enum Ref_type {
-    RTmp,
-    RCon,
-    RLoc
-} Ref_type;
-
-typedef union Ref_ptr {
-    listNode *tmp_node;
-    Con *con;
-    location loc;
-} Ref_ptr;
-
 typedef struct Ref {
-    Ref_type type;
-    Ref_ptr val;
+    enum {
+        REF_TYPE_UNDEFINED,
+        REF_TYPE_TMP,
+        REF_TYPE_INT32_CONST,
+        REF_TYPE_NAME,
+        REF_TYPE_LOCATION,
+    } type;
+    union {
+        listNode *tmp_node;
+        int32_t int32_const;
+        char *name;
+        location loc;
+    } as;
 } Ref;
 
-#define UNDEF_TMP_REF (Ref){ .type = RTmp, .val.tmp_node = NULL }
+#define UNDEFINED_REF \
+    (Ref){ .type = REF_TYPE_UNDEFINED, }
+
+#define NEW_INT32_CONST(val) \
+    (Ref){ .type = REF_TYPE_INT32_CONST, .as.int32_const = (val) }
+
+#define NEW_NAME(val) \
+    (Ref){ .type = REF_TYPE_NAME, .as.name = (val) }
+
+#define REF_EQ(a, b) \
+    (((a).type == REF_TYPE_UNDEFINED && (b).type == REF_TYPE_UNDEFINED) || \
+    ((a).type == REF_TYPE_TMP && (b).type == REF_TYPE_TMP && \
+        (a).as.tmp_node == (b).as.tmp_node) || \
+    ((a).type == REF_TYPE_INT32_CONST && (b).type == REF_TYPE_INT32_CONST && \
+        (a).as.int32_const == (b).as.int32_const) || \
+    ((a).type == REF_TYPE_NAME && (b).type == REF_TYPE_NAME && \
+        (a).as.name == (b).as.name) || \
+    ((a).type == REF_TYPE_LOCATION && (b).type == REF_TYPE_LOCATION && \
+        LOCATION_EQ((a).as.loc, (b).as.loc)))
 
 typedef enum Jump_type {
     NONE_JUMP_TYPE,
@@ -229,7 +236,7 @@ struct Use {
     instr((b), (temp), (kind), SUB_INSTR, (ref1), (ref2))
 
 #define NEG(b, temp, kind, ref) \
-    instr((b), (temp), (kind), NEG_INSTR, (ref1), UNDEF_TMP_REF)
+    instr((b), (temp), (kind), NEG_INSTR, (ref1), UNDEFINED_REF)
 
 #define DIV(b, temp, kind, ref1, ref2) \
     instr((b), (temp), (kind), DIV_INSTR, (ref1), (ref2))
@@ -266,7 +273,7 @@ struct Use {
 
 /* Comparisons */
 #define EQZW(b, temp, ref1) \
-    instr((b), (temp), WORD_TYPE, EQZW_INSTR, (ref1), UNDEF_TMP_REF)
+    instr((b), (temp), WORD_TYPE, EQZW_INSTR, (ref1), UNDEFINED_REF)
 
 #define CNEW(b, temp, ref1, ref2) \
     instr((b), (temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
@@ -278,27 +285,26 @@ struct Use {
     instr((b), (temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
 
 /* Memory */
-#define STOREW(b, fromRef, toRef) \
-    instr((b), UNDEF_TMP_REF, WORD_TYPE, STOREW_INSTR, (fromRef), (toRef))
+#define STOREW(b, fromRef, offset, toRef) \
+    instr((b), (fromRef), WORD_TYPE, STOREW_INSTR, (offset), (toRef))
 
-#define LOADW(b, temp, addr) \
-    instr((b), (temp), WORD_TYPE, LOADW_INSTR, (addr), UNDEF_TMP_REF)
+#define LOADW(b, toRef, offset, fromRef) \
+    instr((b), (toRef), WORD_TYPE, LOADW_INSTR, (offset), (fromRef))
 
 /* Conversions */
 #define EXTSW(b, temp, ref) \
-    instr((b), (temp), LONG_TYPE, EXTSW_INSTR, (ref), UNDEF_TMP_REF)
+    instr((b), (temp), LONG_TYPE, EXTSW_INSTR, (ref), UNDEFINED_REF)
 
 /* Cast and Copy */
 #define COPY(b, temp, kind, ref1) \
-    instr((b), (temp), (kind), COPY_INSTR, (ref1), UNDEF_TMP_REF)
+    instr((b), (temp), (kind), COPY_INSTR, (ref1), UNDEFINED_REF)
 
 /* Call */
 #define FUNC_CALL(b, temp, kind, addrRef) \
-    instr((b), (temp), kind, CALL_INSTR, (addrRef), UNDEF_TMP_REF)
+    instr((b), (temp), kind, CALL_INSTR, (addrRef), UNDEFINED_REF)
 
 #define VOID_FUNC_CALL(b, addrRef) \
-    instr((b), UNDEF_TMP_REF, WORD_TYPE, CALL_INSTR, (addrRef), UNDEF_TMP_REF)
-
+    instr((b), UNDEFINED_REF, WORD_TYPE, CALL_INSTR, (addrRef), UNDEFINED_REF)
 
 /* Data */
 #define ADD_INT32_DATA_FIELD(num) addNumDataField(DW, (num))
@@ -309,14 +315,14 @@ struct Use {
 /* libqbe.c */
 void printfn(Fn *fn, FILE *f);
 void printdata(Data *d, FILE *f);
+Ref newMemoryAddr(Fn *f, Blk *b);
 Fn *newFunc(simple_type ret_type, char *name, Blk *start);
 Ref newFuncParam(Fn *f, simple_type type);
 Ref newTemp(Fn *func);
 Blk *newBlock(uint32_t nlocals);
-Ref newIntConst(Fn *f, int64_t value);
 // TODO: usare instr e macro per newFuncCallArg
 void newFuncCallArg(Blk *b, simple_type type, Ref r);
-Ref newAddrConst(Fn *f, char *addrName);
+//Ref newAddrConst(Fn *f, char *addrName);
 void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);
 void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
@@ -335,7 +341,6 @@ listNode *newPhi(Blk *b, Ref temp, simple_type type);
 void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg);
 void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
 void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
-int req(Ref a, Ref b);
 void freeFunc(Fn *f);
 void freeTemp(Tmp *tmp);
 void freePhi(Phi *phi);

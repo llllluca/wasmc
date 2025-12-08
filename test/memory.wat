@@ -13,6 +13,6 @@
     local.get 1
     i32.load
     i32.add)
-  (export "_start" (func 0))
+  (export "main" (func 0))
   (memory 1)
   ) 

@@ -126,18 +126,29 @@ void printfn(Fn *fn, FILE *f) {
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
             fprintf(f, "\t");
-            if (!req(i->to, UNDEF_TMP_REF)) {
-                printref(i->to, f);
-                fprintf(f, " =%c ", ktoc[i->type]);
-            }
-            fprintf(f, "%s", optab[i->op]);
-            if (!req(i->arg[0], UNDEF_TMP_REF)) {
+            if (i->op == STOREW_INSTR || i->op == LOADW_INSTR) {
+                fprintf(f, "%s", optab[i->op]);
                 fprintf(f, " ");
-                printref(i->arg[0], f);
-            }
-            if (!req(i->arg[1], UNDEF_TMP_REF)) {
+                printref(i->to, f);
                 fprintf(f, ", ");
+                printref(i->arg[0], f);
+                fprintf(f, "(");
                 printref(i->arg[1], f);
+                fprintf(f, ")");
+            } else {
+                if (i->to.type != REF_TYPE_UNDEFINED) {
+                    printref(i->to, f);
+                    fprintf(f, " =%c ", ktoc[i->type]);
+                }
+                fprintf(f, "%s", optab[i->op]);
+                if (i->arg[0].type != REF_TYPE_UNDEFINED) {
+                    fprintf(f, " ");
+                    printref(i->arg[0], f);
+                }
+                if (i->arg[1].type != REF_TYPE_UNDEFINED) {
+                    fprintf(f, ", ");
+                    printref(i->arg[1], f);
+                }
             }
             fprintf(f, "\n");
         }
@@ -205,39 +216,30 @@ void printdata(Data *d, FILE *f) {
     fprintf(f, " }\n");
 }
 
-static void printcon(Con *c, FILE *f) {
-    switch (c->type) {
-        case CInt64:
-            fprintf(f, "%"PRId64, c->val.i);
-            break;
-        case CAddr:
-            fprintf(f, "$%s", c->val.addr);
-            break;
-        default:
-            break;
-    }
-}
-
 void printref(Ref r, FILE *f) {
     switch (r.type) {
-    case RTmp:
-        if (r.val.tmp_node != NULL) {
-            Tmp *t = listNodeValue(r.val.tmp_node);
+    case REF_TYPE_UNDEFINED:
+        fprintf(f, "UNDEFINED_REF");
+        break;
+    case REF_TYPE_TMP:
+        if (r.as.tmp_node != NULL) {
+            Tmp *t = listNodeValue(r.as.tmp_node);
             fprintf(f, "%%%s", t->name);
-        } else {
-            fprintf(f, "UNDEF_TMP_REF");
         }
         break;
-    case RCon:
-        printcon(r.val.con, f);
+    case REF_TYPE_INT32_CONST:
+        printf("%"PRIi32, r.as.int32_const);
         break;
-    case RLoc: {
-        switch (r.val.loc.type) {
+    case REF_TYPE_NAME:
+        printf("%s", r.as.name);
+        break;
+    case REF_TYPE_LOCATION: {
+        switch (r.as.loc.type) {
             case REGISTER:
-                fprintf(f, "%s", rname[r.val.loc.as.reg]);
+                fprintf(f, "%s", rname[r.as.loc.as.reg]);
                 break;
             case STACK_SLOT:
-                fprintf(f, "Stack_Slot_%u", r.val.loc.as.stack_slot);
+                fprintf(f, "Stack_Slot_%u", r.as.loc.as.stack_slot);
                 break;
             default:
                 panic();
@@ -314,7 +316,7 @@ Ref newTemp(Fn *f) {
     listAddNodeTail(f->tmp_list, tmp);
     tmp->i = NULL;
     listNode *tmp_node = listLast(f->tmp_list);
-    return (Ref) { .type = RTmp, .val.tmp_node = tmp_node };
+    return (Ref) { .type = REF_TYPE_TMP, .as.tmp_node = tmp_node };
 }
 
 Blk *newBlock(uint32_t nlocals) {
@@ -330,7 +332,7 @@ Blk *newBlock(uint32_t nlocals) {
     b->loop_end_blk_list = NULL;
     b->live_in = NULL;
     b->jmp.type = NONE_JUMP_TYPE;
-    b->jmp.arg = UNDEF_TMP_REF;
+    b->jmp.arg = UNDEFINED_REF;
     b->succ[0] = NULL;
     b->succ[1] = NULL;
     b->preds = listCreate();
@@ -341,7 +343,7 @@ Blk *newBlock(uint32_t nlocals) {
         b->locals = xcalloc(nlocals, sizeof(struct Ref));
         b->incomplete_phis = xcalloc(nlocals, sizeof(listNode *));
         for (uint32_t i = 0; i < nlocals; i++) {
-            b->locals[i] = UNDEF_TMP_REF;
+            b->locals[i] = UNDEFINED_REF;
             b->incomplete_phis[i] = NULL;
         }
     }
@@ -369,33 +371,17 @@ Fn *newFunc(simple_type ret_type, char *name, Blk *start) {
     return f;
 }
 
+
 Ref newFuncParam(Fn *f, simple_type type) {
     Ref r = newTemp(f);
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = PAR_INSTR;
     ins->type = type;
     ins->to = r;
-    ins->arg[0] = UNDEF_TMP_REF;
-    ins->arg[1] = UNDEF_TMP_REF;
+    ins->arg[0] = UNDEFINED_REF;
+    ins->arg[1] = UNDEFINED_REF;
     listAddNodeTail(f->start->ins_list, ins);
     return r;
-}
-
-
-Ref newIntConst(Fn *f, int64_t val) {
-    listNode *con_node;
-    listNode *con_iter = listFirst(f->con_list);
-    while ((con_node = listNext(&con_iter)) != NULL) {
-        Con *c = listNodeValue(con_node);
-        if (c->type == CInt64 && c->val.i == val) {
-            return (Ref) { .type = RCon, .val.con = c };
-        }
-    }
-    Con *con = xmalloc(sizeof(struct Con));
-    con->type = CInt64;
-    con->val.i = val;
-    listAddNodeTail(f->con_list, con);
-    return (Ref) { .type = RCon, .val.con = con };
 }
 
 void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2) {
@@ -407,11 +393,11 @@ void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2)
     ins->arg[1] = arg2;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
-    if (arg1.type == RTmp && arg1.val.tmp_node != NULL) {
-        addUsage(listNodeValue(arg1.val.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
+    if (arg1.type == REF_TYPE_TMP && arg1.as.tmp_node != NULL) {
+        addUsage(listNodeValue(arg1.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
     }
-    if (arg2.type == RTmp && arg2.val.tmp_node != NULL) {
-        addUsage(listNodeValue(arg2.val.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
+    if (arg2.type == REF_TYPE_TMP && arg2.as.tmp_node != NULL) {
+        addUsage(listNodeValue(arg2.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
     }
 }
 
@@ -442,8 +428,8 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
     listAddNodeTail(b0->preds, b);
     listAddNodeTail(b1->preds, b);
 
-    if (r.type == RTmp && r.val.tmp_node != NULL) {
-        addUsage(listNodeValue(r.val.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
+    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
+        addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
     if (f->start == b0 || f->start == b1) {
         err("invalid jump to the start block");
@@ -465,8 +451,8 @@ void retRef(Fn *f, Blk *b, Ref r) {
     }
     b->jmp.type = RET1_JUMP_TYPE;
     b->jmp.arg = r;
-    if (r.type == RTmp && r.val.tmp_node != NULL) {
-        addUsage(listNodeValue(r.val.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
+    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
+        addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
 }
 
@@ -477,28 +463,18 @@ void halt(Fn *f, Blk *b) {
     b->jmp.type = HALT_JUMP_TYPE;
 }
 
-// TODO: intern the string addrName
-Ref newAddrConst(Fn *f, char *addrName) {
-
-    Con *con = xmalloc(sizeof(struct Con));
-    con->type = CAddr;
-    con->val.addr = addrName;
-    listAddNodeTail(f->con_list, con);
-    return (Ref) { .type = RCon, .val.con = con };
-}
-
 void newFuncCallArg(Blk *b, simple_type type, Ref r) {
 
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = ARG_INSTR;
     ins->type = type;
-    ins->to = UNDEF_TMP_REF;
+    ins->to = UNDEFINED_REF;
     ins->arg[0] = r;
-    ins->arg[1] = UNDEF_TMP_REF;
+    ins->arg[1] = UNDEFINED_REF;
     listAddNodeTail(b->ins_list, ins);
     listNode *ins_node = listLast(b->ins_list);
-    if (r.type == RTmp && r.val.tmp_node != NULL) {
-        addUsage(listNodeValue(r.val.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
+    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
+        addUsage(listNodeValue(r.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
     }
 }
 
@@ -519,19 +495,14 @@ void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg) {
     pa->r = arg;
     pa->b = b;
     listAddNodeTail(phi->phi_arg_list, pa);
-    if (arg.type == RTmp && arg.val.tmp_node != NULL) {
-        addUsage(listNodeValue(arg.val.tmp_node), UPhi, (Use_ptr) { .phi = phi_node });
+    if (arg.type == REF_TYPE_TMP && arg.as.tmp_node != NULL) {
+        addUsage(listNodeValue(arg.as.tmp_node), UPhi, (Use_ptr) { .phi = phi_node });
     }
 }
 
 void freePhi(Phi *phi) {
     listRelease(phi->phi_arg_list);
     free(phi);
-}
-
-
-inline int req(Ref a, Ref b) {
-    return a.type == b.type && a.val.tmp_node == b.val.tmp_node;
 }
 
 void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {

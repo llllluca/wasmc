@@ -2,7 +2,7 @@
  *      $gcc -o readaot readaot.c
  *
  * - How to generate AOT format from WASM module:
- *      $./wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 -o add2.aot test/add2.wasm
+ *      $./wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 --bounds-checks=0 -o add2.aot test/add2.wasm
  *
  * - How to generate object ELF format from WASM module:
  *      $./wamrc --target=riscv32 --format=object --stack-bounds-checks=0 -o add2.o test/add2.wasm
@@ -673,7 +673,7 @@ void print_function_section(AOTSection *s) {
             fprintf(stderr, "Error: invalid function code offset\n");
             exit(EXIT_FAILURE);
         }
-        printf("func[%"PRIu32"] offset: %"PRIu32"\n", i, text_offset);
+        printf("func[%"PRIu32"] offset: %x\n", i, text_offset);
     }
 
     for (uint32_t i = 0; i < data.func_count; i++) {
@@ -811,14 +811,15 @@ void print_relocation_section(AOTSection *s) {
             read_uint32(p, p_end, &relocation.symbol_index);
 
             if (relocation.symbol_index >= symbol_count) {
-                fprintf(stderr, "Error: symbol index out of range\n");
+                fprintf(stderr, "Error: symbol index out of range. The relocation symbol "
+                    "index is %"PRIu32" but the symbol count is %"PRIu32"\n", relocation.symbol_index, symbol_count);
                 exit(EXIT_FAILURE);
             }
 
             uint8_t * name_addr = symbol_buf + symbol_offsets[relocation.symbol_index] + sizeof(uint16_t);
             relocation.symbol_name = (char *)name_addr;
 
-            printf("  relocation[%"PRIu32"].offset: %"PRIu32"\n", j, relocation.offset);
+            printf("  relocation[%"PRIu32"].offset: %x\n", j, relocation.offset);
             printf("  relocation[%"PRIu32"].addend: %"PRIu32"\n", j, relocation.addend);
             printf("  relocation[%"PRIu32"].type: %"PRIu32"\n", j, relocation.type);
             printf("  relocation[%"PRIu32"].symbol_index: %"PRIu32"\n", j, relocation.symbol_index);

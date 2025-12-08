@@ -9,17 +9,17 @@ static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node);
 void write_local(Blk *b, uint32_t index, Ref value) {
     Ref *ptr = &b->locals[index];
     Use_ptr u = { .local = ptr };
-    if (ptr->type == RTmp && ptr->val.tmp_node != NULL) {
-        rmUsage(listNodeValue(ptr->val.tmp_node), ULocal, u);
+    if (ptr->type == REF_TYPE_TMP && ptr->as.tmp_node != NULL) {
+        rmUsage(listNodeValue(ptr->as.tmp_node), ULocal, u);
     }
     b->locals[index] = value;
-    if (value.type == RTmp && value.val.tmp_node != NULL) {
-        addUsage(listNodeValue(value.val.tmp_node), ULocal, u);
+    if (value.type == REF_TYPE_TMP && value.as.tmp_node != NULL) {
+        addUsage(listNodeValue(value.as.tmp_node), ULocal, u);
     }
 }
 
 Ref read_local(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
-    if (b->locals[index].val.tmp_node != NULL) {
+    if (b->locals[index].type != REF_TYPE_UNDEFINED) {
         return b->locals[index];
     }
     return read_local_rec(ctx, b, index);
@@ -30,7 +30,7 @@ static Ref read_local_rec(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
     if (!b->is_sealed) {
         // Incomplete CFG
         Ref temp = newTemp(ctx->qbe_func);
-        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index)));
+        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index-1)));
         b->incomplete_phis[index] = phi_node;
         value = temp;
     } else if (listLength(b->preds) == 1) {
@@ -40,7 +40,7 @@ static Ref read_local_rec(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
     } else {
         // Break potential cycles with operandless phi
         Ref temp = newTemp(ctx->qbe_func);
-        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index)));
+        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index-1)));
         write_local(b, index, temp);
         value = add_phi_operands(ctx, phi_node, index);
     }
@@ -65,7 +65,7 @@ static Ref add_phi_operands(func_compile_ctx_t *ctx, listNode *phi_node, uint32_
 static void phi_replace_by(listNode *phi_node, Ref r) {
 
     Phi *phi = listNodeValue(phi_node);
-    Tmp *to = listNodeValue(phi->to.val.tmp_node);
+    Tmp *to = listNodeValue(phi->to.as.tmp_node);
     listNode *use_node;
     listNode *use_iter = listFirst(to->use_list);
     while ((use_node = listNext(&use_iter)) != NULL) {
@@ -77,10 +77,10 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
                 listNode *phi_arg_iter = listFirst(p->phi_arg_list);
                 while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
                     Phi_arg *phi_arg = listNodeValue(phi_arg_node);
-                    if (req(phi_arg->r, phi->to)) {
+                    if (REF_EQ(phi_arg->r, phi->to)) {
                         phi_arg->r = r;
-                        if (r.val.tmp_node != NULL) {
-                            addUsage(listNodeValue(r.val.tmp_node), UPhi, use->u);
+                        if (r.as.tmp_node != NULL) {
+                            addUsage(listNodeValue(r.as.tmp_node), UPhi, use->u);
                         }
                     }
                 }
@@ -88,10 +88,10 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
             case UIns: {
                 Ins *i = listNodeValue(use->u.ins);
                 for (unsigned int j = 0; j < 2; j++) {
-                    if (req(i->arg[j], phi->to)) {
+                    if (REF_EQ(i->arg[j], phi->to)) {
                         i->arg[j] = r;
-                        if (r.val.tmp_node != NULL) {
-                            addUsage(listNodeValue(r.val.tmp_node), UIns, use->u);
+                        if (r.as.tmp_node != NULL) {
+                            addUsage(listNodeValue(r.as.tmp_node), UIns, use->u);
                         }
                     }
                 }
@@ -99,15 +99,15 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
             case UJmp: {
                 Blk *b = listNodeValue(use->u.blk);
                 b->jmp.arg = r;
-                if (r.val.tmp_node != NULL) {
-                    addUsage(listNodeValue(r.val.tmp_node), UJmp, use->u);
+                if (r.as.tmp_node != NULL) {
+                    addUsage(listNodeValue(r.as.tmp_node), UJmp, use->u);
                 }
             } break;
             case ULocal: {
                 Ref *l = use->u.local;
                 *l = r;
-                if (r.val.tmp_node != NULL) {
-                    addUsage(listNodeValue(r.val.tmp_node), ULocal, use->u);
+                if (r.as.tmp_node != NULL) {
+                    addUsage(listNodeValue(r.as.tmp_node), ULocal, use->u);
                 }
             } break;
             default:
@@ -118,30 +118,30 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
 
 static Ref try_remove_trivial_phi(func_compile_ctx_t *ctx, listNode *phi_node) {
     Phi *phi = listNodeValue(phi_node);
-    Ref same = UNDEF_TMP_REF;
+    Ref same = UNDEFINED_REF;
     listNode *phi_arg_node;
     listNode *phi_arg_iter = listFirst(phi->phi_arg_list);
     while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
         Phi_arg *op = listNodeValue(phi_arg_node);
-        if (req(same, op->r) || req(op->r, phi->to)) {
+        if (REF_EQ(same, op->r) || REF_EQ(op->r, phi->to)) {
             // Unique value or self-reference
             continue;
         }
-        if (!req(same, UNDEF_TMP_REF)) {
+        if (same.type != REF_TYPE_UNDEFINED) {
             // The phi merges at least two values: not trivial
             return phi->to;
         }
         same = op->r;
     }
 
-    assert(phi->to.type == RTmp);
-    listNode *to_node = phi->to.val.tmp_node;
+    assert(phi->to.type == REF_TYPE_TMP);
+    listNode *to_node = phi->to.as.tmp_node;
     Tmp *to = listNodeValue(to_node);
 
     phi_replace_by(phi_node, same);
-    if (same.type == RTmp && same.val.tmp_node != NULL) {
+    if (same.type == REF_TYPE_TMP && same.as.tmp_node != NULL) {
         Use_ptr u = { .phi = phi_node };
-        rmUsage(listNodeValue(same.val.tmp_node), UPhi, u);
+        rmUsage(listNodeValue(same.as.tmp_node), UPhi, u);
     }
     listDelNode(phi->block->phi_list, phi_node);
 

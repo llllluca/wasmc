@@ -191,6 +191,7 @@ typedef struct {
 } func_compile_ctx_t;
 
 typedef struct AOTInitData {
+    const memory_info_t *mem0;
     const wasm_func_type *types;
     const uint32_t types_len;
     const uint32_t func_count;

@@ -350,11 +350,11 @@ wasm_module* parse(unsigned char *start, unsigned int len) {
     parse_data_section_if_exists(m);
 
     for (uint32_t i = 0; i < m->num_funcs; i++) {
-        int n = snprintf(NULL, 0, "aot_func#%d", i);
+        int n = snprintf(NULL, 0, "aot_func#%"PRIu32, i);
         if (n < 0) panic();
         size_t size = n + 1;
         m->func_decls[i].name = xcalloc(size, sizeof(char));
-        snprintf(m->func_decls[i].name, size, "aot_func#%d", i);
+        snprintf(m->func_decls[i].name, size, "aot_func#%"PRIu32, i);
     }
 
     return m;

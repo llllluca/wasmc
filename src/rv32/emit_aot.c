@@ -226,18 +226,18 @@ static const instr_info_elem instr_info[] = {
 };
 
 /* binary operation tempalte */
-#define BINOP(OP, OPI)                               \
-    {                                                \
-        fix_ins_args(i, &p, p_end);                  \
-        rv32_reg rd = i->to.val.loc.as.reg;          \
-        rv32_reg rs1 = i->arg[0].val.loc.as.reg;     \
-        if (i->arg[1].type == RCon) {                \
-            uint64_t imm = i->arg[1].val.con->val.i; \
-            EMIT(OPI(rd, rs1, imm), p, p_end);       \
-        } else {                                     \
-            rv32_reg rs2 = i->arg[1].val.loc.as.reg; \
-            EMIT(OP(rd, rs1, rs2), p, p_end);        \
-        }                                            \
+#define BINOP(OP, OPI)                                \
+    {                                                 \
+        fix_ins_args(i, &p, p_end);                   \
+        rv32_reg rd = i->to.as.loc.as.reg;            \
+        rv32_reg rs1 = i->arg[0].as.loc.as.reg;       \
+        if (i->arg[1].type == REF_TYPE_INT32_CONST) { \
+            uint32_t imm = i->arg[1].as.int32_const;  \
+            EMIT(OPI(rd, rs1, imm), p, p_end);        \
+        } else {                                      \
+            rv32_reg rs2 = i->arg[1].as.loc.as.reg;   \
+            EMIT(OP(rd, rs1, rs2), p, p_end);         \
+        }                                             \
     } break
 
 static void emitins(AOTModule *aotm, Ins *i) {
@@ -250,38 +250,37 @@ static void emitins(AOTModule *aotm, Ins *i) {
         case SUB_INSTR: BINOP(RV32_SUB, RV32_SUBI);
         case EQZW_INSTR: {
             fix_ins_args(i, &p, p_end);
-            rv32_reg rd = i->to.val.loc.as.reg;
-            rv32_reg rs1 = i->arg[0].val.loc.as.reg;
+            rv32_reg rd = i->to.as.loc.as.reg;
+            rv32_reg rs1 = i->arg[0].as.loc.as.reg;
             EMIT(RV32_SEQZ(rd, rs1), p, p_end);
         } break;
         case XOR_INSTR:   BINOP(RV32_XOR, RV32_XORI);
         case CSLTW_INSTR: BINOP(RV32_SLT, RV32_SLTI);
         case CULTW_INSTR: BINOP(RV32_SLTU, RV32_SLTIU);
         case COPY_INSTR: {
-            assert(i->to.type == RLoc);
-            if (i->to.val.loc.type == REGISTER) {
+            assert(i->to.type == REF_TYPE_LOCATION);
+            if (i->to.as.loc.type == REGISTER) {
                 /* the copy destination is a register */
-                location *loc = &i->arg[0].val.loc;
-                if (i->arg[0].type == RLoc && loc->type == REGISTER) {
+                location *loc = &i->arg[0].as.loc;
+                if (i->arg[0].type == REF_TYPE_LOCATION && loc->type == REGISTER) {
                     /* the copy source is a register */
-                    if (i->to.val.loc.as.reg != loc->as.reg) {
+                    if (i->to.as.loc.as.reg != loc->as.reg) {
                         /* the copy destination is not equal to the copy source */
-                        EMIT(RV32_MV(i->to.val.loc.as.reg, loc->as.reg), p, p_end);
+                        EMIT(RV32_MV(i->to.as.loc.as.reg, loc->as.reg), p, p_end);
                     }
                 }
-                else if (i->arg[0].type == RLoc && loc->type == STACK_SLOT) {
+                else if (i->arg[0].type == REF_TYPE_LOCATION && loc->type == STACK_SLOT) {
                     /* the copy source is a stack slot */
                     /* STACK_SLOT as a copy destination is not implemented */
                     assert(0);
                 }
-                else if (i->arg[0].type == RCon) {
+                else if (i->arg[0].type == REF_TYPE_INT32_CONST) {
                     /* the copy source is a constant */
-                    assert(i->arg[0].val.con->type == CInt64);
-                    emit_li(i->to.val.loc.as.reg, i->arg[0].val.con->val.i, &p, p_end);
+                    emit_li(i->to.as.loc.as.reg, i->arg[0].as.int32_const, &p, p_end);
                 }
                 else assert(0);
             }
-            else if (i->to.val.loc.type == STACK_SLOT) {
+            else if (i->to.as.loc.type == STACK_SLOT) {
                 /* the copy destination is a stack slot */
                 /* STACK_SLOT as a copy destination is not implemented */
                 assert(0); 
@@ -289,21 +288,38 @@ static void emitins(AOTModule *aotm, Ins *i) {
             else assert(0);
         } break;
         case CALL_INSTR: {
-            assert(i->arg[0].type == RCon);
-            assert(i->arg[0].val.con->type == CAddr);
+            assert(i->arg[0].type == REF_TYPE_NAME);
 
             AOTRelocation *reloc = xmalloc(sizeof(struct AOTRelocation));
             reloc->offset = p - aotm->text_start;
             reloc->addend = 0;
             reloc->type = R_RISCV_CALL;
             /* symbol_name points in the array func_decls in the wasm_module struct */
-            reloc->symbol_name = i->arg[0].val.con->val.addr;
+            reloc->symbol_name = i->arg[0].as.name;
             reloc->next = aotm->reloc_list;
             aotm->reloc_list = reloc;
             aotm->reloc_count++;
 
             EMIT(RV32_AUIPC(RA, 0), p, p_end);
             EMIT(RV32_JARL(RA, RA, 0), p, p_end);
+        } break;
+        case STOREW_INSTR: {
+            fix_arg(&i->to, rv32_reserved_reg[0], &p, p_end);
+            fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
+            assert(i->arg[0].type == REF_TYPE_INT32_CONST);
+            rv32_reg rs2 = i->to.as.loc.as.reg;
+            uint32_t imm = i->arg[0].as.int32_const;
+            rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            EMIT(RV32_SW(rs2, imm, rs1), p, p_end);
+        } break;
+        case LOADW_INSTR: {
+            fix_arg(&i->to, rv32_reserved_reg[0], &p, p_end);
+            fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
+            assert(i->arg[0].type == REF_TYPE_INT32_CONST);
+            rv32_reg rs2 = i->to.as.loc.as.reg;
+            uint32_t imm = i->arg[0].as.int32_const;
+            rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            EMIT(RV32_LW(rs2, imm, rs1), p, p_end);
         } break;
         default:
             fprintf(stderr, "Error: opcode %d not implemented!\n", i->op);
@@ -319,28 +335,14 @@ ERROR:
 
 static void fix_arg(Ref *arg, rv32_reg r, uint8_t **p, uint8_t *p_end) {
     switch (arg->type) {
-        case RCon: {
-            switch (arg->val.con->type) {
-                case CInt64: {
-                    emit_li(r, arg->val.con->val.i, p, p_end);
-                    arg->type = RLoc;
-                    arg->val.loc.type = REGISTER;
-                    arg->val.loc.as.reg = r;
-                } break;
-                case CAddr: {
-                    assert(0 && "fix_arg: CAddr not implemented!");
-                    //fprintf(f, "\tla %s, %s\n",
-                    //rname[r], arg->val.con->val.addr);
-                    arg->type = RLoc;
-                    arg->val.loc.type = REGISTER;
-                    arg->val.loc.as.reg = r;
-                } break;
-                default:
-                    assert(0);
-            }
+        case REF_TYPE_INT32_CONST: {
+            emit_li(r, arg->as.int32_const, p, p_end);
+            arg->type = REF_TYPE_LOCATION;
+            arg->as.loc.type = REGISTER;
+            arg->as.loc.as.reg = r;
         } break;
-        case RLoc: {
-            switch (arg->val.loc.type) {
+        case REF_TYPE_LOCATION: {
+            switch (arg->as.loc.type) {
                 case REGISTER:
                     break;
                 case STACK_SLOT: {
@@ -357,12 +359,9 @@ static void fix_arg(Ref *arg, rv32_reg r, uint8_t **p, uint8_t *p_end) {
 }
 
 static bool is_imm(Ref *r, int imm_min, int imm_max) {
-    if (r->type == RCon) {
-        Con *c = r->val.con;
-        if (c->type == CInt64) {
-            if (imm_min <= c->val.i && c->val.i <= imm_max) {
-                return true;
-            }
+    if (r->type == REF_TYPE_INT32_CONST) {
+        if (imm_min <= r->as.int32_const && r->as.int32_const <= imm_max) {
+            return true;
         }
     }
     return false;
@@ -578,7 +577,7 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
                     /* The next block to be processed is the 'then' block, so jump
                      * to the 'else' block is the argument of jnz is equal to zero */
                     Blk *jump_target = b->succ[1];
-                    rv32_reg rs1 = b->jmp.arg.val.loc.as.reg;
+                    rv32_reg rs1 = b->jmp.arg.as.loc.as.reg;
                     int32_t imm = 0;
                     if (jump_target->text_start != NULL) {
                         imm = jump_target->text_start - p;
@@ -594,7 +593,7 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
                     /* The next block to be processed is the 'else' block, so jump
                      * to the 'then' block is the argument of jnz is not equal to zero */
                     Blk *jump_target = b->succ[0];
-                    rv32_reg rs1 = b->jmp.arg.val.loc.as.reg;
+                    rv32_reg rs1 = b->jmp.arg.as.loc.as.reg;
                     int32_t imm = 0;
                     if (jump_target->text_start != NULL) {
                         imm = jump_target->text_start - p;
@@ -725,8 +724,8 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
 
     WRITE_UINT32(mem_flags, p, p_end);
     WRITE_UINT32(mem_num_bytes_per_page, p, p_end);
-    WRITE_UINT32(mem.min_page_num, p, p_end);
-    WRITE_UINT32(mem.max_page_num, p, p_end);
+    WRITE_UINT32(init_data->mem0->min_page_num, p, p_end);
+    WRITE_UINT32(init_data->mem0->max_page_num, p, p_end);
 
     WRITE_UINT32(mem_init_data_count, p, p_end);
 
@@ -948,7 +947,7 @@ void rv32_emit_relocation(AOTModule *aotm) {
         if (i->representative != NULL) continue;
         *symbol_offset = p - symbol_buf_start;
         symbol_offset++;
-        i->symbol_index++;
+        i->symbol_index = symbol_index++;
         uint16_t len = strlen(i->symbol_name) + 1;
         WRITE_UINT16(len, p, p_end);
         WRITE_BYTE_ARRAY(p, p_end, i->symbol_name, len);
