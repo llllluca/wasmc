@@ -29,6 +29,31 @@
 #define AOT_MAGIC_NUMBER 0x746f6100
 #define AOT_CURRENT_VERSION 5
 
+/* legal value for init_expr_type */
+#define INIT_EXPR_NONE 0x00
+#define INIT_EXPR_TYPE_I32_CONST 0x41
+#define INIT_EXPR_TYPE_I64_CONST 0x42
+#define INIT_EXPR_TYPE_F32_CONST 0x43
+#define INIT_EXPR_TYPE_F64_CONST 0x44
+#define INIT_EXPR_TYPE_V128_CONST 0xFD
+#define INIT_EXPR_TYPE_GET_GLOBAL 0x23
+#define INIT_EXPR_TYPE_I32_ADD 0x6A
+#define INIT_EXPR_TYPE_I32_SUB 0x6B
+#define INIT_EXPR_TYPE_I32_MUL 0x6C
+#define INIT_EXPR_TYPE_I64_ADD 0x7C
+#define INIT_EXPR_TYPE_I64_SUB 0x7D
+#define INIT_EXPR_TYPE_I64_MUL 0x7E
+#define INIT_EXPR_TYPE_REFNULL_CONST 0xD0
+#define INIT_EXPR_TYPE_FUNCREF_CONST 0xD2
+#define INIT_EXPR_TYPE_STRUCT_NEW 0xD3
+#define INIT_EXPR_TYPE_STRUCT_NEW_DEFAULT 0xD4
+#define INIT_EXPR_TYPE_ARRAY_NEW 0xD5
+#define INIT_EXPR_TYPE_ARRAY_NEW_DEFAULT 0xD6
+#define INIT_EXPR_TYPE_ARRAY_NEW_FIXED 0xD7
+#define INIT_EXPR_TYPE_I31_NEW 0xD8
+#define INIT_EXPR_TYPE_ANY_CONVERT_EXTERN 0xD9
+#define INIT_EXPR_TYPE_EXTERN_CONVERT_ANY 0xDA
+
 /* Legal values for bin_type */
 #define BIN_TYPE_ELF32L 0 /* 32-bit little endian */
 #define BIN_TYPE_ELF32B 1 /* 32-bit big endian */
@@ -461,8 +486,38 @@ void print_init_data_section(AOTSection *s) {
 
     read_uint32(p, p_end, &data.mem_init_data_count);
     printf("mem_init_data_count %"PRIu32"\n", data.mem_init_data_count);
-    if (data.mem_init_data_count > 0) {
-        assert(0 && "mem init data unimplemented");
+    for (uint32_t i = 0; i < data.mem_init_data_count; i++) {
+    /* is_passive and memory_index is only used in bulk memory mode */
+        uint32_t is_passive;
+        uint32_t memory_index;
+        read_uint32(p, p_end, &is_passive);
+        read_uint32(p, p_end, &memory_index);
+        //p = align_ptr(p, 4);
+        uint32_t init_expr_type;
+        read_uint32(p, p_end, &init_expr_type);
+
+        printf("mem_init_data[%"PRIu32"].is_passive: %"PRIu32"\n", i, is_passive);
+        printf("mem_init_data[%"PRIu32"].memory_index: %"PRIu32"\n", i, memory_index);
+        printf("mem_init_data[%"PRIu32"].init_expr_type: 0x%x\n", i, init_expr_type);
+
+        switch (init_expr_type) {
+        case INIT_EXPR_TYPE_I32_CONST: {
+            uint32_t init_expr;
+            read_uint32(p, p_end, &init_expr);
+            printf("  mem_init_data[%"PRIu32"].init_expr: %"PRIu32"\n", i, init_expr);
+        } break;
+        default:
+            printf("Error: unknown init expr type: %x\n", init_expr_type);
+            exit(EXIT_FAILURE);
+        }
+        uint32_t byte_count;
+        read_uint32(p, p_end, &byte_count);
+        for (uint32_t i = 0; i < byte_count; i++) {
+            printf("0x%x ", p[i]);
+        }
+        printf("\n");
+        p += byte_count;
+
     }
 
     //----- Table Info -----
@@ -470,20 +525,45 @@ void print_init_data_section(AOTSection *s) {
     printf("import_table_count %"PRIu32"\n", data.import_table_count);
     if (data.import_table_count > 0) {
         printf("Error: import table count unimplemented\n");
+        exit(EXIT_FAILURE);
         return;
     }
 
     read_uint32(p, p_end, &data.table_count);
     printf("table_count %"PRIu32"\n", data.table_count);
-    if (data.table_count > 0) {
-        printf("Error: table count unimplemented\n");
-        return;
+    for (uint32_t i = 0; i < data.table_count; i++) {
+        uint8_t table_type;
+        uint8_t table_flags;
+        /* table_flag possible value:
+         * 0: no max size and not shared
+         * 1: has max size
+         * 2: shared
+         * 4: table64
+         */
+        boolean table_can_grow;
+        uint8_t table_init_size;
+        /* table_max_size is specified if (flags & 1), else it is 0x10000 */
+        uint8_t table_max_size;
+
+        read_uint8(p, p_end, &table_type);
+        read_uint8(p, p_end, &table_flags);
+        read_uint8(p, p_end, &table_can_grow);
+        p += 1;
+        read_uint32(p, p_end, &table_init_size);
+        read_uint32(p, p_end, &table_max_size);
+
+        printf("  table[%"PRIu32"].type: 0x%x\n", i, table_type);
+        printf("  table[%"PRIu32"].flags: %"PRIu8"\n", i, table_flags);
+        printf("  table[%"PRIu32"].can_grow: %"PRIu8"\n", i, table_can_grow);
+        printf("  table[%"PRIu32"].init_size: %"PRIu8"\n", i, table_init_size);
+        printf("  table[%"PRIu32"].max_size: %"PRIu8"\n", i, table_max_size);
     }
 
     read_uint32(p, p_end, &data.table_init_data_count);
     printf("table_init_data_count %"PRIu32"\n", data.table_init_data_count);
     if (data.table_init_data_count > 0) {
         printf("Error: table init data count unimplemented\n");
+        exit(EXIT_FAILURE);
         return;
     }
 
@@ -528,8 +608,28 @@ void print_init_data_section(AOTSection *s) {
     //----- Global Info -----
     read_uint32(p, p_end, &data.global_count);
     printf("global count %"PRIu32"\n", data.global_count);
-    if (data.global_count > 0) {
-        assert(0 && "global count unimplemented");
+    for (uint32_t i = 0; i < data.global_count; i++) {
+        uint8_t val_type;
+        uint8_t is_mutable;
+        uint32_t init_expr_type;
+        read_uint8(p, p_end, &val_type);
+        read_uint8(p, p_end, &is_mutable);
+        p = align_ptr(p, 4);
+        read_uint32(p, p_end, &init_expr_type);
+        printf("  global[%"PRIu32"].val_type: 0x%x\n", i, val_type);
+        printf("  global[%"PRIu32"].is_mutable: %"PRIu32"\n", i, is_mutable);
+        printf("  global[%"PRIu32"].init_expr_type: 0x%x\n", i, init_expr_type);
+
+        switch (init_expr_type) {
+        case INIT_EXPR_TYPE_I32_CONST: {
+            uint32_t init_expr;
+            read_uint32(p, p_end, &init_expr);
+            printf("  global[%"PRIu32"].init_expr: %"PRIu32"\n", i, init_expr);
+        } break;
+        default:
+            printf("Error: unknown init expr type: %x\n", init_expr_type);
+            exit(EXIT_FAILURE);
+        }
     }
 
     //----- Import Func Info -----
@@ -697,7 +797,7 @@ void print_function_section(AOTSection *s) {
     }
 
     if (p != p_end) {
-        fprintf(stderr, "Error: invalid function section size\n");
+        fprintf(stderr, "Error: invalid function section size. p = %p, p_end = %p, p_end - p = %ld\n", p, p_end, p_end - p);
         exit(EXIT_FAILURE);
     }
 }
@@ -819,7 +919,7 @@ void print_relocation_section(AOTSection *s) {
             uint8_t * name_addr = symbol_buf + symbol_offsets[relocation.symbol_index] + sizeof(uint16_t);
             relocation.symbol_name = (char *)name_addr;
 
-            printf("  relocation[%"PRIu32"].offset: %x\n", j, relocation.offset);
+            printf("  relocation[%"PRIu32"].offset: 0x%x\n", j, relocation.offset);
             printf("  relocation[%"PRIu32"].addend: %"PRIu32"\n", j, relocation.addend);
             printf("  relocation[%"PRIu32"].type: %"PRIu32"\n", j, relocation.type);
             printf("  relocation[%"PRIu32"].symbol_index: %"PRIu32"\n", j, relocation.symbol_index);

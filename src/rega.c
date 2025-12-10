@@ -346,7 +346,7 @@ static void fill_register_hints(Fn *f) {
             t->i->register_hint = rv32_arg_reg[arg_index++];
         }
     }
-    arg_index = 1;
+    arg_index = 0;
 
     listNode *blk_node;
     listNode *blk_iter = listFirst(f->blk_list);
@@ -364,7 +364,7 @@ static void fill_register_hints(Fn *f) {
                 }
             }
             else if (ins->op == CALL_INSTR) {
-                arg_index = 1;
+                arg_index = 0;
                 if (ins->to.type == REF_TYPE_TMP && ins->to.as.tmp_node != NULL) {
                     Tmp *t = listNodeValue(ins->to.as.tmp_node);
                     t->i->register_hint = A0;
@@ -440,20 +440,29 @@ static live_interval **build_intervals(Fn *f) {
         listNode *ins_iter = listLast(b->ins_list);
         while ((ins_node = listPrev(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            // Ins can contain a output operand (i.e. a definition of a Tmp).
             listNode *tmp_node = ins->to.as.tmp_node;
-            if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
-                Tmp *t = listNodeValue(tmp_node);
-                set_start(t, ins->id);
-                live_remove(live, t);
+            // The storew instruction has 3 input operand and 0 output operand
+            if (ins->op == STOREW_INSTR || ins->op == STOREB_INSTR) {
+                if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
+                    Tmp *t = listNodeValue(tmp_node);
+                    add_range(t, b->id, ins->id);
+                    listAddNodeHead(live, t);
+                }
+            } else {
+                // Ins can contain a output operand (i.e. a definition of a Tmp).
+                if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
+                    Tmp *t = listNodeValue(tmp_node);
+                    set_start(t, ins->id);
+                    live_remove(live, t);
 
-                /* When a definition of a Tmp is encountered, its lifetime
-                 * interval is saved to the array in ascending order of start
-                 * point. The following line works because the instructions
-                 * are numbered in such a way when iterated in reverse order,
-                 * the instructions are encountered in descending order of
-                 * instruction number. */
-                sorted_intervals[--n] = t->i;
+                    /* When a definition of a Tmp is encountered, its lifetime
+                     * interval is saved to the array in ascending order of start
+                     * point. The following line works because the instructions
+                     * are numbered in such a way when iterated in reverse order,
+                     * the instructions are encountered in descending order of
+                     * instruction number. */
+                    sorted_intervals[--n] = t->i;
+                }
             }
             // Ins can contain at most 2 input operands (i.e. a use of a Tmp).
             for (unsigned int i = 0; i < 2; i++) {
@@ -675,7 +684,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         if (ins->op != PAR_INSTR) break;
         assert(ins->to.type == REF_TYPE_TMP);
         Tmp *t = listNodeValue(ins->to.as.tmp_node);
-        if (arg_index >= RV32_ARG_NUM_REG) panic();
+        if (arg_index > RV32_ARG_NUM_REG) panic();
         move_from from = {
             .type = LOCATION,
             .as.loc = {
@@ -700,7 +709,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         listUnlinkNode(move_seq, copy_node);
         listLinkNodeHead(f->start->ins_list, copy_node);
     }
-    arg_index = 1;
+    arg_index = 0;
     listRelease(move_seq);
     listEmpty(par_move);
 
@@ -733,7 +742,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
 
                 location to;
                 to.type = REGISTER;
-                if (arg_index >= RV32_ARG_NUM_REG) panic();
+                if (arg_index > RV32_ARG_NUM_REG) panic();
                 to.as.reg = rv32_arg_reg[arg_index++];
 
                 if (!MOVE_FROM_EQ_TO(from, to)) {

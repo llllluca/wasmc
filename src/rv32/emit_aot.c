@@ -226,7 +226,7 @@ static const instr_info_elem instr_info[] = {
 };
 
 /* binary operation tempalte */
-#define BINOP(OP, OPI)                                \
+#define BINOP_IMM(OP, OPI)                            \
     {                                                 \
         fix_ins_args(i, &p, p_end);                   \
         rv32_reg rd = i->to.as.loc.as.reg;            \
@@ -240,23 +240,40 @@ static const instr_info_elem instr_info[] = {
         }                                             \
     } break
 
+#define BINOP(OP)                               \
+    {                                           \
+        fix_ins_args(i, &p, p_end);             \
+        rv32_reg rd = i->to.as.loc.as.reg;      \
+        rv32_reg rs1 = i->arg[0].as.loc.as.reg; \
+        rv32_reg rs2 = i->arg[1].as.loc.as.reg; \
+        EMIT(OP(rd, rs1, rs2), p, p_end);       \
+    } break
+
 static void emitins(AOTModule *aotm, Ins *i) {
 
     uint8_t *p = aotm->p;
     uint8_t *p_end = aotm->p_end;
 
     switch (i->op) {
-        case ADD_INSTR: BINOP(RV32_ADD, RV32_ADDI);
-        case SUB_INSTR: BINOP(RV32_SUB, RV32_SUBI);
+        case ADD_INSTR:  BINOP_IMM(RV32_ADD, RV32_ADDI);
+        case SUB_INSTR:  BINOP_IMM(RV32_SUB, RV32_SUBI);
+        case DIV_INSTR:  BINOP(RV32_DIV);
+        case MUL_INSTR:  BINOP(RV32_MUL);
+        case UDIV_INSTR: BINOP(RV32_DIVU);
+        case REM_INSTR:  BINOP(RV32_REM);
         case EQZW_INSTR: {
             fix_ins_args(i, &p, p_end);
             rv32_reg rd = i->to.as.loc.as.reg;
             rv32_reg rs1 = i->arg[0].as.loc.as.reg;
             EMIT(RV32_SEQZ(rd, rs1), p, p_end);
         } break;
-        case XOR_INSTR:   BINOP(RV32_XOR, RV32_XORI);
-        case CSLTW_INSTR: BINOP(RV32_SLT, RV32_SLTI);
-        case CULTW_INSTR: BINOP(RV32_SLTU, RV32_SLTIU);
+        case AND_INSTR:   BINOP_IMM(RV32_AND, RV32_ANDI);
+        case XOR_INSTR:   BINOP_IMM(RV32_XOR, RV32_XORI);
+        case OR_INSTR:    BINOP_IMM(RV32_OR, RV32_ORI);
+        case CSLTW_INSTR: BINOP_IMM(RV32_SLT, RV32_SLTI);
+        case CULTW_INSTR: BINOP_IMM(RV32_SLTU, RV32_SLTIU);
+        case SHL_INSTR:   BINOP_IMM(RV32_SLL, RV32_SLLI);
+        case SAR_INSTR:   BINOP_IMM(RV32_SRA, RV32_SRAI);
         case COPY_INSTR: {
             assert(i->to.type == REF_TYPE_LOCATION);
             if (i->to.as.loc.type == REGISTER) {
@@ -287,6 +304,18 @@ static void emitins(AOTModule *aotm, Ins *i) {
             }
             else assert(0);
         } break;
+        case PUSH_INSTR: {
+            assert(i->arg[0].type == REF_TYPE_LOCATION);
+            assert(i->arg[0].as.loc.type == REGISTER);
+            EMIT(RV32_ADDI(SP, SP, -4), p, p_end);
+            EMIT(RV32_SW(i->arg[0].as.loc.as.reg, 0, SP), p, p_end);
+        } break;
+        case POP_INSTR: {
+            assert(i->to.type == REF_TYPE_LOCATION);
+            assert(i->to.as.loc.type == REGISTER);
+            EMIT(RV32_LW(i->to.as.loc.as.reg, 0, SP), p, p_end);
+            EMIT(RV32_ADDI(SP, SP, 4), p, p_end);
+        } break;
         case CALL_INSTR: {
             assert(i->arg[0].type == REF_TYPE_NAME);
 
@@ -308,18 +337,68 @@ static void emitins(AOTModule *aotm, Ins *i) {
             fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
             assert(i->arg[0].type == REF_TYPE_INT32_CONST);
             rv32_reg rs2 = i->to.as.loc.as.reg;
-            uint32_t imm = i->arg[0].as.int32_const;
+            int32_t imm = i->arg[0].as.int32_const;
             rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            while (imm > 2047) {
+                EMIT(RV32_ADDI(rs1, rs1, 2047), p, p_end);
+                imm -= 2047;
+            }
+            while (imm < -2048) {
+                EMIT(RV32_ADDI(rs1, rs1, -2048), p, p_end);
+                imm += 2048;
+            }
             EMIT(RV32_SW(rs2, imm, rs1), p, p_end);
+        } break;
+        case STOREB_INSTR: {
+            fix_arg(&i->to, rv32_reserved_reg[0], &p, p_end);
+            fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
+            assert(i->arg[0].type == REF_TYPE_INT32_CONST);
+            rv32_reg rs2 = i->to.as.loc.as.reg;
+            int32_t imm = i->arg[0].as.int32_const;
+            rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            while (imm > 2047) {
+                EMIT(RV32_ADDI(rs1, rs1, 2047), p, p_end);
+                imm -= 2047;
+            }
+            while (imm < -2048) {
+                EMIT(RV32_ADDI(rs1, rs1, -2048), p, p_end);
+                imm += 2048;
+            }
+            EMIT(RV32_SB(rs2, imm, rs1), p, p_end);
         } break;
         case LOADW_INSTR: {
             fix_arg(&i->to, rv32_reserved_reg[0], &p, p_end);
             fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
             assert(i->arg[0].type == REF_TYPE_INT32_CONST);
             rv32_reg rs2 = i->to.as.loc.as.reg;
-            uint32_t imm = i->arg[0].as.int32_const;
+            int32_t imm = i->arg[0].as.int32_const;
             rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            while (imm > 2047) {
+                EMIT(RV32_ADDI(rs1, rs1, 2047), p, p_end);
+                imm -= 2047;
+            }
+            while (imm < -2048) {
+                EMIT(RV32_ADDI(rs1, rs1, -2048), p, p_end);
+                imm += 2048;
+            }
             EMIT(RV32_LW(rs2, imm, rs1), p, p_end);
+        } break;
+        case LOADUB_INSTR: {
+            fix_arg(&i->to, rv32_reserved_reg[0], &p, p_end);
+            fix_arg(&i->arg[1], rv32_reserved_reg[1], &p, p_end);
+            assert(i->arg[0].type == REF_TYPE_INT32_CONST);
+            rv32_reg rs2 = i->to.as.loc.as.reg;
+            int32_t imm = i->arg[0].as.int32_const;
+            rv32_reg rs1 = i->arg[1].as.loc.as.reg;
+            while (imm > 2047) {
+                EMIT(RV32_ADDI(rs1, rs1, 2047), p, p_end);
+                imm -= 2047;
+            }
+            while (imm < -2048) {
+                EMIT(RV32_ADDI(rs1, rs1, -2048), p, p_end);
+                imm += 2048;
+            }
+            EMIT(RV32_LBU(rs2, imm, rs1), p, p_end);
         } break;
         default:
             fprintf(stderr, "Error: opcode %d not implemented!\n", i->op);
@@ -409,11 +488,11 @@ static void emit_li(uint32_t rd, int32_t imm,
     } else {
         uint32_t lui_imm = imm >> 12;
         uint32_t addi_imm = imm & 0xfff;
-        if (addi_imm & 0x800) {
+        if (imm & 0x800) {
             lui_imm += 1;
         }
         EMIT(RV32_LUI(rd, lui_imm), *p, p_end);
-        EMIT(RV32_ADDI(rd, ZERO, addi_imm), *p, p_end);
+        EMIT(RV32_ADDI(rd, rd, addi_imm), *p, p_end);
     }
     return;
 
@@ -625,7 +704,7 @@ ERROR:
 }
 
 void rv32_init(AOTModule *aotm) {
-    aotm->buf_len = 1024;
+    aotm->buf_len = 16384;
     aotm->buf = xcalloc(aotm->buf_len, sizeof(uint8_t));
     aotm->p = aotm->buf;
     aotm->p_end = aotm->buf + aotm->buf_len;
@@ -703,21 +782,16 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
     }
 
     WRITE_UINT32(AOT_SECTION_TYPE_INIT_DATA, p, p_end);
-    uint8_t *section_size = p;
+    uint32_t *section_size = (uint32_t *)p;
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 
     //----- Emit Memory Info subsection -----
     const uint32_t import_memory_count = 0;
     const uint32_t memory_count = 1;
-    const memory_info_t mem = {
-        .min_page_num = 0,
-        .max_page_num = 0,
-    };
     const uint32_t mem_flags = 0;
     const uint32_t mem_num_bytes_per_page = 65536;
 
-    const uint32_t mem_init_data_count = 0;
 
     WRITE_UINT32(import_memory_count, p, p_end);
     WRITE_UINT32(memory_count, p, p_end);
@@ -727,7 +801,20 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
     WRITE_UINT32(init_data->mem0->min_page_num, p, p_end);
     WRITE_UINT32(init_data->mem0->max_page_num, p, p_end);
 
+    uint32_t mem_init_data_count = init_data->data_segments_len;
+    uint32_t is_passive = 0;
+    uint32_t memory_index = 0;
     WRITE_UINT32(mem_init_data_count, p, p_end);
+    for (uint32_t i = 0; i < mem_init_data_count; i++) {
+        WRITE_UINT32(is_passive, p, p_end);
+        WRITE_UINT32(memory_index, p, p_end);
+        WRITE_UINT32(I32_CONST_OPCODE, p, p_end);
+        WRITE_UINT32(init_data->data_segments[i].offset, p, p_end);
+        WRITE_UINT32(init_data->data_segments[i].init_len, p, p_end);
+        WRITE_BYTE_ARRAY( p, p_end,
+            init_data->data_segments[i].init_bytes,
+            init_data->data_segments[i].init_len);
+    }
 
     //----- Emit Memory Info subsection -----
     const uint32_t import_table_count = 0;
@@ -745,11 +832,14 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
         uint16_t type_flag = 0;
         WRITE_UINT16(type_flag, p, p_end);
         WRITE_UINT16(types[i].num_params, p, p_end);
-        const uint16_t num_return = 1;
+        const uint16_t num_return =
+            types[i].return_type == NO_VALTYPE ? 0 : 1;
         WRITE_UINT16(num_return, p, p_end);
 
         WRITE_BYTE_ARRAY(p, p_end, types[i].params_type, types[i].num_params);
-        WRITE_UINT8(types[i].return_type, p, p_end);
+        if (types[i].return_type != NO_VALTYPE) {
+            WRITE_UINT8(types[i].return_type, p, p_end);
+        }
     }
 
     //----- Emit Import Global Info subsection  -----
@@ -757,8 +847,14 @@ void rv32_emit_init_data(AOTModule *aotm, const AOTInitData *init_data) {
     WRITE_UINT32(import_global_count, p, p_end);
 
     //----- Emit Global Info subsection  -----
-    const uint32_t global_count = 0;
-    WRITE_UINT32(global_count, p, p_end);
+    WRITE_UINT32(init_data->globals_len, p, p_end);
+    for (uint32_t i = 0; i < init_data->globals_len; i++) {
+        WRITE_UINT8(I32_VALTYPE, p, p_end);
+        WRITE_UINT8(init_data->globals[i].is_mutable, p, p_end);
+        p = ALIGN_PTR(p, sizeof(uint32_t));
+        WRITE_UINT32(I32_CONST_OPCODE, p, p_end);
+        WRITE_UINT32(init_data->globals[i].expr.as.i32, p, p_end);
+    }
 
     //----- Emit Import Func Info subsection -----
     const uint32_t import_func_count = 0;
@@ -820,7 +916,7 @@ ERROR:
 }
 
 void rv32_finalize_text(AOTModule *aotm) {
-    *(aotm->text_size) = aotm->p - (aotm->text_size + sizeof(uint32_t));
+    *(uint32_t *)(aotm->text_size) = aotm->p - (aotm->text_size + sizeof(uint32_t));
 }
 
 void rv32_emit_function(AOTModule *aotm) {
@@ -829,7 +925,7 @@ void rv32_emit_function(AOTModule *aotm) {
     uint8_t *p_end = aotm->p_end;
 
     WRITE_UINT32(AOT_SECTION_TYPE_FUNCTION, p, p_end);
-    uint8_t *section_size = p;
+    uint32_t *section_size = (uint32_t *)p;
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 
@@ -865,12 +961,23 @@ void rv32_emit_export(AOTModule *aotm, uint32_t num_exports, WASMExport *exports
     uint8_t *p_end = aotm->p_end;
 
     WRITE_UINT32(AOT_SECTION_TYPE_EXPORT, p, p_end);
-    uint8_t *section_size = p;
+    uint32_t *section_size = (uint32_t *)p;
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 
-    WRITE_UINT32(num_exports, p, p_end);
+    uint32_t num_exports_only_funcs = 0;
     for (uint32_t i = 0; i < num_exports; i++) {
+        if (exports[i].export_desc == EXPORT_TYPE_FUNC) {
+            num_exports_only_funcs++;
+        }
+    }
+
+
+    WRITE_UINT32(num_exports_only_funcs, p, p_end);
+    for (uint32_t i = 0; i < num_exports; i++) {
+        if (exports[i].export_desc != EXPORT_TYPE_FUNC) {
+            continue;
+        }
         WRITE_UINT32(exports[i].index, p, p_end);
         WRITE_UINT8(exports[i].export_desc, p, p_end);
         uint32_t name_len = exports[i].name_len;
@@ -904,7 +1011,7 @@ void rv32_emit_relocation(AOTModule *aotm) {
     uint8_t *p_end = aotm->p_end;
 
     WRITE_UINT32(AOT_SECTION_TYPE_RELOCATION, p, p_end);
-    uint8_t *section_size = p;
+    uint32_t *section_size = (uint32_t *)p;
     p += sizeof(uint32_t);
     uint8_t *section_start = p;
 

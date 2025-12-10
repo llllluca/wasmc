@@ -582,7 +582,7 @@ void rv32_emitfn(Fn *fn, FILE *f) {
                     "\tlw ra, 4(fp)\n"
                     "\tlw fp, 0(fp)\n"
                     "\tret\n"
-                );
+                    );
             } break;
             case JMP_JUMP_TYPE: {
                 listNode *blk_node_next = listNextNode(blk_node);

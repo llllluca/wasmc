@@ -600,6 +600,15 @@ typedef struct ins_fmt {
 #define RV32_LW(RD, IMM, RS1) \
     I_TYPE_INS_TEMPLATE(LOAD_OPCODE, LW_FUNC3, RD, RS1, IMM)
 
+/* Instr: lbu
+ * Description: load byte unsigned
+ * Use: lbu rd, imm(rs1)
+ * Result: rd = mem[rs1+imm][0:7] */
+#define LBU_FUNC3 0x4
+#define RV32_LBU(RD, IMM, RS1) \
+    I_TYPE_INS_TEMPLATE(LOAD_OPCODE, LW_FUNC3, RD, RS1, IMM)
+
+
 /* Instr: sw
  * Description: store word
  * Use: sw rs2, imm(rs1)
@@ -607,6 +616,14 @@ typedef struct ins_fmt {
 #define SW_FUNC3 0x2
 #define RV32_SW(RS2, IMM, RS1) \
     S_TYPE_INS_TEMPLATE(STORE_OPCODE, SW_FUNC3, RS2, IMM, RS1)
+
+/* Instr: sb
+ * Description: store byte
+ * Use: sb rs2, imm(rs1)
+ * Result: mem[rs1+imm][0:7] = rs2 */
+#define SB_FUNC3 0x0
+#define RV32_SB(RS2, IMM, RS1) \
+    S_TYPE_INS_TEMPLATE(STORE_OPCODE, SB_FUNC3, RS2, IMM, RS1)
 
 /* ----- Environment Call and Breakpoints ----- */
 
@@ -620,5 +637,45 @@ typedef struct ins_fmt {
 #define EBREAK_FUNC3 0x0
 #define RV32_EBREAK \
     I_TYPE_INS_TEMPLATE(SYSTEM_OPCODE, EBREAK_FUNC3, 0, 0, EBREAK_IMM)
+
+/* ----- M Extension for Integer Multiplication and Division ----- */
+
+#define MULDIV_FUNC7 0x1
+
+/* Instr: div
+ * Description: Divide
+ * Use: div rd, rs1, rs2
+ * Result: rd = rs1 / rs2 */
+#define DIV_FUNC3 0x4
+#define RV32_DIV(RD, RS1, RS2) \
+    R_TYPE_INS_TEMPLATE(REG_OPCODE, DIV_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
+
+/* Instr: divu
+ * Description: divide unsigned
+ * Use: divu rd, rs1, rs2
+ * Result: rd = rs1 / rs2 */
+#define DIVU_FUNC3 0x5
+#define RV32_DIVU(RD, RS1, RS2) \
+    R_TYPE_INS_TEMPLATE(REG_OPCODE, DIVU_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
+
+/* Instr: rem
+ * Description: Remainder
+ * Use: rem rd, rs1, rs2
+ * Result: rd = rs1 % rs2 */
+#define REM_FUNC3 0x6
+#define RV32_REM(RD, RS1, RS2) \
+    R_TYPE_INS_TEMPLATE(REG_OPCODE, REM_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
+
+/* Instr: mul
+ * Description: Multiply
+ * Use: mul rd, rs1, rs2
+ * Result: rd = (rs1 * rs2)[31:0] */
+#define MUL_FUNC3 0x0
+#define RV32_MUL(RD, RS1, RS2) \
+    R_TYPE_INS_TEMPLATE(REG_OPCODE, MUL_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
+
+
+
+
 
 #endif

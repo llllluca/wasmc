@@ -30,7 +30,11 @@ static Ref read_local_rec(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
     if (!b->is_sealed) {
         // Incomplete CFG
         Ref temp = newTemp(ctx->qbe_func);
-        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index-1)));
+        simple_type phi_type = WORD_TYPE;
+        if (index > 0) {
+            phi_type = cast(local_type(ctx, index));
+        }
+        listNode *phi_node = newPhi(b, temp, phi_type);
         b->incomplete_phis[index] = phi_node;
         value = temp;
     } else if (listLength(b->preds) == 1) {
@@ -40,7 +44,11 @@ static Ref read_local_rec(func_compile_ctx_t *ctx, Blk *b, uint32_t index) {
     } else {
         // Break potential cycles with operandless phi
         Ref temp = newTemp(ctx->qbe_func);
-        listNode *phi_node = newPhi(b, temp, cast(local_type(ctx, index-1)));
+        simple_type phi_type = WORD_TYPE;
+        if (index > 0) {
+            phi_type = cast(local_type(ctx, index));
+        }
+        listNode *phi_node = newPhi(b, temp, phi_type);
         write_local(b, index, temp);
         value = add_phi_operands(ctx, phi_node, index);
     }

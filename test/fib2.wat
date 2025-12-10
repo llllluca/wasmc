@@ -21,7 +21,7 @@
     local.get 2
     local.get 3
     i32.store offset=12
-    i32.const 42
+    i32.const 10
     local.set 4
     local.get 2
     local.get 4

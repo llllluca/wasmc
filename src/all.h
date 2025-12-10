@@ -188,6 +188,9 @@ typedef struct {
     uint32_t locals_len;
     skip_flag skip_flag;
     Blk *curr_block;
+    Ref mem0_ptr;
+    Ref globals_start;
+    Ref a0;
 } func_compile_ctx_t;
 
 typedef struct AOTInitData {
@@ -195,6 +198,10 @@ typedef struct AOTInitData {
     const wasm_func_type *types;
     const uint32_t types_len;
     const uint32_t func_count;
+    const global_t *globals;
+    const uint32_t globals_len;
+    const data_segment_t *data_segments;
+    const uint32_t data_segments_len;
 } AOTInitData;
 
 typedef struct Target {

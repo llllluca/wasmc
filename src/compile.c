@@ -243,7 +243,7 @@ static void compile_instr_local_get(func_compile_ctx_t *ctx) {
     readULEB128_u32(&ctx->wasm_func_body->expr, &index);
     wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
-    Ref local = read_local(ctx, ctx->curr_block, 1+index);
+    Ref local = read_local(ctx, ctx->curr_block, index);
     if (local.as.tmp_node == NULL) {
         local = NEW_INT32_CONST(0);
     }
@@ -259,7 +259,7 @@ static void compile_instr_local_set(func_compile_ctx_t *ctx) {
     wasm_valtype wasm_type = local_type(ctx, index);
     if (size(wasm_type) != 4) panic();
     assert_stack_entry_value(entry, wasm_type);
-    write_local(ctx->curr_block, 1+index, entry->as.value.qbe_temp);
+    write_local(ctx->curr_block, index, entry->as.value.qbe_temp);
     free(entry);
 }
 
@@ -277,23 +277,23 @@ static void compile_instr_local_tee(func_compile_ctx_t *ctx) {
 }
 */
 
-/*
 static void compile_instr_global_get(func_compile_ctx_t *ctx) {
     uint32_t globalidx;
     readULEB128_u32(&ctx->wasm_func_body->expr, &globalidx);
     if (globalidx >= ctx->m->globals_len) panic();
     global_t *g = &ctx->m->globals[globalidx];
+    Blk *b = ctx->curr_block;
+    Fn *f = ctx->qbe_func;
 
     if (g->expr.type != I32_VALTYPE) panic();
 
     if (g->is_mutable) {
-        Ref temp = newTemp(ctx->qbe_func);
+        Ref temp = newTemp(f);
+        LOADW(b, temp, NEW_INT32_CONST(sizeof(uint32_t) * globalidx), ctx->globals_start);
         stack_entry_t *entry = alloc_stack_entry_value(temp, g->expr.type);
         listPush(ctx->value_stack, entry);
-        Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
-        LOADW(ctx->curr_block, temp, global);
     } else {
-        Ref c = NEW_INT32_CONST_REF(g->expr.as.i32);
+        Ref c = NEW_INT32_CONST(g->expr.as.i32);
         stack_entry_t *entry = alloc_stack_entry_value(c, g->expr.type);
         listPush(ctx->value_stack, entry);
     }
@@ -309,11 +309,14 @@ static void compile_instr_global_set(func_compile_ctx_t *ctx) {
     stack_entry_t *entry = listPop(ctx->value_stack);
     assert_stack_entry_value(entry, g->expr.type);
     if (size(g->expr.type) != 4) panic();
-    Ref global = newAddrConst(ctx->qbe_func, (char *) g->name);
-    STOREW(ctx->curr_block, entry->as.value.qbe_temp, global);
+
+    Fn *f = ctx->qbe_func;
+    Blk *b = ctx->curr_block;
+
+    STOREW(b, entry->as.value.qbe_temp,
+        NEW_INT32_CONST(sizeof(uint32_t) * globalidx), ctx->globals_start);
     free(entry);
 }
-*/
 
 static void compile_instr_i32_const(func_compile_ctx_t *ctx) {
     int32_t n;
@@ -325,6 +328,7 @@ static void compile_instr_i32_const(func_compile_ctx_t *ctx) {
 
 static void compile_instr_call(func_compile_ctx_t *ctx) {
     uint32_t funcidx;
+    Blk *b = ctx->curr_block;
     readULEB128_u32(&ctx->wasm_func_body->expr, &funcidx);
     if (funcidx >= ctx->m->num_funcs) {
         panic();
@@ -336,6 +340,7 @@ static void compile_instr_call(func_compile_ctx_t *ctx) {
 
     Ref called_addr = NEW_NAME(ctx->m->func_decls[funcidx].name);
     uint32_t num_params = called_type->num_params;
+    newFuncCallArg(b, WORD_TYPE, ctx->a0);
     if (num_params > 0) {
             listNode *node;
             listNode *iter = listIndex(ctx->value_stack, -1 * (int) num_params);
@@ -812,12 +817,10 @@ static void compile_variable_instr(func_compile_ctx_t *ctx, unsigned char opcode
             //compile_instr_local_tee(ctx);
             break;
         case GLOBAL_GET_OPCODE:
-            assert(0);
-            //compile_instr_global_get(ctx);
+            compile_instr_global_get(ctx);
             break;
         case GLOBAL_SET_OPCODE:
-            assert(0);
-            //compile_instr_global_set(ctx);
+            compile_instr_global_set(ctx);
             break;
         default: 
             printf("PANIC: opcode = 0x%02X\n", opcode);
@@ -883,13 +886,8 @@ static void compile_i32_load_instr_generic(
     stack_entry_t *address = listPop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
 
-    Ref WASMExecEnv_ptr = read_local(ctx, ctx->curr_block, 0);
-    Ref WASMModuleInstance_ptr = newTemp(f);
-    LOADW(b, WASMModuleInstance_ptr, NEW_INT32_CONST(8), WASMExecEnv_ptr);
-    Ref mem0_start = newTemp(f);
-    LOADW(b, mem0_start, NEW_INT32_CONST(376), WASMModuleInstance_ptr);
     Ref load_addr = newTemp(f);
-    ADD(b, load_addr, WORD_TYPE, mem0_start, address->as.value.qbe_temp);
+    ADD(b, load_addr, WORD_TYPE, ctx->mem0_ptr, address->as.value.qbe_temp);
     //TODO: out of bound memory check
     Ref result = newTemp(f);
     instr(b, result, WORD_TYPE, load_instr, NEW_INT32_CONST(offset), load_addr);
@@ -913,13 +911,8 @@ static void compile_i32_store_instr_generic(
     stack_entry_t *address = listPop(ctx->value_stack);
     assert_stack_entry_value(address, I32_VALTYPE);
 
-    Ref WASMExecEnv_ptr = read_local(ctx, ctx->curr_block, 0);
-    Ref WASMModuleInstance_ptr = newTemp(f);
-    LOADW(b, WASMModuleInstance_ptr, NEW_INT32_CONST(8), WASMExecEnv_ptr);
-    Ref mem0_start = newTemp(f);
-    LOADW(b, mem0_start, NEW_INT32_CONST(376), WASMModuleInstance_ptr);
     Ref store_addr = newTemp(f);
-    ADD(b, store_addr, WORD_TYPE, mem0_start, address->as.value.qbe_temp);
+    ADD(b, store_addr, WORD_TYPE, ctx->mem0_ptr, address->as.value.qbe_temp);
     instr(b,
         value->as.value.qbe_temp,
         WORD_TYPE,
@@ -1022,7 +1015,7 @@ static void compile_instr(func_compile_ctx_t *ctx, unsigned char opcode) {
 static Fn *compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *body) {
     wasm_func_type *t = decl->type;
 
-    uint32_t locals_len = 1 + t->num_params + body->num_locals;
+    uint32_t locals_len = t->num_params + body->num_locals;
 
     simple_type ret_type = NO_TYPE;
     if (t->return_type != NO_VALTYPE) {
@@ -1033,15 +1026,22 @@ static Fn *compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *bo
     Ref zero = NEW_INT32_CONST(0);
 
     Ref WASMExecEnv_ptr = newFuncParam(qbe_func, WORD_TYPE);
-    start->locals[0] = WASMExecEnv_ptr;
     for (uint32_t i = 0; i < t->num_params; i++) {
         Ref param = newFuncParam(qbe_func, cast(t->params_type[i]));
-        start->locals[1 + i] = param;
+        start->locals[i] = param;
     }
 
     for (uint32_t i = 0; i < body->num_locals; i++) {
-        start->locals[1 + t->num_params + i] = zero;
+        start->locals[t->num_params + i] = zero;
     }
+
+    Ref WASMModuleInstance_ptr = newTemp(qbe_func);
+    LOADW(start, WASMModuleInstance_ptr, NEW_INT32_CONST(8), WASMExecEnv_ptr);
+
+    Ref mem0_ptr = newTemp(qbe_func);
+    LOADW(start, mem0_ptr, NEW_INT32_CONST(376), WASMModuleInstance_ptr);
+    Ref globals_start = newTemp(qbe_func);
+    ADD(start, globals_start, WORD_TYPE, WASMModuleInstance_ptr, NEW_INT32_CONST(464));
     func_compile_ctx_t ctx = {
         .m = m,
         .wasm_func_decl = decl,
@@ -1052,6 +1052,9 @@ static Fn *compile_func(wasm_module *m, wasm_func_decl *decl, wasm_func_body *bo
         .locals_len = locals_len,
         .skip_flag = NONE,
         .curr_block = start,
+        .mem0_ptr = mem0_ptr,
+        .globals_start = globals_start,
+        .a0 = WASMExecEnv_ptr,
     };
     listSetFreeMethod(ctx.value_stack, free);
     listSetFreeMethod(ctx.value_stack, free);
@@ -1200,6 +1203,10 @@ void compile(wasm_module *m, uint8_t **out_buf, uint32_t *out_len) {
         .types = m->types,
         .types_len = m->types_len,
         .func_count = m->num_funcs,
+        .globals = m->globals,
+        .globals_len = m->globals_len,
+        .data_segments = m->data_segments,
+        .data_segments_len = m->num_data_segments,
     };
     rv32.emit_init_data(&aot_mod, &init_data);
 

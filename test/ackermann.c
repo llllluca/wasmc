@@ -13,8 +13,8 @@ int ackermann(int M, int N)
 
 int main()
 {
-    int M = 4;
-    int N = 8;
+    int M = 3;
+    int N = 7;
     int result = ackermann(M, N);
     return result;
 }

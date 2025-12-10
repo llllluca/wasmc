@@ -9,7 +9,7 @@ fib2(unsigned long n)
 
 int main()
 {
-    int n = 42;
+    int n = 10;
     int res = fib2(n);
     return res;
 }

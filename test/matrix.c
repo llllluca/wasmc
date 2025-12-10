@@ -1,7 +1,6 @@
 //https://en.wikipedia.org/wiki/Matrix_multiplication
 
-#define ITERATIONS 300000
-#define SIZE 10
+#define SIZE 50
 
 static void
 fillmatrix(int *m, int rows, int cols)
@@ -44,9 +43,7 @@ int main()
     fillmatrix(mm, rows, cols);
 
     int i;
-    for (i = 0; i < ITERATIONS; i++) {
-        mmult(rows, cols, m1, m2, mm);
-    }
+    mmult(rows, cols, m1, m2, mm);
     int res = mm[0 * rows + 0] + mm[2* rows + 3] + mm[3 * rows + 2] + mm[4 * rows + 4];
     return res;
 }

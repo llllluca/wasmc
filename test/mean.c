@@ -3,8 +3,8 @@
 int x[LEN];
 
 int main(void) {
-    for (unsigned int i = 1; i <= LEN; i++) {
-        x[i] = i;
+    for (unsigned int i = 0; i < LEN; i++) {
+        x[i] = i+1;
     }
     int sum = 0;
     for (unsigned int i = 0; i < LEN; i++) {
