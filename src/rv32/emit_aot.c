@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 #include "rv32i.h"
 #include "../libqbe.h"
@@ -696,6 +697,7 @@ void rv32_emit_fn_text(AOTModule *aotm, Fn *fn, uint32_t type_index) {
         }
     }
 
+    listRelease(patch_list);
     aotm->p = p;
     return;
 
@@ -1096,8 +1098,16 @@ ERROR:
 }
 
 void rv32_finalize(AOTModule *aotm, uint8_t **buf, uint32_t *buf_len) {
-    *buf = aotm->buf;
-    *buf_len = aotm->p - aotm->buf;
+    uint32_t len = aotm->p - aotm->buf;
+    *buf_len = len;
+    *buf = realloc(aotm->buf, len);
+    free(aotm->funcs);
+    AOTRelocation *r = aotm->reloc_list;
+    while (r != NULL) {
+        AOTRelocation *next = r->next;
+        free(r);
+        r = next;
+    }
 }
 
 

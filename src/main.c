@@ -29,5 +29,6 @@ int main(int argc, char **argv) {
 
     free_wasm_module(m);
     free(wasm_buf);
+    free(buf);
     return EXIT_SUCCESS;
 }

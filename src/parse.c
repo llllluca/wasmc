@@ -447,6 +447,11 @@ void free_wasm_module(wasm_module *m) {
         free(m->func_decls);
         m->func_decls = NULL;
     }
+    if (m->exports != NULL) {
+        free(m->exports);
+        m->exports = NULL;
+        m->num_exports = 0;
+    }
     free(m);
 }
 

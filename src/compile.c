@@ -310,7 +310,6 @@ static void compile_instr_global_set(func_compile_ctx_t *ctx) {
     assert_stack_entry_value(entry, g->expr.type);
     if (size(g->expr.type) != 4) panic();
 
-    Fn *f = ctx->qbe_func;
     Blk *b = ctx->curr_block;
 
     STOREW(b, entry->as.value.qbe_temp,
