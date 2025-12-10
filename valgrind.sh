@@ -26,7 +26,7 @@ run_valgrind() {
 
     log_info "Checking memory leaks for ${name}..."
     wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
-    valgrind --leak-check=full --quiet --error-exitcode=1 ./wasmc "test/${name}.wasm" > /dev/null
+    valgrind --leak-check=full --quiet --error-exitcode=1 ./build/wasmc "test/${name}.wasm" > /dev/null
 
     # Check the exit status of Valgrind
     if [ "$?" -eq 0 ]; then

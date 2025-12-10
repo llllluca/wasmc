@@ -27,7 +27,7 @@ run_test() {
     log_info "starting test '${name}'."
 
     local result=$(wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
-        ./wasmc "test/${name}.wasm" > "test/${name}.aot" && \
+        ./build/wasmc "test/${name}.wasm" > "test/${name}.aot" && \
         ./iwasm-2.4.4 -f main "test/${name}.aot" "$@")
 
     if [ "$result" != "$expected_result" ]; then
