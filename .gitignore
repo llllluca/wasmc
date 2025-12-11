@@ -1,13 +1,7 @@
-wasm3/
-iwasm3
 .ccls-cache/
-endianess.c
 wasmc
-qbe-git
-qbe
-src/*.o
-src/rv32/*.o
-src/qbe-1.2/*.o
+build/
+tools/readaot
 esp32c3-idf/build/
 esp32c3-idf/managed_components/
 esp32c3-idf/Debug/

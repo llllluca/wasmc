@@ -28,7 +28,7 @@ run_test() {
 
     local result=$(wat2wasm "test/${name}.wat" -o "test/${name}.wasm" && \
         ./build/wasmc "test/${name}.wasm" > "test/${name}.aot" && \
-        ./iwasm-2.4.4 -f main "test/${name}.aot" "$@")
+        iwasm-2.4.4 -f main "test/${name}.aot" "$@")
 
     if [ "$result" != "$expected_result" ]; then
         log_error "${name} failed, the expected result is ${expected_result} but received ${result}."

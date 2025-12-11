@@ -1,54 +1,10 @@
 (module $fib2.wasm
   (type (;0;) (func))
-  (type (;1;) (func (result i32)))
-  (type (;2;) (func (param i32) (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (type (;2;) (func (result i32)))
   (type (;3;) (func (param i32 i32) (result i32)))
   (func $__wasm_call_ctors (type 0))
-  (func $__original_main (type 1) (result i32)
-    (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
-    global.get $__stack_pointer
-    local.set 0
-    i32.const 16
-    local.set 1
-    local.get 0
-    local.get 1
-    i32.sub
-    local.set 2
-    local.get 2
-    global.set $__stack_pointer
-    i32.const 0
-    local.set 3
-    local.get 2
-    local.get 3
-    i32.store offset=12
-    i32.const 10
-    local.set 4
-    local.get 2
-    local.get 4
-    i32.store offset=8
-    local.get 2
-    i32.load offset=8
-    local.set 5
-    local.get 5
-    call $fib2
-    local.set 6
-    local.get 2
-    local.get 6
-    i32.store offset=4
-    local.get 2
-    i32.load offset=4
-    local.set 7
-    i32.const 16
-    local.set 8
-    local.get 2
-    local.get 8
-    i32.add
-    local.set 9
-    local.get 9
-    global.set $__stack_pointer
-    local.get 7
-    return)
-  (func $fib2 (type 2) (param i32) (result i32)
+  (func $fib2 (type 1) (param i32) (result i32)
     (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
     global.get $__stack_pointer
     local.set 1
@@ -135,6 +91,50 @@
     global.set $__stack_pointer
     local.get 19
     return)
+  (func $__original_main (type 2) (result i32)
+    (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+    global.get $__stack_pointer
+    local.set 0
+    i32.const 16
+    local.set 1
+    local.get 0
+    local.get 1
+    i32.sub
+    local.set 2
+    local.get 2
+    global.set $__stack_pointer
+    i32.const 0
+    local.set 3
+    local.get 2
+    local.get 3
+    i32.store offset=12
+    i32.const 10
+    local.set 4
+    local.get 2
+    local.get 4
+    i32.store offset=8
+    local.get 2
+    i32.load offset=8
+    local.set 5
+    local.get 5
+    call $fib2
+    local.set 6
+    local.get 2
+    local.get 6
+    i32.store offset=4
+    local.get 2
+    i32.load offset=4
+    local.set 7
+    i32.const 16
+    local.set 8
+    local.get 2
+    local.get 8
+    i32.add
+    local.set 9
+    local.get 9
+    global.set $__stack_pointer
+    local.get 7
+    return)
   (func $main (type 3) (param i32 i32) (result i32)
     (local i32)
     call $__original_main
@@ -155,6 +155,7 @@
   (global (;9;) i32 (i32.const 1))
   (export "memory" (memory 0))
   (export "__wasm_call_ctors" (func $__wasm_call_ctors))
+  (export "fib2" (func $fib2))
   (export "__original_main" (func $__original_main))
   (export "main" (func $main))
   (export "__main_void" (func $__original_main))

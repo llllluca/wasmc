@@ -12,7 +12,7 @@ add_executable(
     "src/adlist.c"
     "src/utils.c"
     "src/ssa.c"
-    "src/rega.o"
+    "src/rega.c"
     "src/rv32/emit_aot.c"
     "src/rv32/target.c")
 
