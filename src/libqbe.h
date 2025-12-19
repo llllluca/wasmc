@@ -13,13 +13,13 @@ typedef struct Use Use;
 typedef struct Blk Blk;
 typedef struct Tmp Tmp;
 
-typedef enum __attribute__ ((__packed__)) simple_type {
-    NO_TYPE,
-    WORD_TYPE,
-    LONG_TYPE,
-    SINGLE_PRECISION_TYPE,
-    DOUBLE_PRECISION_TYPE,
-} simple_type;
+typedef enum __attribute__ ((__packed__)) IRType {
+    IR_TYPE_NONE,
+    IR_TYPE_INT32,
+    IR_TYPE_INT64,
+    IR_TYPE_F32,
+    IR_TYPE_F64,
+} IRType;
 
 typedef struct location {
     location_type type;
@@ -46,7 +46,6 @@ typedef struct live_interval {
 #define NString 80
 struct Tmp {
     char name[NString];
-    simple_type cls; // TODO: when cls is used?
     list *use_list;
     live_interval *i;
 };
@@ -70,7 +69,7 @@ typedef struct Ref {
 #define UNDEFINED_REF \
     (Ref){ .type = REF_TYPE_UNDEFINED, }
 
-#define NEW_INT32_CONST(val) \
+#define INT32_CONST(val) \
     (Ref){ .type = REF_TYPE_INT32_CONST, .as.int32_const = (val) }
 
 #define NEW_NAME(val) \
@@ -96,7 +95,6 @@ typedef enum Jump_type {
     HALT_JUMP_TYPE
 } Jump_type;
 
-// TODO: put Jump as normal Ins
 typedef struct Jump {
     Jump_type type;
     Ref arg;
@@ -131,7 +129,7 @@ typedef struct Phi_arg {
 struct Phi {
     Ref to;
     list *phi_arg_list;
-    simple_type type;
+    IRType type;
     Blk *block;
 };
 
@@ -141,69 +139,61 @@ typedef struct Fn {
     list *blk_list;
     char name[NString];
     Blk *start;
-    simple_type ret_type;
+    IRType ret_type;
     unsigned int num_stack_slots;
 } Fn;
 
-typedef enum DataField_type {
-    DByte,
-    DWord,
-    DLong,
-    DZeros,
-    DString,
-} DataField_type;
+typedef enum IROpcode {
+    /* Arithmetic and Bits */
+    IR_OPCODE_ADD,
+    IR_OPCODE_AND,
+    IR_OPCODE_DIV,
+    IR_OPCODE_MUL,
+    IR_OPCODE_OR,
+    IR_OPCODE_REM,
+    IR_OPCODE_SAR,
+    IR_OPCODE_SHL,
+    IR_OPCODE_SHR,
+    IR_OPCODE_SUB,
+    IR_OPCODE_UDIV,
+    IR_OPCODE_UREM,
+    IR_OPCODE_XOR,
 
-typedef struct DataField {
-    DataField_type type;
-    union {
-        unsigned char b;
-        int32_t w;
-        int64_t l;
-        uint64_t z;
-        char *s;
-    } val;
-} DataField;
+    /* Comparisons */
+    IR_OPCODE_CEQZI32,
+    IR_OPCODE_CEQI32,
+    IR_OPCODE_CNEI32,
+    IR_OPCODE_CSLTI32,
+    IR_OPCODE_CULTI32,
+    IR_OPCODE_CSGTI32,
+    IR_OPCODE_CUGTI32,
+    IR_OPCODE_CSLEI32,
+    IR_OPCODE_CULEI32,
+    IR_OPCODE_CSGEI32,
+    IR_OPCODE_CUGEI32,
 
-typedef struct Data {
-    char name[NString];
-    list *dataField_list;
-} Data;
+    /* Memory */
+    IR_OPCODE_STORE32,
+    IR_OPCODE_LOAD32,
+    IR_OPCODE_LOADU8,
+    IR_OPCODE_STORE8,
 
-typedef enum instr_opcode {
-    ADD_INSTR,
-    SUB_INSTR,
-    DIV_INSTR,
-    REM_INSTR,
-    UDIV_INSTR,
-    UREM_INSTR,
-    MUL_INSTR,
-    AND_INSTR,
-    OR_INSTR,
-    XOR_INSTR,
-    SAR_INSTR,
-    SHR_INSTR,
-    SHL_INSTR,
-    EQZW_INSTR,
-    CNEW_INSTR,
-    CSLTW_INSTR,
-    CULTW_INSTR,
-    STOREW_INSTR,
-    LOADW_INSTR,
-    LOADUB_INSTR,
-    STOREB_INSTR,
+    /* Conversions */
+    EXTSW_INSTR,
+
+    /* Other */
     CALL_INSTR,
     PAR_INSTR,
     ARG_INSTR,
-    EXTSW_INSTR,
     COPY_INSTR,
-
     PUSH_INSTR,
     POP_INSTR,
-} instr_opcode;
+
+    } IROpcode;
 
 struct Ins {
-    instr_opcode op;
-    simple_type type;
+    IROpcode op;
+    IRType type;
     Ref to;
     Ref arg[2];
     unsigned int id;
@@ -230,7 +220,7 @@ struct Use {
 
 /* Arithmetic and Bits */
 #define ADD(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), ADD_INSTR, (ref1), (ref2))
+    instr((b), (temp), (kind), IR_OPCODE_ADD, (ref1), (ref2))
 
 #define SUB(b, temp, kind, ref1, ref2) \
     instr((b), (temp), (kind), SUB_INSTR, (ref1), (ref2))
@@ -285,11 +275,11 @@ struct Use {
     instr((b), (temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
 
 /* Memory */
-#define STOREW(b, fromRef, offset, toRef) \
-    instr((b), (fromRef), WORD_TYPE, STOREW_INSTR, (offset), (toRef))
+#define STOREI32(b, fromRef, offset, toRef) \
+    instr((b), (fromRef), IR_TYPE_INT32, IR_OPCODE_STORE32, (offset), (toRef))
 
-#define LOADW(b, toRef, offset, fromRef) \
-    instr((b), (toRef), WORD_TYPE, LOADW_INSTR, (offset), (fromRef))
+#define LOADI32(b, toRef, offset, fromRef) \
+    instr((b), (toRef), IR_TYPE_INT32, IR_OPCODE_LOAD32, (offset), (fromRef))
 
 /* Conversions */
 #define EXTSW(b, temp, ref) \
@@ -304,26 +294,17 @@ struct Use {
     instr((b), (temp), kind, CALL_INSTR, (addrRef), UNDEFINED_REF)
 
 #define VOID_FUNC_CALL(b, addrRef) \
-    instr((b), UNDEFINED_REF, WORD_TYPE, CALL_INSTR, (addrRef), UNDEFINED_REF)
-
-/* Data */
-#define ADD_INT32_DATA_FIELD(num) addNumDataField(DW, (num))
-#define ADD_ZEROS_DATA_FIELD(num) addNumDataField(DZ, (num))
-#define ADD_STR_DATA_FIELD(str) addStrDataField(DB, (str))
-
+    instr((b), UNDEFINED_REF, IR_TYPE_INT32, CALL_INSTR, (addrRef), UNDEFINED_REF)
 
 /* libqbe.c */
 void printfn(Fn *fn, FILE *f);
-void printdata(Data *d, FILE *f);
 Ref newMemoryAddr(Fn *f, Blk *b);
-Fn *newFunc(simple_type ret_type, char *name, Blk *start);
-Ref newFuncParam(Fn *f, simple_type type);
+Fn *newFunc(IRType ret_type, char *name, Blk *start);
+Ref newFuncParam(Fn *f, IRType type);
 Ref newTemp(Fn *func);
 Blk *newBlock(uint32_t nlocals);
-// TODO: usare instr e macro per newFuncCallArg
-void newFuncCallArg(Blk *b, simple_type type, Ref r);
-//Ref newAddrConst(Fn *f, char *addrName);
-void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2);
+void newFuncCallArg(Blk *b, IRType type, Ref r);
+void instr(Blk *b, Ref r, IRType type, IROpcode op, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);
 void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
 void ret(Fn *f, Blk *b);
@@ -331,13 +312,7 @@ void retRef(Fn *f, Blk *b, Ref r);
 void halt(Fn *f, Blk *b);
 void optimizeFunc(Fn *fn);
 void typecheck(Fn *fn);
-Data *newData(char *name);
-void dataAppendByteField(Data *d, unsigned char b);
-void dataAppendWordField(Data *d, int32_t w);
-void dataAppendLongField(Data *d, int64_t l);
-void dataAppendZerosField(Data *d, uint64_t z);
-void dataAppendStringField(Data *d, char *s, unsigned int len);
-listNode *newPhi(Blk *b, Ref temp, simple_type type);
+listNode *newPhi(Blk *b, Ref temp, IRType type);
 void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg);
 void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
 void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
@@ -345,7 +320,5 @@ void freeFunc(Fn *f);
 void freeTemp(Tmp *tmp);
 void freePhi(Phi *phi);
 void freeBlock(Blk *b);
-void freeData(Data *d);
-void freeDataField(DataField *df);
 
 #endif 

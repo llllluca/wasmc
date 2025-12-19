@@ -2,6 +2,13 @@
 #define AOT_H_INCLUDED
 
 #include <inttypes.h>
+#include "wasm.h"
+#include "libqbe.h"
+
+typedef enum AOTErr_t {
+    AOT_OK,
+    AOT_ERR,
+} AOTErr_t;
 
 #define AOT_MAGIC_NUMBER 0x746f6100
 #define AOT_CURRENT_VERSION 5
@@ -128,18 +135,62 @@ typedef struct AOTFuncSecEntry {
 } AOTFuncSecEntry;
 
 typedef struct AOTModule {
+    WASMModule *wasm_mod;
     uint8_t *buf;
     uint32_t buf_len;
-    uint8_t *p;
+    uint8_t *offset;
+    uint8_t *buf_end;
     uint8_t *p_end;
-    uint8_t *text_size;
+    uint32_t *text_size;
     uint8_t *text_start;
-    uint32_t func_count;
     uint32_t next_func;
     AOTFuncSecEntry *funcs;
     uint32_t reloc_count;
     AOTRelocation *reloc_list;
 } AOTModule;
+
+typedef struct Target {
+    char *name;
+    AOTErr_t (*emit_target_info)(AOTModule *);
+    AOTErr_t (*emitfn)(AOTModule *, Fn *, uint32_t);
+} Target;
+
+#define ALIGN_PTR(p, align) ((void *)((((uintptr_t)p) + (align-1)) & ~(align-1)))
+
+#define TEMPLATE_WRITE(val, p, p_end, type, align) \
+    do { \
+        p = ALIGN_PTR(p, align); \
+        if ((long unsigned int)(p_end - p) < sizeof(type)) { \
+            return AOT_ERR; \
+        } \
+        *((type *)p) = (val); \
+        p += sizeof(type); \
+    } while (0)
+
+#define WRITE_UINT64(m, val) \
+    TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint64_t, sizeof(uint32_t))
+
+#define WRITE_UINT32(m, val) \
+    TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint32_t, sizeof(uint32_t))
+
+#define WRITE_UINT16(m, val) \
+    TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint16_t, sizeof(uint16_t))
+
+#define WRITE_UINT8(m, val) \
+    TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint8_t, sizeof(uint8_t))
+
+#define WRITE_BYTE_ARRAY(m, addr, len) \
+    do { \
+        if ((long unsigned int)((m)->buf_end - (m)->offset) < len) { \
+            return AOT_ERR; \
+        } \
+        memcpy((m)->offset, addr, len); \
+        (m)->offset += len; \
+    } while (0)
+
+AOTErr_t aot_module_finalize(AOTModule *m, uint8_t **buf, uint32_t *len);
+AOTErr_t aot_module_init(AOTModule *m, WASMModule *w, Target *t);
+void aot_module_cleanup(AOTModule *m);
 
 #endif
 

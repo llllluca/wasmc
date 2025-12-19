@@ -589,7 +589,9 @@ void print_init_data_section(AOTSection *s) {
         data.types[i] = xmalloc(size);
         data.types[i]->param_count = param_count;
         data.types[i]->result_count = result_count;
-        read_byte_array(p, p_end, data.types[i]->types, type_size);
+        if (type_size > 0) {
+            read_byte_array(p, p_end, data.types[i]->types, type_size);
+        }
 
         printf("type[%"PRIu32"].param_count %"PRIu32"\n", i, param_count);
         printf("type[%"PRIu32"].result_count %"PRIu32"\n", i, result_count);

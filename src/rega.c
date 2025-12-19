@@ -1,6 +1,12 @@
-#include "all.h"
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
+#include "libqbe.h"
+
+/* utils.c */
+extern void panic(void);
+extern void *xcalloc(size_t nmemb, size_t size);
+extern void *xmalloc(size_t size);
 
 static Ref *input_of(Phi *phi, Blk *b) {
     listNode *phi_arg_node;
@@ -140,7 +146,7 @@ static list *phi_parallel_moves(Blk *pred, Blk *succ) {
 static Ins *alloc_copy(location *dst, move_from *src) {
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = COPY_INSTR;
-    ins->type = WORD_TYPE;
+    ins->type = IR_TYPE_INT32;
 
     ins->to.type = REF_TYPE_LOCATION;
     ins->to.as.loc = *dst;
@@ -166,7 +172,7 @@ static void move_one(move *m, list* par_move, list *move_seq) {
     m->status = BEING_MOVED;
     location tmp = {
         .type = REGISTER,
-        .as.reg = rv32_reserved_reg[0],
+        .as.reg = rv32_priv_reg[0],
     };
     listNode *move_node;
     listNode *move_iter = listFirst(par_move);
@@ -213,22 +219,6 @@ static list *sequentialize(list *par_move) {
     }
 
     return move_seq;
-}
-
-static void print_location(location *l) {
-    switch (l->type) {
-        case LOCATION_NONE:
-            printf("LOCATION_NONE\n");
-            break;
-        case REGISTER:
-            printf("REGISTER %u\n", l->as.reg);
-            break;
-        case STACK_SLOT:
-            printf("STACK_SLOT %u\n", l->as.stack_slot);
-            break;
-        default:
-            panic();
-    }
 }
 
 static void insert_move_at_start(Blk *b, list *ins_list) {
@@ -442,7 +432,7 @@ static live_interval **build_intervals(Fn *f) {
             Ins *ins = listNodeValue(ins_node);
             listNode *tmp_node = ins->to.as.tmp_node;
             // The storew instruction has 3 input operand and 0 output operand
-            if (ins->op == STOREW_INSTR || ins->op == STOREB_INSTR) {
+            if (ins->op == IR_OPCODE_STORE32 || ins->op == IR_OPCODE_STORE8) {
                 if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
                     Tmp *t = listNodeValue(tmp_node);
                     add_range(t, b->id, ins->id);
@@ -773,7 +763,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                     live_interval *li = listNodeValue(survivor_node);
                     Ins *push_ins = xmalloc(sizeof(struct Ins));
                     push_ins->op = PUSH_INSTR;
-                    push_ins->type = WORD_TYPE;
+                    push_ins->type = IR_TYPE_INT32;
                     push_ins->to = UNDEFINED_REF;
                     push_ins->arg[0].type = REF_TYPE_LOCATION;
                     push_ins->arg[0].as.loc = li->assign;
@@ -786,7 +776,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                     live_interval *li = listNodeValue(survivor_node);
                     Ins *pop_ins = xmalloc(sizeof(struct Ins));
                     pop_ins->op = POP_INSTR;
-                    pop_ins->type = WORD_TYPE;
+                    pop_ins->type = IR_TYPE_INT32;
                     pop_ins->to.type = REF_TYPE_LOCATION;
                     pop_ins->to.as.loc = li->assign;
                     pop_ins->arg[0] = UNDEFINED_REF;

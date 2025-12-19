@@ -4,11 +4,14 @@
 
 The project was developed and tested using a GNU/Linux Debian 13 stable x86-64 machine.
 
-The following Debian 13 stable package are required to build `wasmc` and then run a WASM module compiled with `wasmc` on your own (most probably x86-64) machine:
+The following Debian 13 stable package are required to build `wasmc`.
 ```bash
-sudo apt install git cmake wabt qemu-user
+sudo apt install git cmake
 ```
-
+Also the following Debian 13 stable package are required to run a WASM module compiled with `wasmc` on your own (most probably x86-64) machine:
+```bash
+sudo apt install qemu-user
+```
 Build from source:
 ```bash
 mkdir build/
@@ -20,11 +23,10 @@ cd ..
 
 `wasmc` usage:
 ```bash
-wat2wasm -o test/fib2.wasm test/fib2.wat
-./build/wasmc test/fib2.wasm > test/fib2.aot
+./build/wasmc tests/wasm/fib2.wasm
 ```
 
-`wasmc` outputs a file in the AOT format.
+`wasmc` outputs a file in the AOT format, the deafult file name is `a.aot`.
 The AOT (Ahead Of Time) format is not a stardard file format for executables, it is used and developed for the [WAMR][WAMR] project.
 The AOT format is designed to facilitate compilation from a WASM module to machine code.
 To run an AOT file, one need to install the WAMR runtime.
@@ -37,7 +39,7 @@ sudo tar xf riscv32-glibc-ubuntu-24.04-gcc.tar.xz -C /opt/
 sudo chown root:root -R /opt/riscv/
 ```
 Otherwise compile the riscv32 toolchain from source following the instructions at [link][riscv-toolchain] (it takes long).
-Then add `/opt/riscv/bin` to the `$PATH` environment variable.
+ In both cases add `/opt/riscv/bin` to the `$PATH` environment variable.
 
 Cross compile the WAMR runtime:
 ```bash
@@ -55,13 +57,45 @@ Then place the `iwasm-2.4.4` executable in a path in the `$PATH` environment var
 
 Execute the AOT file with the cross compiled WAMR runtime inside QEMU:
 ```bash
-./iwasm-2.4.4 -f main test/fib2.aot 10
+./iwasm-2.4.4 -f fib2 fib2.aot 10
 ```
 This example calculate the 10-th Fibonacci number using the slow recursive algorithm.
 
 ## Build from source and run on the esp32c3 microcontroller
 ```bash
 ```
+
+## Testing
+
+### How to run tests
+Build the project first, the run the tests with:
+```bash
+cd build/
+ctest
+```
+
+### How to create a new test
+Create a new `.wat` o `.c` test source file and place it in `tests/wasm/src/`.
+
+Compile the `.c` test source file using:
+```bash
+cd tests/wasm/
+clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export-all -o <name>.wasm src/<name>.c
+```
+Compile the `.wat` test source file using:
+```bash
+cd tests/wasm/
+wat2wasm src/<name>.wat
+```
+
+On Debian 13 you can install `clang` or `wat2wasm` with:
+```bash
+sudo apt install wabt clang
+```
+
+Add the new test in `tests/CMakeLists.txt`
+
+
 
 [riscv-toolchain]: https://github.com/riscv/riscv-gnu-toolchain
 [WAMR]: https://github.com/bytecodealliance/wasm-micro-runtime/tree/main

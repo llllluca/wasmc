@@ -6,3 +6,5 @@ esp32c3-idf/build/
 esp32c3-idf/managed_components/
 esp32c3-idf/Debug/
 esp32c3-idf/compile_commands.json
+Debug/
+compile_commands.json

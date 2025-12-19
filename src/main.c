@@ -1,7 +1,11 @@
-#include "all.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "compile.h"
+#include "wasm.h"
+#include "aot.h"
+
+extern Target rv32;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -21,13 +25,17 @@ int main(int argc, char **argv) {
     fread(wasm_buf, sizeof(char), wasm_len, input);
     fclose(input);
 
-    wasm_module *m = parse(wasm_buf, wasm_len);
+    WASMModule m;
+    load_wasm_module(&m, wasm_buf, wasm_len);
     uint8_t *buf;
     uint32_t len;
-    compile(m, &buf, &len);
-    fwrite(buf, len, 1, stdout);
+    if (compile(&m, &rv32, &buf, &len)) return 1;
 
-    free_wasm_module(m);
+    FILE *output = fopen("a.aot", "w");
+    fwrite(buf, 1, len, output);
+    fclose(output);
+
+    free_wasm_module(&m);
     free(wasm_buf);
     free(buf);
     return EXIT_SUCCESS;

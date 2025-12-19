@@ -47,7 +47,7 @@ extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
 extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
 
 #define RV32_RESERVED_NUM_REG 2
-extern const rv32_reg rv32_reserved_reg[RV32_RESERVED_NUM_REG];
+extern const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG];
 
 typedef struct rv32_reg_pool {
     bool pool[RV32_NUM_REG];
@@ -659,12 +659,20 @@ typedef struct ins_fmt {
     R_TYPE_INS_TEMPLATE(REG_OPCODE, DIVU_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
 
 /* Instr: rem
- * Description: Remainder
+ * Description: remainder
  * Use: rem rd, rs1, rs2
  * Result: rd = rs1 % rs2 */
 #define REM_FUNC3 0x6
 #define RV32_REM(RD, RS1, RS2) \
     R_TYPE_INS_TEMPLATE(REG_OPCODE, REM_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
+
+/* Instr: remu
+ * Description: remainder unsigned
+ * Use: remu rd, rs1, rs2
+ * Result: rd = rs1 % rs2 */
+#define REMU_FUNC3 0x7
+#define RV32_REMU(RD, RS1, RS2) \
+    R_TYPE_INS_TEMPLATE(REG_OPCODE, REMU_FUNC3, MULDIV_FUNC7, RD, RS1, RS2)
 
 /* Instr: mul
  * Description: Multiply

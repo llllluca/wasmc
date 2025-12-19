@@ -1,11 +1,13 @@
 #include "libqbe.h"
-#include "all.h"
 #include <stdarg.h>
 #include <string.h>
-#include <stddef.h>
 #include <assert.h>
+#include <stdlib.h>
 
-extern char *rname[];
+/* utils.c */
+extern void panic(void);
+extern void *xcalloc(size_t nmemb, size_t size);
+extern void *xmalloc(size_t size);
 
 static unsigned int next_temp_id = 0;
 
@@ -48,29 +50,29 @@ char *rname[] = {
 
 const char *optab[] = {
     /* Arithmetic and Bits */
-    [ADD_INSTR] = "add",
-    [SUB_INSTR] = "sub",
-    [DIV_INSTR] = "div",
-    [REM_INSTR] = "rem",
-    [UDIV_INSTR] = "udiv",
-    [UREM_INSTR] = "urem",
-    [MUL_INSTR] = "mul",
-    [AND_INSTR] = "and",
-    [OR_INSTR] = "or",
-    [XOR_INSTR] = "xor",
-    [SAR_INSTR] = "sar",
-    [SHR_INSTR] = "shr",
-    [SHL_INSTR] = "shl",
+    [IR_OPCODE_ADD] = "add",
+    [IR_OPCODE_SUB] = "sub",
+    [IR_OPCODE_DIV] = "div",
+    [IR_OPCODE_REM] = "rem",
+    [IR_OPCODE_UDIV] = "udiv",
+    [IR_OPCODE_UREM] = "urem",
+    [IR_OPCODE_MUL] = "mul",
+    [IR_OPCODE_AND] = "and",
+    [IR_OPCODE_OR] = "or",
+    [IR_OPCODE_XOR] = "xor",
+    [IR_OPCODE_SAR] = "sar",
+    [IR_OPCODE_SHR] = "shr",
+    [IR_OPCODE_SHL] = "shl",
     /* Comparisons */
-    [EQZW_INSTR] = "eqz",
-    [CNEW_INSTR] = "cnew",
-    [CSLTW_INSTR] = "csltw",
-    [CULTW_INSTR] = "cultw",
+    [IR_OPCODE_CEQZI32] = "ceqzi32",
+    [IR_OPCODE_CNEI32] = "cnei32",
+    [IR_OPCODE_CSLTI32] = "cslti32",
+    [IR_OPCODE_CULTI32] = "culti32",
     /* Memory */
-    [STOREB_INSTR] = "storeb",
-    [STOREW_INSTR] = "storew",
-    [LOADUB_INSTR] = "loadub",
-    [LOADW_INSTR] = "loadw",
+    [IR_OPCODE_STORE8] = "store8",
+    [IR_OPCODE_STORE32] = "store32",
+    [IR_OPCODE_LOADU8] = "loadu8",
+    [IR_OPCODE_LOAD32] = "load32",
     /* Conversions */
     [EXTSW_INSTR] = "extsw",
     /* Cast and Copy */
@@ -126,7 +128,7 @@ void printfn(Fn *fn, FILE *f) {
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
             fprintf(f, "\t");
-            if (i->op == STOREW_INSTR || i->op == LOADW_INSTR) {
+            if (i->op == IR_OPCODE_STORE32 || i->op == IR_OPCODE_STORE8) {
                 fprintf(f, "%s", optab[i->op]);
                 fprintf(f, " ");
                 printref(i->to, f);
@@ -181,41 +183,6 @@ void printfn(Fn *fn, FILE *f) {
     fprintf(f, "}\n");
 }
 
-void printdata(Data *d, FILE *f) {
-    
-    unsigned int n = 1;
-    fprintf(f, "data $%s = { ", d->name);
-    listNode *node;
-    listNode *iter = listFirst(d->dataField_list);
-    while ((node = listNext(&iter)) != NULL) {
-        DataField *df = listNodeValue(node);
-        switch (df->type) {
-            case DByte:
-                fprintf(f, "b %d", df->val.b);
-                break;
-            case DWord:
-                fprintf(f, "w %"PRId32, df->val.w);
-                break;
-            case DLong:
-                fprintf(f, "l %"PRId64, df->val.l);
-                break;
-            case DZeros:
-                fprintf(f, "z %"PRIu64, df->val.z);
-                break;
-            case DString:
-                fprintf(f, "b %s", df->val.s);
-                break;
-            default:
-                panic();
-        }
-        if (n < listLength(d->dataField_list)) {
-            fprintf(f, ", ");
-        }
-        n++;
-    }
-    fprintf(f, " }\n");
-}
-
 void printref(Ref r, FILE *f) {
     switch (r.type) {
     case REF_TYPE_UNDEFINED:
@@ -250,6 +217,7 @@ void printref(Ref r, FILE *f) {
     }
 }
 
+/*
 static void err(char *s, ...) {
     va_list ap;
 
@@ -260,57 +228,12 @@ static void err(char *s, ...) {
     va_end(ap);
     exit(1);
 }
-
-Data *newData(char *name) {
-    Data *d = xmalloc(sizeof(Data));
-    strncpy(d->name, name, NString);
-    d->dataField_list = listCreate();
-    listSetFreeMethod(d->dataField_list, (void (*)(void *))freeDataField);
-    return d;
-}
-
-void dataAppendByteField(Data *d, unsigned char b) {
-    DataField *df = xmalloc(sizeof(DataField));
-    df->type = DByte;
-    df->val.b = b;
-    listAddNodeTail(d->dataField_list, df);
-}
-
-void dataAppendWordField(Data *d, int32_t w) {
-    DataField *df = xmalloc(sizeof(DataField));
-    df->type = DWord;
-    df->val.w = w;
-    listAddNodeTail(d->dataField_list, df);
-}
-
-void dataAppendLongField(Data *d, int64_t l) {
-    DataField *df = xmalloc(sizeof(DataField));
-    df->type = DLong;
-    df->val.l = l;
-    listAddNodeTail(d->dataField_list, df);
-}
-
-void dataAppendZerosField(Data *d, uint64_t z) {
-    DataField *df = xmalloc(sizeof(DataField));
-    df->type = DZeros;
-    df->val.z = z;
-    listAddNodeTail(d->dataField_list, df);
-}
-
-void dataAppendStringField(Data *d, char *s, unsigned int len) {
-    DataField *df = xmalloc(sizeof(DataField));
-    char *str = xcalloc(len, sizeof(char));
-    memcpy(str, s, len);
-    df->type = DString;
-    df->val.s = str;
-    listAddNodeTail(d->dataField_list, df);
-}
+*/
 
 Ref newTemp(Fn *f) {
 
     Tmp *tmp = xmalloc(sizeof(Tmp));
     snprintf(tmp->name, NString, "t%d", next_temp_id++);
-    tmp->cls = NO_TYPE;
     tmp->use_list = listCreate();
     listSetFreeMethod(tmp->use_list, free);
     listAddNodeTail(f->tmp_list, tmp);
@@ -352,7 +275,7 @@ Blk *newBlock(uint32_t nlocals) {
     return b;
 }
 
-Fn *newFunc(simple_type ret_type, char *name, Blk *start) {
+Fn *newFunc(IRType ret_type, char *name, Blk *start) {
     next_temp_id = 0;
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
@@ -364,15 +287,17 @@ Fn *newFunc(simple_type ret_type, char *name, Blk *start) {
     listAddNodeTail(f->blk_list, start);
     f->start = start;
     f->ret_type = ret_type;
+    /*
     if (name == NULL) {
         err("function need a explicit name");
     }
+    */
     strncpy(f->name, name, NString-1);
     return f;
 }
 
 
-Ref newFuncParam(Fn *f, simple_type type) {
+Ref newFuncParam(Fn *f, IRType type) {
     Ref r = newTemp(f);
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = PAR_INSTR;
@@ -384,7 +309,7 @@ Ref newFuncParam(Fn *f, simple_type type) {
     return r;
 }
 
-void instr(Blk *b, Ref r, simple_type type, instr_opcode op, Ref arg1, Ref arg2) {
+void instr(Blk *b, Ref r, IRType type, IROpcode op, Ref arg1, Ref arg2) {
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = op;
     ins->type = type;
@@ -408,9 +333,11 @@ void jmp(Fn *f, Blk *b, Blk *b0) {
         listAddNodeTail(f->blk_list, b);
     }
     listAddNodeTail(b0->preds, b);
+    /*
     if (f->start == b0) {
         err("invalid jump to the start block");
     }
+    */
 }
 
 void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
@@ -431,9 +358,11 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
     if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
         addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
+    /*
     if (f->start == b0 || f->start == b1) {
         err("invalid jump to the start block");
     }
+    */
 }
 
 void ret(Fn *f, Blk *b) {
@@ -463,7 +392,7 @@ void halt(Fn *f, Blk *b) {
     b->jmp.type = HALT_JUMP_TYPE;
 }
 
-void newFuncCallArg(Blk *b, simple_type type, Ref r) {
+void newFuncCallArg(Blk *b, IRType type, Ref r) {
 
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = ARG_INSTR;
@@ -478,7 +407,7 @@ void newFuncCallArg(Blk *b, simple_type type, Ref r) {
     }
 }
 
-listNode *newPhi(Blk *b, Ref temp, simple_type type) {
+listNode *newPhi(Blk *b, Ref temp, IRType type) {
     Phi *phi = xmalloc(sizeof(struct Phi));
     phi->to = temp;
     phi->type = type;
@@ -551,13 +480,3 @@ void freeBlock(Blk *b) {
     free(b);
 }
 
-void freeData(Data *d) {
-    listRelease(d->dataField_list);
-    free(d);
-}
-void freeDataField(DataField *df) {
-    if (df->type == DString) {
-        free(df->val.s);
-    }
-    free(df);
-}
