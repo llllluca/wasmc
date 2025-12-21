@@ -1,21 +1,3 @@
-/* - How to compile:
- *      $gcc -o readaot readaot.c
- *
- * - How to generate AOT format from WASM module:
- *      $./wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 --bounds-checks=0 -o add2.aot test/add2.wasm
- *
- * - How to generate object ELF format from WASM module:
- *      $./wamrc --target=riscv32 --format=object --stack-bounds-checks=0 -o add2.o test/add2.wasm
- *
- * - How to disassemble text section of a object file
- *      $riscv32-unknown-linux-gnu-objdump -d add2.o
- *
- * - How to display the relocation entries in the object file
- *      $riscv32-unknown-linux-gnu-objdump -r add2.o
- *
- * - How to disassembling a flat binary file using objdump
- *      $riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
- */
 #include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -153,7 +135,7 @@ typedef struct WASMMemory {
 typedef struct WASMFuncType {
     uint16_t param_count;
     uint16_t result_count;
-    uint8_t types[0];
+    uint8_t types[1];
 } WASMFuncType;
 
 typedef struct AOTObjectDataSection {
@@ -255,7 +237,7 @@ const char *AOTSectionType_to_string(AOTSectionType sec_type) {
 
 #define read_byte_array(p, p_end, addr, len) \
     do { \
-        assert(p_end - p >= len); \
+        assert((unsigned long)(p_end - p) >= len); \
         memcpy(addr, p, len); \
         p += len; \
     } while (0)
@@ -647,7 +629,7 @@ void print_init_data_section(AOTSection *s) {
 
     read_uint32(p, p_end, &data.start_func_index);
 
-    if (data.start_func_index == -1) {
+    if (data.start_func_index == (uint32_t)-1) {
         printf("start func index NONE\n");
     } else {
         printf("start func index %"PRIu32"\n", data.start_func_index);
@@ -799,7 +781,7 @@ void print_function_section(AOTSection *s) {
     }
 
     if (p != p_end) {
-        fprintf(stderr, "Error: invalid function section size. p = %p, p_end = %p, p_end - p = %ld\n", p, p_end, p_end - p);
+        fprintf(stderr, "Error: invalid function section size\n");
         exit(EXIT_FAILURE);
     }
 }
@@ -995,7 +977,7 @@ int main(int argc, char **argv) {
     }
 
     fseek(f, 0, SEEK_END);
-    long buf_size  = ftell(f);
+    unsigned long buf_size  = ftell(f);
     fseek(f, 0, SEEK_SET);
     uint8_t *buf = xmalloc(buf_size);
     if (fread(buf, 1, buf_size, f) != buf_size) {

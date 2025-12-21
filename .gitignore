@@ -1,5 +1,6 @@
 .ccls-cache/
 wasmc
+tests/a.aot
 build/
 tools/readaot
 esp32c3-idf/build/

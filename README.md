@@ -105,6 +105,33 @@ sudo apt install wabt clang
 
 Add the new test in `tests/CMakeLists.txt`
 
+## Useful commands
+
+Generate riscv32 AOT format from WASM module using `warmc`:
+```bash
+ wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 --bounds-checks=0 -o fib2.aot tests/wasm/fib2.wasm
+```
+
+Generate riscv32 object ELF format from WASM module using `warmc`:
+```bash
+wamrc --target=riscv32 --format=object --stack-bounds-checks=0 --bounds-checks=0 -o fib2.aot tests/wasm/fib2.wasm
+```
+
+Disassemble text section of a riscv32 object file:
+```bash
+ riscv32-unknown-linux-gnu-objdump -d fib2.o
+```
+
+Display the relocation entries in a riscv32 object file:
+```bash
+riscv32-unknown-linux-gnu-objdump -r fib2.o
+```
+
+Disassemble a flat riscv32 binary file using objdump:
+```bash
+ riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
+```
+
 
 
 [riscv-toolchain]: https://github.com/riscv/riscv-gnu-toolchain

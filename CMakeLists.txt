@@ -16,6 +16,8 @@ add_executable(
     src/rv32/emit.c
 )
 
+add_executable(readaot src/readaot.c)
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)
