@@ -280,8 +280,6 @@ Fn *newFunc(IRType ret_type, char *name, Blk *start) {
     Fn *f = xmalloc(sizeof(struct Fn));
     f->tmp_list = listCreate();
     listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
-    f->con_list = listCreate();
-    listSetFreeMethod(f->con_list, free);
     f->blk_list = listCreate();
     listSetFreeMethod(f->blk_list, (void (*)(void *)) freeBlock);
     listAddNodeTail(f->blk_list, start);
@@ -457,7 +455,6 @@ void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {
 
 void freeFunc(Fn *f) {
     listRelease(f->tmp_list);
-    listRelease(f->con_list);
     listRelease(f->blk_list);
     free(f);
 }

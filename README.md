@@ -68,10 +68,20 @@ This example calculate the 10-th Fibonacci number using the slow recursive algor
 ## Testing
 
 ### How to run tests
-Build the project first, the run the tests with:
+Make sure you can build `wasmc` from source and run it on your own machine using the instruction of the previous section.
+In order to run the memory check tests, `valgrind` is required. On Debian 13 you can install `valgrind` with:
+```bash
+sudo apt install valgrind
+```
+Build the project first, the run all tests with:
 ```bash
 cd build/
 ctest
+```
+The memory check tests takes long, you can skip them with:
+```bash
+cd build/
+ctest -E memcheck
 ```
 
 ### How to create a new test

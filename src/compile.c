@@ -84,6 +84,7 @@ static CompileErr_t label_stack_pop(CompileCtx *ctx, LabelStackEntry *l) {
     list_del(next);
     LabelStackEntry *top = (LabelStackEntry *)next;
     if (l != NULL) *l = *top;
+    listRelease(top->results);
     free(top);
     ctx->label_stack_length--;
     return COMPILE_OK;
@@ -483,6 +484,8 @@ static CompileErr_t compile_if(CompileCtx *ctx) {
     if (last_opcode == WASM_OPCODE_ELSE) {
         ERR_CHECK(compile_else(ctx));
         if (label_stack_top(ctx) != l) return COMPILE_ERR;
+    } else {
+        jmp(ctx->ir_func, ctx->curr_block, end_blk);
     }
     ERR_CHECK(finalize_block(ctx, l));
     return COMPILE_OK;

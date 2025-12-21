@@ -135,7 +135,6 @@ struct Phi {
 
 typedef struct Fn {
     list *tmp_list;
-    list *con_list;
     list *blk_list;
     char name[NString];
     Blk *start;

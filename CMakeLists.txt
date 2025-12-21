@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(wasmc LANGUAGES C)
 
-add_compile_options(-O3 -Wall -Wextra -Wpedantic)
+add_compile_options(-ggdb -Wall -Wextra -Wpedantic)
 
 add_executable(
     wasmc
