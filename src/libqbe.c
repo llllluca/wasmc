@@ -13,6 +13,7 @@ static unsigned int next_temp_id = 0;
 
 void printref(Ref r, FILE *f);
 
+/*
 char *rname[] = {
     [ZERO] = "zero",
     [RA] = "ra",
@@ -49,7 +50,7 @@ char *rname[] = {
 };
 
 const char *optab[] = {
-    /* Arithmetic and Bits */
+    // Arithmetic and Bits
     [IR_OPCODE_ADD] = "add",
     [IR_OPCODE_SUB] = "sub",
     [IR_OPCODE_DIV] = "div",
@@ -63,23 +64,23 @@ const char *optab[] = {
     [IR_OPCODE_SAR] = "sar",
     [IR_OPCODE_SHR] = "shr",
     [IR_OPCODE_SHL] = "shl",
-    /* Comparisons */
+    // Comparisons
     [IR_OPCODE_CEQZI32] = "ceqzi32",
     [IR_OPCODE_CNEI32] = "cnei32",
     [IR_OPCODE_CSLTI32] = "cslti32",
     [IR_OPCODE_CULTI32] = "culti32",
-    /* Memory */
+    // Memory
     [IR_OPCODE_STORE8] = "store8",
     [IR_OPCODE_STORE32] = "store32",
     [IR_OPCODE_LOADU8] = "loadu8",
     [IR_OPCODE_LOAD32] = "load32",
-    /* Conversions */
+    // Conversions
     [EXTSW_INSTR] = "extsw",
-    /* Cast and Copy */
+    // Cast and Copy
     [COPY_INSTR] = "copy",
-    /* Call */
+    // Call
     [CALL_INSTR] = "call",
-    /* Other */
+    // Other
     [PAR_INSTR] = "par",
     [ARG_INSTR] = "arg",
 
@@ -216,6 +217,7 @@ void printref(Ref r, FILE *f) {
         panic();
     }
 }
+*/
 
 /*
 static void err(char *s, ...) {
@@ -233,7 +235,6 @@ static void err(char *s, ...) {
 Ref newTemp(Fn *f) {
 
     Tmp *tmp = xmalloc(sizeof(Tmp));
-    snprintf(tmp->name, NString, "t%d", next_temp_id++);
     tmp->use_list = listCreate();
     listSetFreeMethod(tmp->use_list, free);
     listAddNodeTail(f->tmp_list, tmp);
@@ -243,8 +244,6 @@ Ref newTemp(Fn *f) {
 }
 
 Blk *newBlock(uint32_t nlocals) {
-
-    static unsigned int id = 0;
 
     Blk *b = xmalloc(sizeof(struct Blk));
     b->phi_list = listCreate();
@@ -259,7 +258,6 @@ Blk *newBlock(uint32_t nlocals) {
     b->succ[0] = NULL;
     b->succ[1] = NULL;
     b->preds = listCreate();
-    snprintf(b->name, NString, "l%d", id++);
     b->locals = NULL;
     b->incomplete_phis = NULL;
     if (nlocals > 0) {
@@ -285,12 +283,7 @@ Fn *newFunc(IRType ret_type, char *name, Blk *start) {
     listAddNodeTail(f->blk_list, start);
     f->start = start;
     f->ret_type = ret_type;
-    /*
-    if (name == NULL) {
-        err("function need a explicit name");
-    }
-    */
-    strncpy(f->name, name, NString-1);
+    strncpy(f->name, name, 16);
     return f;
 }
 

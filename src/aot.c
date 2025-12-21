@@ -20,6 +20,43 @@ static AOTErr_t emit_init_data(AOTModule *m) {
     m->offset += sizeof(uint32_t);
     uint8_t *section_start = m->offset;
 
+    uint32_t aux_data_end_global_index = (uint32_t)-1;
+    uint64_t aux_data_end = 0;
+    uint32_t aux_heap_base_global_index = (uint32_t)-1;
+    uint64_t aux_heap_base = 0;
+    uint32_t aux_stack_top_global_index = (uint32_t)-1;
+    uint64_t aux_stack_bottom = 0;
+    uint32_t aux_stack_size = 0;
+
+    for (uint32_t i = 0; i < w->export_count; i++) {
+        WASMExport *e = &w->exports[i];
+
+        if (strncmp((char *)e->name, "__data_end", e->name_len) == 0 &&
+            e->export_desc == EXPORT_TYPE_GLOBAL) {
+
+            WASMGlobal *g = &w->globals[e->index];
+            if (g->type != WASM_VALTYPE_I32) continue;
+            aux_data_end_global_index = e->index;
+            aux_data_end = g->as.i32;
+
+        } else if (strncmp((char *)e->name, "__heap_base", e->name_len) == 0 &&
+            e->export_desc == EXPORT_TYPE_GLOBAL) {
+
+            WASMGlobal *g = &w->globals[e->index];
+            if (g->type != WASM_VALTYPE_I32) continue;
+            aux_heap_base_global_index = e->index;
+            aux_heap_base = g->as.i32;
+        }
+    }
+
+    if (aux_data_end_global_index != (uint32_t)-1 &&
+        aux_heap_base_global_index != (uint32_t)-1) {
+
+            aux_stack_top_global_index = 0;
+            aux_stack_bottom = aux_heap_base;
+            aux_stack_size = aux_heap_base - aux_data_end;
+    }
+
     /* ----- Emit Memory Info subsection ----- */
     uint32_t import_memory_count = 0;
     uint32_t memory_count = 1;
@@ -35,6 +72,13 @@ static AOTErr_t emit_init_data(AOTModule *m) {
         mem_num_bytes_per_page = w->memory.num_bytes_per_page;
         mem_min_page_num = w->memory.init_page_count;
         mem_max_page_num = w->memory.max_page_count;
+    }
+    if (aux_data_end_global_index != (uint32_t)-1 &&
+        aux_heap_base_global_index != (uint32_t)-1) {
+
+            mem_num_bytes_per_page = aux_heap_base;
+            mem_min_page_num = 1;
+            mem_max_page_num = 1;
     }
     WRITE_UINT32(m, mem_flags);
     WRITE_UINT32(m, mem_num_bytes_per_page);
@@ -101,7 +145,6 @@ static AOTErr_t emit_init_data(AOTModule *m) {
         default:
             return AOT_ERR;
         }
-        
     }
 
     /* ----- Emit Import Func Info subsection ----- */
@@ -114,13 +157,6 @@ static AOTErr_t emit_init_data(AOTModule *m) {
     WRITE_UINT32(m, start_func_index);
 
     /* ----- Emit auxiliary section ----- */
-    uint32_t aux_data_end_global_index = -1;
-    uint64_t aux_data_end = 0;
-    uint32_t aux_heap_base_global_index = -1;
-    uint64_t aux_heap_base = 0;
-    uint32_t aux_stack_top_global_index = -1;
-    uint64_t aux_stack_bottom = 0;
-    uint32_t aux_stack_size = 0;
     WRITE_UINT32(m, aux_data_end_global_index);
     WRITE_UINT64(m, aux_data_end);
     WRITE_UINT32(m, aux_heap_base_global_index);

@@ -109,7 +109,7 @@ Add the new test in `tests/CMakeLists.txt`
 
 Generate riscv32 AOT format from WASM module using `warmc`:
 ```bash
- wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 --bounds-checks=0 -o fib2.aot tests/wasm/fib2.wasm
+wamrc --target=riscv32 --format=aot --stack-bounds-checks=0 --bounds-checks=0 -o fib2.aot tests/wasm/fib2.wasm
 ```
 
 Generate riscv32 object ELF format from WASM module using `warmc`:

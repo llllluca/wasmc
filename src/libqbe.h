@@ -43,9 +43,7 @@ typedef struct live_interval {
     rv32_reg register_hint;
 } live_interval;
 
-#define NString 80
 struct Tmp {
-    char name[NString];
     list *use_list;
     live_interval *i;
 };
@@ -107,7 +105,6 @@ struct Blk {
     Jump jmp;
     Blk *succ[2];
     list *preds;
-    char name[NString];
     Ref *locals;
     listNode **incomplete_phis;
     bool is_sealed;
@@ -136,7 +133,7 @@ struct Phi {
 typedef struct Fn {
     list *tmp_list;
     list *blk_list;
-    char name[NString];
+    char name[16];
     Blk *start;
     IRType ret_type;
     unsigned int num_stack_slots;
