@@ -1,6 +1,5 @@
 //https://en.wikipedia.org/wiki/Heapsort
 #define LENGTH 10000
-#define ITERATIONS 1000
 
 #define IM 139968
 #define IA 3877
@@ -14,8 +13,7 @@ gen_random()
 }
 
 static void
-my_heapsort(int n, int* ra)
-{
+my_heapsort(int n, int* ra) {
     int    i, j;
     int    ir = n;
     int    l = (n >> 1) + 1;
@@ -59,13 +57,10 @@ int main()
     int n = LENGTH;
     int res;
 
-    int i, j;
-    for (i = 0; i < ITERATIONS; i++) {
-        for (j = 1; j <= n; j++) {
-            ary[j] = gen_random();
-        }
-        my_heapsort(n, ary);
-        res = ary[n-1];
-        return res;
+    for (int j = 0; j < n; j++) {
+        ary[j] = gen_random();
     }
+    my_heapsort(n, ary);
+    res = ary[n-1];
+    return res;
 }

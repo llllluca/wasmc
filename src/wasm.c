@@ -531,7 +531,7 @@ WASMErr_t load_wasm_module(WASMModule *m, uint8_t *start, uint32_t len) {
     }
 
     /* Parse each section */
-    WASMErr_t err;
+    WASMErr_t err = WASM_OK;
     for (WASMSection *s = sections_list; s != NULL; s = s->next) {
         switch (s->type) {
         case WASM_SECTION_CUSTOM:

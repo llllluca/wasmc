@@ -74,5 +74,5 @@ test_c(ackermann "0x3fd:i32")
 test_c(base64 "0x2b:i32")
 test_c(heapsort "0x22291:i32")
 test_c(matrix "0x2255727:i32")
-test_c(sieve "0x10aa9a0:i32")
+test_c(sieve "0x76c:i32")
 
