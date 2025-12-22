@@ -132,7 +132,27 @@ Disassemble a flat riscv32 binary file using objdump:
  riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
 ```
 
+### How to register the AOT format as a [miscellaneous binary format][binfmt_msc].
+Create this wrapper script `/usr/local/bin/iwasm-2.4.4-binfmt` with execution permission.
+```bash
+#!/bin/sh
 
+exec iwasm-2.4.4 -f main $1 0 0
 
+```
+Then register the AOT format:
+```bash
+su -
+cp /path/to/iwasm-2.4.4 /usr/local/bin/
+echo ":aot:M::\x00\x61\x6f\x74\x05\x00\x00\x00::/usr/local/bin/iwasm-2.4.4-binfmt:P" > /proc/sys/fs/binfmt_misc/register
+exit
+```
+
+To unregister the AOT format use:
+```bash
+echo -1 > /proc/sys/fs/binfmt_misc/aot
+```
+
+[binfmt_msc]: https://en.wikipedia.org/wiki/Binfmt_misc
 [riscv-toolchain]: https://github.com/riscv/riscv-gnu-toolchain
 [WAMR]: https://github.com/bytecodealliance/wasm-micro-runtime/tree/main
