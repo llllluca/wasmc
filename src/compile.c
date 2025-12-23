@@ -173,7 +173,8 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
     Ref r;
     if (g->is_mutable) {
         r = newTemp(ctx->ir_func);
-        LOADI32(b, r, INT32_CONST(sizeof(uint32_t) * globalidx), ctx->globals_start);
+        Ref offset = INT32_CONST(sizeof(uint32_t) * globalidx);
+        APPEND_LOAD(b, cast(g->type), r, offset, ctx->globals_start);
     } else {
         r = INT32_CONST(g->as.i32);
     }
@@ -189,6 +190,7 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
 static CompileErr_t compile_global_set(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
+    Blk *b = ctx->curr_block;
     uint32_t globalidx;
     ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &globalidx));
     if (globalidx >= ctx->m->global_count) return COMPILE_ERR;
@@ -198,13 +200,15 @@ static CompileErr_t compile_global_set(CompileCtx *ctx) {
     ValueStackEntry v;
     ERR_CHECK(value_stack_pop(ctx, &v));
     if (v.valtype != g->type) return COMPILE_ERR;
-    STOREI32(ctx->curr_block, v.r, INT32_CONST(sizeof(uint32_t) * globalidx), ctx->globals_start);
+    Ref offset = INT32_CONST(sizeof(uint32_t) * globalidx);
+    APPEND_STORE(b, cast(g->type), v.r, offset, ctx->globals_start);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_call(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
+    Blk *b = ctx->curr_block;
     uint32_t funcidx;
     ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &funcidx));
     if (funcidx >= ctx->m->function_count) return COMPILE_ERR;
@@ -215,7 +219,7 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
     if (ctx->value_stack_length < t->param_count) {
         return COMPILE_ERR;
     }
-    newFuncCallArg(ctx->curr_block, IR_TYPE_INT32, ctx->a0);
+    newFuncCallArg(b, IR_TYPE_I32, ctx->a0);
     if (t->param_count > 0) {
         uint32_t n = t->param_count;
         if (ctx->value_stack_length < n) return COMPILE_ERR;
@@ -227,7 +231,7 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
         for (uint32_t i = 0; i < n; i++) {
             ValueStackEntry *v = (ValueStackEntry *)iter;
             if (v->valtype != t->param_types[i]) return COMPILE_ERR;
-            newFuncCallArg(ctx->curr_block, cast(t->param_types[i]), v->r);
+            newFuncCallArg(b, cast(t->param_types[i]), v->r);
             iter = list_prev(iter);
         }
 
@@ -238,13 +242,13 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
 
     Ref called_addr = NEW_NAME(called_func->name);
     if (t->result_count == 0) {
-        VOID_FUNC_CALL(ctx->curr_block, called_addr);
+        APPEND_VOID_CALL(b, called_addr);
         return COMPILE_OK;
     }
 
     Ref result = newTemp(ctx->ir_func);
     IRType ret_type = cast(t->result_type);
-    FUNC_CALL(ctx->curr_block, result, ret_type, called_addr);
+    APPEND_CALL(b, ret_type, result, called_addr);
     ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
     if (v == NULL) return COMPILE_ERR;
     v->valtype = t->result_type;
@@ -624,6 +628,7 @@ static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype type, IROpcode ir_
     if (ctx->m->memories_count < 1) return COMPILE_ERR;
 
     WASMFunction *f = ctx->wasm_func;
+    Blk *b = ctx->curr_block;
     //TODO: how to properly use align?
     uint32_t align, offset;
     ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &align));
@@ -633,11 +638,11 @@ static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype type, IROpcode ir_
     ERR_CHECK(value_stack_pop(ctx, &v));
     if (v.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
 
-    Ref load_addr = newTemp(ctx->ir_func);
-    ADD(ctx->curr_block, load_addr, IR_TYPE_INT32, ctx->mem0_ptr, v.r);
+    Ref ptr = newTemp(ctx->ir_func);
+    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, v.r);
     //TODO: out of bound memory check
     Ref r = newTemp(ctx->ir_func);
-    instr(ctx->curr_block, r, IR_TYPE_INT32, ir_opcode, INT32_CONST(offset), load_addr);
+    ir_append_ins(b, ir_opcode, cast(type), r, INT32_CONST(offset), ptr);
 
     ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
     if (result == NULL) return COMPILE_ERR;
@@ -664,15 +669,16 @@ static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype type, IROpcode ir
     if (addr.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
 
     Blk *b = ctx->curr_block;
-    Ref store_addr = newTemp(ctx->ir_func);
-    ADD(b, store_addr, IR_TYPE_INT32, ctx->mem0_ptr, addr.r);
-    instr(b, v.r, IR_TYPE_INT32, ir_opcode, INT32_CONST(offset), store_addr);
+    Ref ptr = newTemp(ctx->ir_func);
+    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, addr.r);
+    ir_append_ins(b, ir_opcode, cast(type), v.r, INT32_CONST(offset), ptr);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_binop(CompileCtx *ctx, WASMValtype type,
                                   IROpcode ir_opcode) {
 
+    Blk *b = ctx->curr_block;
     ValueStackEntry arg1, arg2;
     ERR_CHECK(value_stack_pop(ctx, &arg2));
     ERR_CHECK(value_stack_pop(ctx, &arg1));
@@ -686,12 +692,13 @@ static CompileErr_t compile_binop(CompileCtx *ctx, WASMValtype type,
     v->valtype = type;
     v->r = result;
     value_stack_push(ctx, v);
-    instr(ctx->curr_block, result, cast(type), ir_opcode, arg1.r, arg2.r);
+    ir_append_ins(b, ir_opcode, cast(type), result, arg1.r, arg2.r);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_testop(CompileCtx *ctx, WASMValtype type,
                                   IROpcode ir_opcode) {
+    Blk *b = ctx->curr_block;
     ValueStackEntry v;
     ERR_CHECK(value_stack_pop(ctx, &v));
     if (v.valtype != type) return COMPILE_ERR;
@@ -700,13 +707,14 @@ static CompileErr_t compile_testop(CompileCtx *ctx, WASMValtype type,
     if (result == NULL) return COMPILE_ERR;
     result->valtype = WASM_VALTYPE_I32;
     result->r = r;
-    instr(ctx->curr_block, r, IR_TYPE_INT32, ir_opcode, v.r, UNDEFINED_REF);
+    ir_append_ins(b, ir_opcode, IR_TYPE_I32, r, v.r, UNDEFINED_REF);
     value_stack_push(ctx, result);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_relop(CompileCtx *ctx, WASMValtype type,
                                   IROpcode ir_opcode) {
+    Blk *b = ctx->curr_block;
     ValueStackEntry arg1, arg2;
     ERR_CHECK(value_stack_pop(ctx, &arg2));
     ERR_CHECK(value_stack_pop(ctx, &arg1));
@@ -720,7 +728,7 @@ static CompileErr_t compile_relop(CompileCtx *ctx, WASMValtype type,
     v->valtype = WASM_VALTYPE_I32;
     v->r = result;
     value_stack_push(ctx, v);
-    instr(ctx->curr_block, result, cast(type), ir_opcode, arg1.r, arg2.r);
+    ir_append_ins(b, ir_opcode, cast(type), result, arg1.r, arg2.r);
     return COMPILE_OK;
 }
 
@@ -795,11 +803,11 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
 
     /* Memory instructions */
     case WASM_OPCODE_I32_LOAD:
-        return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_LOAD32);
+        return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_LOAD);
     case WASM_OPCODE_I32_STORE:
-        return compile_store(ctx, WASM_VALTYPE_I32, IR_OPCODE_STORE32);
+        return compile_store(ctx, WASM_VALTYPE_I32, IR_OPCODE_STORE);
     case WASM_OPCODE_I32_LOAD8_U:
-        return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_LOADU8);
+        return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULOAD8);
     case WASM_OPCODE_I32_STORE8:
         return compile_store(ctx, WASM_VALTYPE_I32, IR_OPCODE_STORE8);
 
@@ -807,27 +815,27 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
     case WASM_OPCODE_I32_CONST:
         return compile_const(ctx, WASM_VALTYPE_I32);
     case WASM_OPCODE_I32_EQZ:
-        return compile_testop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CEQZI32);
+        return compile_testop(ctx, WASM_VALTYPE_I32, IR_OPCODE_EQZ);
     case WASM_OPCODE_I32_EQ:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CEQI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_EQ);
     case WASM_OPCODE_I32_NE:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CNEI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_NE);
     case WASM_OPCODE_I32_LT_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CSLTI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SLT);
     case WASM_OPCODE_I32_LT_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CULTI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULT);
     case WASM_OPCODE_I32_GT_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CSGTI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SGT);
     case WASM_OPCODE_I32_GT_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CUGTI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UGT);
     case WASM_OPCODE_I32_LE_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CSLEI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SLE);
     case WASM_OPCODE_I32_LE_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CULEI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULE);
     case WASM_OPCODE_I32_GE_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CSGEI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SGE);
     case WASM_OPCODE_I32_GE_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_CUGEI32);
+        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UGE);
     case WASM_OPCODE_I32_ADD:
         return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ADD);
     case WASM_OPCODE_I32_SUB:
@@ -835,11 +843,11 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
     case WASM_OPCODE_I32_MUL:
         return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_MUL);
     case WASM_OPCODE_I32_DIV_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_DIV);
+        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SDIV);
     case WASM_OPCODE_I32_DIV_U:
         return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UDIV);
     case WASM_OPCODE_I32_REM_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_REM);
+        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SREM);
     case WASM_OPCODE_I32_REM_U:
         return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UREM);
     case WASM_OPCODE_I32_AND:
@@ -851,9 +859,9 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
     case WASM_OPCODE_I32_SHL:
         return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SHL);
     case WASM_OPCODE_I32_SHR_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SAR);
+        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ASHR);
     case WASM_OPCODE_I32_SHR_U:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SAR);
+        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ASHR);
 
     /* unknown opcode */
     default:
@@ -886,7 +894,7 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
     WASMFuncType *t = wasm_func->type;
     uint32_t local_count = t->param_count + wasm_func->local_count;
 
-    IRType ret_type = IR_TYPE_NONE;
+    IRType ret_type = IR_TYPE_VOID;
     if (t->result_count != 0) {
         ret_type = cast(t->result_type);
     }
@@ -895,7 +903,7 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
 
     /* Initialize function parameters, the first parameter (a0)
      * always hold a pointer to the struct WASMExecEnv */
-    Ref WASMExecEnv_ptr = newFuncParam(ir_func, IR_TYPE_INT32);
+    Ref WASMExecEnv_ptr = newFuncParam(ir_func, IR_TYPE_I32);
     for (uint32_t i = 0; i < t->param_count; i++) {
         Ref param = newFuncParam(ir_func, cast(wasm_valtype_of(wasm_func, i)));
         start->locals[i] = param;
@@ -908,12 +916,12 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
     }
 
     Ref WASMModuleInstance_ptr = newTemp(ir_func);
-    LOADI32(start, WASMModuleInstance_ptr, INT32_CONST(8), WASMExecEnv_ptr);
+    APPEND_LOAD(start, IR_TYPE_I32, WASMModuleInstance_ptr, INT32_CONST(8), WASMExecEnv_ptr);
 
     Ref mem0_ptr = newTemp(ir_func);
-    LOADI32(start, mem0_ptr, INT32_CONST(376), WASMModuleInstance_ptr);
+    APPEND_LOAD(start, IR_TYPE_I32, mem0_ptr, INT32_CONST(376), WASMModuleInstance_ptr);
     Ref globals_start = newTemp(ir_func);
-    ADD(start, globals_start, IR_TYPE_INT32, WASMModuleInstance_ptr, INT32_CONST(464));
+    APPEND_ADD(start, IR_TYPE_I32, globals_start, WASMModuleInstance_ptr, INT32_CONST(464));
 
     CompileCtx ctx = {
         .m = m,
@@ -1019,7 +1027,7 @@ static Ref read_local_rec(CompileCtx *ctx, Blk *b, uint32_t index) {
     if (!b->is_sealed) {
         // Incomplete CFG
         Ref temp = newTemp(ctx->ir_func);
-        IRType phi_type = IR_TYPE_INT32;
+        IRType phi_type = IR_TYPE_I32;
         if (index > 0) {
             phi_type = cast(wasm_valtype_of(ctx->wasm_func, index));
         }
@@ -1033,7 +1041,7 @@ static Ref read_local_rec(CompileCtx *ctx, Blk *b, uint32_t index) {
     } else {
         // Break potential cycles with operandless phi
         Ref temp = newTemp(ctx->ir_func);
-        IRType phi_type = IR_TYPE_INT32;
+        IRType phi_type = IR_TYPE_I32;
         if (index > 0) {
             phi_type = cast(wasm_valtype_of(ctx->wasm_func, index));
         }
@@ -1165,12 +1173,12 @@ static void seal_block(CompileCtx *ctx, Blk *b) {
     b->is_sealed = true;
 }
 
-IRType cast(WASMValtype t) {
+static IRType cast(WASMValtype t) {
     switch(t) {
         case WASM_VALTYPE_I32:
-            return IR_TYPE_INT32;
+            return IR_TYPE_I32;
         case WASM_VALTYPE_I64:
-            return IR_TYPE_INT64;
+            return IR_TYPE_I64;
         case WASM_VALTYPE_F32:
             return IR_TYPE_F32;
         case WASM_VALTYPE_F64:

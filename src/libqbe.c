@@ -291,7 +291,7 @@ Fn *newFunc(IRType ret_type, char *name, Blk *start) {
 Ref newFuncParam(Fn *f, IRType type) {
     Ref r = newTemp(f);
     Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = PAR_INSTR;
+    ins->op = IR_OPCODE_PAR;
     ins->type = type;
     ins->to = r;
     ins->arg[0] = UNDEFINED_REF;
@@ -300,11 +300,13 @@ Ref newFuncParam(Fn *f, IRType type) {
     return r;
 }
 
-void instr(Blk *b, Ref r, IRType type, IROpcode op, Ref arg1, Ref arg2) {
+void ir_append_ins(Blk *b, IROpcode op, IRType type,
+                Ref arg0, Ref arg1, Ref arg2) {
+
     Ins *ins = xmalloc(sizeof(struct Ins));
     ins->op = op;
     ins->type = type;
-    ins->to = r;
+    ins->to = arg0;
     ins->arg[0] = arg1;
     ins->arg[1] = arg2;
     listAddNodeTail(b->ins_list, ins);
@@ -386,7 +388,7 @@ void halt(Fn *f, Blk *b) {
 void newFuncCallArg(Blk *b, IRType type, Ref r) {
 
     Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = ARG_INSTR;
+    ins->op = IR_OPCODE_ARG;
     ins->type = type;
     ins->to = UNDEFINED_REF;
     ins->arg[0] = r;

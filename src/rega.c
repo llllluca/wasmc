@@ -145,8 +145,8 @@ static list *phi_parallel_moves(Blk *pred, Blk *succ) {
 
 static Ins *alloc_copy(location *dst, move_from *src) {
     Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = COPY_INSTR;
-    ins->type = IR_TYPE_INT32;
+    ins->op = IR_OPCODE_COPY;
+    ins->type = IR_TYPE_I32;
 
     ins->to.type = REF_TYPE_LOCATION;
     ins->to.as.loc = *dst;
@@ -330,7 +330,7 @@ static void fill_register_hints(Fn *f) {
     listNode *ins_iter = listFirst(f->start->ins_list);
     while ((ins_node = listNext(&ins_iter)) != NULL) {
         Ins *ins = listNodeValue(ins_node);
-        if (ins->op != PAR_INSTR) break;
+        if (ins->op != IR_OPCODE_PAR) break;
         if (ins->to.type == REF_TYPE_TMP && ins->to.as.tmp_node != NULL) {
             Tmp *t = listNodeValue(ins->to.as.tmp_node);
             t->i->register_hint = rv32_arg_reg[arg_index++];
@@ -347,13 +347,13 @@ static void fill_register_hints(Fn *f) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            if (ins->op == ARG_INSTR) {
+            if (ins->op == IR_OPCODE_ARG) {
                 if (ins->arg[0].type == REF_TYPE_TMP && ins->arg[0].as.tmp_node != NULL) {
                     Tmp *t = listNodeValue(ins->arg[0].as.tmp_node);
                     t->i->register_hint = rv32_arg_reg[arg_index++];
                 }
             }
-            else if (ins->op == CALL_INSTR) {
+            else if (ins->op == IR_OPCODE_CALL) {
                 arg_index = 0;
                 if (ins->to.type == REF_TYPE_TMP && ins->to.as.tmp_node != NULL) {
                     Tmp *t = listNodeValue(ins->to.as.tmp_node);
@@ -432,7 +432,7 @@ static live_interval **build_intervals(Fn *f) {
             Ins *ins = listNodeValue(ins_node);
             listNode *tmp_node = ins->to.as.tmp_node;
             // The storew instruction has 3 input operand and 0 output operand
-            if (ins->op == IR_OPCODE_STORE32 || ins->op == IR_OPCODE_STORE8) {
+            if (ins->op == IR_OPCODE_STORE || ins->op == IR_OPCODE_STORE8) {
                 if (ins->to.type == REF_TYPE_TMP && tmp_node != NULL) {
                     Tmp *t = listNodeValue(tmp_node);
                     add_range(t, b->id, ins->id);
@@ -671,7 +671,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
     listNode *ins_iter = listFirst(f->start->ins_list);
     while ((ins_node = listNext(&ins_iter)) != NULL) {
         Ins *ins = listNodeValue(ins_node);
-        if (ins->op != PAR_INSTR) break;
+        if (ins->op != IR_OPCODE_PAR) break;
         assert(ins->to.type == REF_TYPE_TMP);
         Tmp *t = listNodeValue(ins->to.as.tmp_node);
         if (arg_index > RV32_ARG_NUM_REG) panic();
@@ -712,7 +712,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
         listNode *ins_iter = listFirst(b->ins_list);
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *ins = listNodeValue(ins_node);
-            if (ins->op == ARG_INSTR) {
+            if (ins->op == IR_OPCODE_ARG) {
                 Ref *r = &ins->arg[0];
                 move_from from;
                 switch (r->type) {
@@ -742,7 +742,7 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                     listAddNodeTail(par_move, move);
                 }
             }
-            else if (ins->op == CALL_INSTR) {
+            else if (ins->op == IR_OPCODE_CALL) {
                 listNode *call_node = ins_node;
 
                 Ins *func_call = listNodeValue(call_node);
@@ -762,8 +762,8 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                 while ((survivor_node = listNext(&survivor_iter)) != NULL) {
                     live_interval *li = listNodeValue(survivor_node);
                     Ins *push_ins = xmalloc(sizeof(struct Ins));
-                    push_ins->op = PUSH_INSTR;
-                    push_ins->type = IR_TYPE_INT32;
+                    push_ins->op = IR_OPCODE_PUSH;
+                    push_ins->type = IR_TYPE_I32;
                     push_ins->to = UNDEFINED_REF;
                     push_ins->arg[0].type = REF_TYPE_LOCATION;
                     push_ins->arg[0].as.loc = li->assign;
@@ -775,8 +775,8 @@ static void handle_register_constraints(Fn *f, live_interval **intervals) {
                 while ((survivor_node = listNext(&survivor_iter)) != NULL) {
                     live_interval *li = listNodeValue(survivor_node);
                     Ins *pop_ins = xmalloc(sizeof(struct Ins));
-                    pop_ins->op = POP_INSTR;
-                    pop_ins->type = IR_TYPE_INT32;
+                    pop_ins->op = IR_OPCODE_POP;
+                    pop_ins->type = IR_TYPE_I32;
                     pop_ins->to.type = REF_TYPE_LOCATION;
                     pop_ins->to.as.loc = li->assign;
                     pop_ins->arg[0] = UNDEFINED_REF;

@@ -14,9 +14,9 @@ typedef struct Blk Blk;
 typedef struct Tmp Tmp;
 
 typedef enum __attribute__ ((__packed__)) IRType {
-    IR_TYPE_NONE,
-    IR_TYPE_INT32,
-    IR_TYPE_INT64,
+    IR_TYPE_VOID,
+    IR_TYPE_I32,
+    IR_TYPE_I64,
     IR_TYPE_F32,
     IR_TYPE_F64,
 } IRType;
@@ -140,52 +140,58 @@ typedef struct Fn {
 } Fn;
 
 typedef enum IROpcode {
-    /* Arithmetic and Bits */
+
+/* Integer Arithmetic Operations */
     IR_OPCODE_ADD,
-    IR_OPCODE_AND,
-    IR_OPCODE_DIV,
-    IR_OPCODE_MUL,
-    IR_OPCODE_OR,
-    IR_OPCODE_REM,
-    IR_OPCODE_SAR,
-    IR_OPCODE_SHL,
-    IR_OPCODE_SHR,
     IR_OPCODE_SUB,
+    IR_OPCODE_MUL,
+    IR_OPCODE_SDIV,
     IR_OPCODE_UDIV,
+    IR_OPCODE_SREM,
     IR_OPCODE_UREM,
+
+/* Bitwise Operations */
+    IR_OPCODE_AND,
+    IR_OPCODE_OR,
     IR_OPCODE_XOR,
+    IR_OPCODE_SHL,
+    IR_OPCODE_LSHR,
+    IR_OPCODE_ASHR,
 
-    /* Comparisons */
-    IR_OPCODE_CEQZI32,
-    IR_OPCODE_CEQI32,
-    IR_OPCODE_CNEI32,
-    IR_OPCODE_CSLTI32,
-    IR_OPCODE_CULTI32,
-    IR_OPCODE_CSGTI32,
-    IR_OPCODE_CUGTI32,
-    IR_OPCODE_CSLEI32,
-    IR_OPCODE_CULEI32,
-    IR_OPCODE_CSGEI32,
-    IR_OPCODE_CUGEI32,
+/* Comparison Operations */
+    IR_OPCODE_EQZ,
+    IR_OPCODE_EQ,
+    IR_OPCODE_NE,
+    IR_OPCODE_SLT,
+    IR_OPCODE_ULT,
+    IR_OPCODE_SGT,
+    IR_OPCODE_UGT,
+    IR_OPCODE_SLE,
+    IR_OPCODE_ULE,
+    IR_OPCODE_SGE,
+    IR_OPCODE_UGE,
 
-    /* Memory */
-    IR_OPCODE_STORE32,
-    IR_OPCODE_LOAD32,
-    IR_OPCODE_LOADU8,
+/* Memory Operations */
+/* store <type> <value>, <offset>, <ptr> */
+    IR_OPCODE_STORE,
+/* <result> = load <type> <offset>, <ptr> */
+    IR_OPCODE_LOAD,
+    IR_OPCODE_ULOAD8,
     IR_OPCODE_STORE8,
 
-    /* Conversions */
-    EXTSW_INSTR,
+/* Function definitions and calls */
+    IR_OPCODE_CALL,
+    IR_OPCODE_PAR,
+    IR_OPCODE_ARG,
 
-    /* Other */
-    CALL_INSTR,
-    PAR_INSTR,
-    ARG_INSTR,
-    COPY_INSTR,
-    PUSH_INSTR,
-    POP_INSTR,
+/* Other Operations */
+    IR_OPCODE_COPY,
+    IR_OPCODE_PUSH,
+    IR_OPCODE_POP,
 
-    } IROpcode;
+    IR_OPCODE_COUNT,
+} IROpcode;
+
 
 struct Ins {
     IROpcode op;
@@ -214,83 +220,24 @@ struct Use {
     Use_ptr u;
 };
 
-/* Arithmetic and Bits */
-#define ADD(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), IR_OPCODE_ADD, (ref1), (ref2))
+#define APPEND_ADD(b, type, result, opd1, opd2) \
+    ir_append_ins(b, IR_OPCODE_ADD, type, result, opd1, opd2)
 
-#define SUB(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), SUB_INSTR, (ref1), (ref2))
+#define APPEND_STORE(b, type, value, offset, ptr) \
+    ir_append_ins(b, IR_OPCODE_STORE, type, value, offset, ptr)
 
-#define NEG(b, temp, kind, ref) \
-    instr((b), (temp), (kind), NEG_INSTR, (ref1), UNDEFINED_REF)
+#define APPEND_LOAD(b, type, result, offset, ptr) \
+    ir_append_ins(b, IR_OPCODE_LOAD, type, result, offset, ptr)
 
-#define DIV(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), DIV_INSTR, (ref1), (ref2))
+#define APPEND_CALL(b, type, result, f) \
+    ir_append_ins(b, IR_OPCODE_CALL, type, result, f, UNDEFINED_REF)
 
-#define REM(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), REM_INSTR, (ref1), (ref2))
+#define APPEND_VOID_CALL(b, f) \
+    ir_append_ins(b, IR_OPCODE_CALL, IR_TYPE_VOID, UNDEFINED_REF, f, UNDEFINED_REF)
 
-#define UDIV(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), UDIV_INSTR, (ref1), (ref2))
 
-#define UREM(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), UREM_INSTR, (ref1), (ref2))
 
-#define MUL(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), MUL_INSTR, (ref1), (ref2))
 
-#define AND(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), AND_INSTR, (ref1), (ref2))
-
-#define OR(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), OR_INSTR, (ref1), (ref2))
-
-#define XOR(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), XOR_INSTR, (ref1), (ref2))
-
-#define SAR(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), SAR_INSTR, (ref1), (ref2))
-
-#define SHR(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), SHR_INSTR, (ref1), (ref2))
-
-#define SHL(b, temp, kind, ref1, ref2) \
-    instr((b), (temp), (kind), SHL_INSTR, (ref1), (ref2))
-
-/* Comparisons */
-#define EQZW(b, temp, ref1) \
-    instr((b), (temp), WORD_TYPE, EQZW_INSTR, (ref1), UNDEFINED_REF)
-
-#define CNEW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CNEW_INSTR, (ref1), (ref2))
-
-#define CSLTW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CSLTW_INSTR, (ref1), (ref2))
-
-#define CULTW(b, temp, ref1, ref2) \
-    instr((b), (temp), WORD_TYPE, CULTW_INSTR, (ref1), (ref2))
-
-/* Memory */
-#define STOREI32(b, fromRef, offset, toRef) \
-    instr((b), (fromRef), IR_TYPE_INT32, IR_OPCODE_STORE32, (offset), (toRef))
-
-#define LOADI32(b, toRef, offset, fromRef) \
-    instr((b), (toRef), IR_TYPE_INT32, IR_OPCODE_LOAD32, (offset), (fromRef))
-
-/* Conversions */
-#define EXTSW(b, temp, ref) \
-    instr((b), (temp), LONG_TYPE, EXTSW_INSTR, (ref), UNDEFINED_REF)
-
-/* Cast and Copy */
-#define COPY(b, temp, kind, ref1) \
-    instr((b), (temp), (kind), COPY_INSTR, (ref1), UNDEFINED_REF)
-
-/* Call */
-#define FUNC_CALL(b, temp, kind, addrRef) \
-    instr((b), (temp), kind, CALL_INSTR, (addrRef), UNDEFINED_REF)
-
-#define VOID_FUNC_CALL(b, addrRef) \
-    instr((b), UNDEFINED_REF, IR_TYPE_INT32, CALL_INSTR, (addrRef), UNDEFINED_REF)
 
 /* libqbe.c */
 void printfn(Fn *fn, FILE *f);
@@ -300,7 +247,7 @@ Ref newFuncParam(Fn *f, IRType type);
 Ref newTemp(Fn *func);
 Blk *newBlock(uint32_t nlocals);
 void newFuncCallArg(Blk *b, IRType type, Ref r);
-void instr(Blk *b, Ref r, IRType type, IROpcode op, Ref arg1, Ref arg2);
+void ir_append_ins(Blk *b, IROpcode op, IRType type, Ref arg0, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);
 void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
 void ret(Fn *f, Blk *b);

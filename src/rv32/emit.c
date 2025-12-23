@@ -150,7 +150,7 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
         case IR_OPCODE_AND:
             EMIT_BINOP_IMM(m, i, RV32_AND, RV32_ANDI);
             break;
-        case IR_OPCODE_DIV:
+        case IR_OPCODE_SDIV:
             EMIT_BINOP(m, i, RV32_DIV);
             break;
         case IR_OPCODE_MUL:
@@ -159,10 +159,10 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
         case IR_OPCODE_OR:
             EMIT_BINOP_IMM(m, i, RV32_OR, RV32_ORI);
             break;
-        case IR_OPCODE_REM:
+        case IR_OPCODE_SREM:
             EMIT_BINOP(m, i, RV32_REM);
             break;
-        case IR_OPCODE_SAR:
+        case IR_OPCODE_ASHR:
             EMIT_BINOP_IMM(m, i, RV32_SRA, RV32_SRAI);
             break;
         case IR_OPCODE_SHL:
@@ -182,13 +182,13 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             break;
 
         /* Comparisons */
-        case IR_OPCODE_CEQZI32: {
+        case IR_OPCODE_EQZ: {
             ERR_CHECK(fix_arg(m, &i->arg[0], rv32_priv_reg[0]));
             rv32_reg rd = i->to.as.loc.as.reg;
             rv32_reg rs1 = i->arg[0].as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_SEQZ(rd, rs1)));
         } break;
-        case IR_OPCODE_CEQI32: {
+        case IR_OPCODE_EQ: {
             ERR_CHECK(fix_arg(m, &i->arg[0], rv32_priv_reg[0]));
             ERR_CHECK(fix_arg(m, &i->arg[1], rv32_priv_reg[1]));
             rv32_reg rd = i->to.as.loc.as.reg;
@@ -197,7 +197,7 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             ERR_CHECK(emit(m, RV32_XOR(rs1, rs1, rs2)));
             ERR_CHECK(emit(m, RV32_SEQZ(rd, rs1)));
         } break;
-        case IR_OPCODE_CNEI32: {
+        case IR_OPCODE_NE: {
             ERR_CHECK(fix_arg(m, &i->arg[0], rv32_priv_reg[0]));
             ERR_CHECK(fix_arg(m, &i->arg[1], rv32_priv_reg[1]));
             rv32_reg rd = i->to.as.loc.as.reg;
@@ -205,25 +205,25 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             rv32_reg rs2 = i->arg[1].as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_XOR(rd, rs1, rs2)));
         } break;
-        case IR_OPCODE_CSLTI32:
+        case IR_OPCODE_SLT:
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
             break;
-        case IR_OPCODE_CULTI32:
+        case IR_OPCODE_ULT:
             EMIT_BINOP_IMM(m, i, RV32_SLTU, RV32_SLTIU);
             break;
-        case IR_OPCODE_CSGTI32: {
+        case IR_OPCODE_SGT: {
             Ref tmp = i->arg[0];
             i->arg[0] = i->arg[1];
             i->arg[1] = tmp;
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
         } break;
-        case IR_OPCODE_CUGTI32: {
+        case IR_OPCODE_UGT: {
             Ref tmp = i->arg[0];
             i->arg[0] = i->arg[1];
             i->arg[1] = tmp;
             EMIT_BINOP_IMM(m, i, RV32_SLTU, RV32_SLTIU);
         } break;
-        case IR_OPCODE_CSLEI32: {
+        case IR_OPCODE_SLE: {
             Ref tmp = i->arg[0];
             i->arg[0] = i->arg[1];
             i->arg[1] = tmp;
@@ -231,7 +231,7 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             rv32_reg rd = i->to.as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
         } break;
-        case IR_OPCODE_CULEI32: {
+        case IR_OPCODE_ULE: {
             Ref tmp = i->arg[0];
             i->arg[0] = i->arg[1];
             i->arg[1] = tmp;
@@ -239,25 +239,25 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             rv32_reg rd = i->to.as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
         } break;
-        case IR_OPCODE_CSGEI32: {
+        case IR_OPCODE_SGE: {
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
             rv32_reg rd = i->to.as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
         } break;
-        case IR_OPCODE_CUGEI32: {
+        case IR_OPCODE_UGE: {
             EMIT_BINOP_IMM(m, i, RV32_SLTU, RV32_SLTIU);
             rv32_reg rd = i->to.as.loc.as.reg;
             ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
         } break;
 
         /* Memory */
-        case IR_OPCODE_STORE32:
+        case IR_OPCODE_STORE:
             EMIT_MEMOP(m, i, RV32_SW);
             break;
-        case IR_OPCODE_LOADU8:
+        case IR_OPCODE_ULOAD8:
             EMIT_MEMOP(m, i, RV32_LBU);
             break;
-        case IR_OPCODE_LOAD32:
+        case IR_OPCODE_LOAD:
             EMIT_MEMOP(m, i, RV32_LW);
             break;
         case IR_OPCODE_STORE8:
@@ -265,7 +265,7 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             break;
 
         /* Other */
-        case COPY_INSTR: {
+        case IR_OPCODE_COPY: {
             assert(i->to.type == REF_TYPE_LOCATION);
             if (i->to.as.loc.type == REGISTER) {
                 /* the copy destination is a register */
@@ -295,19 +295,19 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
             }
             else assert(0);
         } break;
-        case PUSH_INSTR: {
+        case IR_OPCODE_PUSH: {
             assert(i->arg[0].type == REF_TYPE_LOCATION);
             assert(i->arg[0].as.loc.type == REGISTER);
             ERR_CHECK(emit(m, RV32_ADDI(SP, SP, -4)));
             ERR_CHECK(emit(m, RV32_SW(i->arg[0].as.loc.as.reg, 0, SP)));
         } break;
-        case POP_INSTR: {
+        case IR_OPCODE_POP: {
             assert(i->to.type == REF_TYPE_LOCATION);
             assert(i->to.as.loc.type == REGISTER);
             ERR_CHECK(emit(m, RV32_LW(i->to.as.loc.as.reg, 0, SP)));
             ERR_CHECK(emit(m, RV32_ADDI(SP, SP, 4)));
         } break;
-        case CALL_INSTR: {
+        case IR_OPCODE_CALL: {
             assert(i->arg[0].type == REF_TYPE_NAME);
 
             AOTRelocation *reloc = malloc(sizeof(struct AOTRelocation));
