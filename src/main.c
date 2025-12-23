@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     fclose(input);
 
     WASMModule m;
-    load_wasm_module(&m, wasm_buf, wasm_len);
+    wasm_decode(&m, wasm_buf, wasm_len);
     uint8_t *buf;
     uint32_t len;
     if (compile(&m, &rv32, &buf, &len)) return 1;
@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
     fwrite(buf, 1, len, output);
     fclose(output);
 
-    free_wasm_module(&m);
+    wasm_free(&m);
     free(wasm_buf);
     free(buf);
     return EXIT_SUCCESS;

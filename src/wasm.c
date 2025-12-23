@@ -28,6 +28,41 @@ typedef struct WASMSection {
     uint8_t *end;
 } WASMSection;
 
+typedef enum __attribute__((__packed__)) OperandType {
+    OPERAND_TYPE_UNKNOWN = 0,
+    OPERAND_TYPE_F64 = WASM_VALTYPE_F64,
+    OPERAND_TYPE_F32 = WASM_VALTYPE_F32,
+    OPERAND_TYPE_I64 = WASM_VALTYPE_I64,
+    OPERAND_TYPE_I32 = WASM_VALTYPE_I32,
+} OperandType;
+
+typedef struct OperandStackEntry {
+    struct OperandStackEntry *next;
+    OperandType type;
+} OperandStackEntry;
+
+typedef struct ControlStackEntry {
+    struct ControlStackEntry *next;
+    WASMBlocktype label_type;
+    WASMBlocktype end_type;
+    uint32_t height;
+    bool unreachable;
+} ControlStackEntry;
+
+typedef struct ValidateCtx {
+    WASMModule *m;
+    WASMFunction *f;
+    WASMFuncType *t;
+    OperandStackEntry *opd_stack;
+    uint32_t opd_size;
+    ControlStackEntry *ctrl_stack;
+    uint32_t ctrl_size;
+    uint8_t *offset;
+    uint8_t *code_end;
+} ValidateCtx;
+
+#define ERR_CHECK(x) if (x) return WASM_ERR
+
 #define READ_TEMPLATE(buf, buf_end, out, type) \
     do {                                       \
         uint8_t *p = *(buf);                   \
@@ -283,7 +318,7 @@ static WASMErr_t parse_global_section(WASMModule *m, WASMSection *s) {
             return WASM_ERR;
         }
         /* Each const expression end with the byte 0x0B */
-        if (*offset++ != 0x0B) return WASM_ERR;
+        if (*offset++ != WASM_OPCODE_END) return WASM_ERR;
         if (g->type != type) return WASM_ERR;
     }
 
@@ -382,7 +417,7 @@ static WASMErr_t parse_code_section(WASMModule *m, WASMSection *s) {
         m->functions[i].code_start = offset;
         uint32_t len = code_entry_len - (uint32_t)(offset - code_entry_start);
         /* Each expression end with the byte 0x0B */
-        if (offset[len-1] != 0x0B) {
+        if (offset[len-1] != WASM_OPCODE_END) {
                 return WASM_ERR;
         }
         m->functions[i].code_end = &offset[len-1];
@@ -431,7 +466,7 @@ static WASMErr_t parse_data_section(WASMModule *m, WASMSection *s) {
             return WASM_ERR;
         }
         /* Each const expression end with the byte 0x0B */
-        if (*offset++ != 0x0B) return WASM_ERR;
+        if (*offset++ != WASM_OPCODE_END) return WASM_ERR;
 
         xreadULEB128_u32(&offset, s->end, &d->len);
         d->bytes = offset;
@@ -446,7 +481,471 @@ static WASMErr_t parse_data_section(WASMModule *m, WASMSection *s) {
     return WASM_OK;
 }
 
-void free_wasm_module(WASMModule *m) {
+static void free_sections(WASMSection *sections_list) {
+    WASMSection *s = sections_list;
+    while (s != NULL) {
+        WASMSection *next = s->next;
+        free(s);
+        s = next;
+    }
+}
+
+static WASMErr_t push_opd(ValidateCtx *ctx, OperandType type) {
+    OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+    if (opd == NULL) return WASM_ERR;
+    opd->type = type;
+    opd->next = ctx->opd_stack;
+    ctx->opd_stack = opd;
+    ctx->opd_size++;
+    return WASM_OK;
+}
+
+static WASMErr_t pop_opd(ValidateCtx *ctx, OperandType *out) {
+    ControlStackEntry *ctrl = ctx->ctrl_stack;
+    assert(ctrl != NULL);
+    if (ctx->opd_size == ctrl->height && ctrl->unreachable) {
+        if (out != NULL) *out = OPERAND_TYPE_UNKNOWN;
+        return WASM_OK;
+    }
+    if (ctx->opd_size == ctrl->height) {
+        return WASM_ERR;
+    }
+    assert(ctx->opd_stack != NULL);
+    OperandStackEntry *opd = ctx->opd_stack;
+    if (out != NULL) *out = opd->type;
+    ctx->opd_stack = opd->next;
+    ctx->opd_size--;
+    free(opd);
+
+    return WASM_OK;
+}
+
+static WASMErr_t pop_expect_opd(ValidateCtx *ctx, OperandType expect,
+                                OperandType *out) {
+
+    OperandType actual;
+    ERR_CHECK(pop_opd(ctx, &actual));
+    if (actual == OPERAND_TYPE_UNKNOWN) {
+        if (out != NULL) *out = expect;
+        return WASM_OK;
+    }
+    if (expect == OPERAND_TYPE_UNKNOWN) {
+        if (out != NULL) *out = actual;
+        return WASM_OK;
+    }
+    if (actual != expect) return WASM_ERR;
+    if (out != NULL) *out = actual;
+    return WASM_OK;
+}
+
+static WASMErr_t push_ctrl(ValidateCtx *ctx, WASMBlocktype label,
+                           WASMBlocktype end) {
+
+    ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
+    if (ctrl == NULL) return WASM_ERR;
+    ctrl->label_type = label;
+    ctrl->end_type = end;
+    ctrl->unreachable = false;
+    ctrl->height = ctx->opd_size;
+    ctrl->next = ctx->ctrl_stack;
+    ctx->ctrl_stack = ctrl;
+    ctx->ctrl_size++;
+    return WASM_OK;
+}
+
+static WASMErr_t pop_ctrl(ValidateCtx *ctx, WASMBlocktype *out) {
+    if (ctx->ctrl_stack == NULL) return WASM_ERR;
+    ControlStackEntry *top = ctx->ctrl_stack;
+    if (top->end_type != WASM_BLOCKTYPE_NONE) {
+        ERR_CHECK(pop_expect_opd(ctx, (OperandType)top->end_type, NULL));
+    }
+    if (ctx->opd_size != top->height) {
+        return WASM_ERR;
+    }
+    if (out != NULL) *out = top->end_type;
+    ctx->ctrl_stack = top->next;
+    ctx->ctrl_size--;
+    free(top);
+    return WASM_OK;
+}
+
+static WASMErr_t unreachable(ValidateCtx *ctx) {
+    if (ctx->ctrl_stack == NULL) return WASM_ERR;
+    ControlStackEntry *top = ctx->ctrl_stack;
+    while (ctx->opd_size != top->height) {
+        ERR_CHECK(pop_opd(ctx, NULL));
+    }
+    top->unreachable = true;
+    return WASM_OK;
+}
+
+static ControlStackEntry *ctrl_get(ValidateCtx *ctx, uint32_t index) {
+    if (index >= ctx->ctrl_size - 1) return NULL;
+    ControlStackEntry *iter = ctx->ctrl_stack;
+    for (uint32_t i = 0; i < index; i++) {
+        iter = iter->next;
+    }
+    return iter;
+}
+
+static WASMErr_t validate_const(ValidateCtx *ctx, OperandType type) {
+    switch (type) {
+    case WASM_VALTYPE_I32: {
+        int32_t n;
+        ERR_CHECK(readILEB128_i32(&ctx->offset, ctx->code_end, &n));
+    } break;
+    case WASM_VALTYPE_F32:
+    case WASM_VALTYPE_I64:
+    case WASM_VALTYPE_F64:
+        /* not implemented */
+        assert(0);
+    default:
+        assert(0);
+    }
+    ERR_CHECK(push_opd(ctx, type));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_binop(ValidateCtx *ctx, OperandType type) {
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    ERR_CHECK(push_opd(ctx, type));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_testop(ValidateCtx *ctx, OperandType type) {
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    ERR_CHECK(push_opd(ctx, OPERAND_TYPE_I32));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_relop(ValidateCtx *ctx, OperandType type) {
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    ERR_CHECK(push_opd(ctx, OPERAND_TYPE_I32));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_load(ValidateCtx *ctx, OperandType type,
+                              uint32_t align_upper_limit) {
+
+    if (ctx->m->memories_count == 0) return WASM_ERR;
+
+    uint32_t align, offset;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &align));
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &offset));
+
+    if (align > align_upper_limit) return WASM_ERR;
+
+    ERR_CHECK(pop_expect_opd(ctx, OPERAND_TYPE_I32, NULL));
+    ERR_CHECK(push_opd(ctx, type));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_store(ValidateCtx *ctx, OperandType type,
+                              uint32_t align_upper_limit) {
+
+    if (ctx->m->memories_count == 0) return WASM_ERR;
+
+    uint32_t align, offset;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &align));
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &offset));
+
+    if (align > align_upper_limit) return WASM_ERR;
+
+    ERR_CHECK(pop_expect_opd(ctx, OPERAND_TYPE_I32, NULL));
+    ERR_CHECK(pop_expect_opd(ctx, type, NULL));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_global_get(ValidateCtx *ctx) {
+    uint32_t globalidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &globalidx));
+    if (globalidx >= ctx->m->global_count) return WASM_ERR;
+    WASMValtype t = ctx->m->globals[globalidx].type;
+    ERR_CHECK(pop_expect_opd(ctx, (OperandType)t, NULL));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_global_set(ValidateCtx *ctx) {
+    uint32_t globalidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &globalidx));
+    if (globalidx >= ctx->m->global_count) return WASM_ERR;
+    WASMValtype t = ctx->m->globals[globalidx].type;
+    ERR_CHECK(push_opd(ctx, (OperandType)t));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_local_set(ValidateCtx *ctx) {
+    uint32_t localidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &localidx));
+    uint32_t n = ctx->f->local_count + ctx->t->param_count;
+    if (localidx >= n) return WASM_ERR;
+    WASMValtype t = wasm_valtype_of(ctx->f, localidx);
+    ERR_CHECK(pop_expect_opd(ctx, (OperandType)t, NULL));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_local_get(ValidateCtx *ctx) {
+    uint32_t localidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &localidx));
+    uint32_t n = ctx->f->local_count + ctx->t->param_count;
+    if (localidx >= n) return WASM_ERR;
+    WASMValtype valtype = wasm_valtype_of(ctx->f, localidx);
+    ERR_CHECK(push_opd(ctx, (OperandType)valtype));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_select(ValidateCtx *ctx) {
+    ERR_CHECK(pop_expect_opd(ctx, OPERAND_TYPE_I32, NULL));
+    OperandType t1, t2;
+    ERR_CHECK(pop_opd(ctx, &t1));
+    ERR_CHECK(pop_expect_opd(ctx, t1, &t2));
+    ERR_CHECK(push_opd(ctx, t2));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_call(ValidateCtx *ctx) {
+    uint32_t funcidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &funcidx));
+    if (funcidx >= ctx->m->function_count) return WASM_ERR;
+
+    WASMFunction *called_func = &ctx->m->functions[funcidx];
+    WASMFuncType *t = called_func->type;
+    if (ctx->opd_size < t->param_count) {
+        return WASM_ERR;
+    }
+    for (uint32_t i = 0; i < t->param_count; i++) {
+        WASMValtype valtype = t->param_types[t->param_count - i - 1];
+        ERR_CHECK(pop_expect_opd(ctx, (OperandType)valtype, NULL));
+    }
+    if (t->result_count > 0) {
+        ERR_CHECK(push_opd(ctx, (OperandType)t->result_type));
+    }
+    return WASM_OK;
+}
+
+static WASMErr_t validate_return(ValidateCtx *ctx) {
+    if (ctx->t->result_count > 0) {
+        WASMValtype t = ctx->t->result_type;
+        ERR_CHECK(pop_expect_opd(ctx, (OperandType)t, NULL));
+    }
+    ERR_CHECK(unreachable(ctx));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_br_if(ValidateCtx *ctx) {
+    uint32_t labelidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &labelidx));
+    ControlStackEntry *ctrl = ctrl_get(ctx, labelidx);
+    if (ctrl == NULL) return WASM_ERR;
+    ERR_CHECK(pop_expect_opd(ctx, OPERAND_TYPE_I32, NULL));
+    if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
+        ERR_CHECK(pop_expect_opd(ctx, (OperandType)ctrl->label_type, NULL));
+        ERR_CHECK(push_opd(ctx, (OperandType)ctrl->label_type));
+    }
+    return WASM_OK;
+}
+
+static WASMErr_t validate_br(ValidateCtx *ctx) {
+    uint32_t labelidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &labelidx));
+    ControlStackEntry *ctrl = ctrl_get(ctx, labelidx);
+    if (ctrl == NULL) return WASM_ERR;
+    if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
+        pop_expect_opd(ctx, (OperandType)ctrl->label_type, NULL);
+    }
+    ERR_CHECK(unreachable(ctx));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_end(ValidateCtx *ctx) {
+    WASMBlocktype result;
+    ERR_CHECK(pop_ctrl(ctx, &result));
+    if (result != WASM_BLOCKTYPE_NONE) {
+        ERR_CHECK(push_opd(ctx, (OperandType)result));
+    }
+    return WASM_OK;
+}
+
+static WASMErr_t validate_else(ValidateCtx *ctx) {
+    WASMBlocktype result;
+    ERR_CHECK(pop_ctrl(ctx, &result));
+    ERR_CHECK(push_ctrl(ctx, result, result));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_if(ValidateCtx *ctx) {
+    WASMBlocktype blktype;
+    ERR_CHECK(read_u8(&ctx->offset, ctx->code_end, &blktype));
+    if (!IS_WASM_BLOCK_TYPE(blktype)) return WASM_ERR;
+    ERR_CHECK(pop_expect_opd(ctx, OPERAND_TYPE_I32, NULL));
+    ERR_CHECK(push_ctrl(ctx, blktype, blktype));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_loop(ValidateCtx *ctx) {
+    WASMBlocktype blktype;
+    ERR_CHECK(read_u8(&ctx->offset, ctx->code_end, &blktype));
+    if (!IS_WASM_BLOCK_TYPE(blktype)) return WASM_ERR;
+    ERR_CHECK(push_ctrl(ctx, WASM_BLOCKTYPE_NONE, blktype));
+    return WASM_OK;
+}
+
+static WASMErr_t validate_block(ValidateCtx *ctx) {
+    WASMBlocktype blktype;
+    ERR_CHECK(read_u8(&ctx->offset, ctx->code_end, &blktype));
+    if (!IS_WASM_BLOCK_TYPE(blktype)) return WASM_ERR;
+    ERR_CHECK(push_ctrl(ctx, blktype, blktype));
+    return WASM_OK;
+}
+
+
+static WASMErr_t validate_instr(ValidateCtx *ctx, uint8_t opcode) {
+
+    switch (opcode) {
+    /* Control instructions */
+    case WASM_OPCODE_UNREACHABLE:
+        return unreachable(ctx);
+    case WASM_OPCODE_NOP:
+        return WASM_OK;
+    case WASM_OPCODE_BLOCK:
+        return validate_block(ctx);
+    case WASM_OPCODE_LOOP:
+        return validate_loop(ctx);
+    case WASM_OPCODE_IF:
+        return validate_if(ctx);
+    case WASM_OPCODE_ELSE:
+        return validate_else(ctx);
+    case WASM_OPCODE_END:
+        return validate_end(ctx);
+    case WASM_OPCODE_BRANCH:
+        return validate_br(ctx);
+    case WASM_OPCODE_BRANCH_IF:
+        return validate_br_if(ctx);
+    case WASM_OPCODE_RETURN:
+        return validate_return(ctx);
+    case WASM_OPCODE_CALL:
+        return validate_call(ctx);
+
+    /* Parametric instruction */
+    case WASM_OPCODE_DROP:
+        return pop_opd(ctx, NULL);
+    case WASM_OPCODE_SELECT:
+        return validate_select(ctx);
+
+    /* Variable instructions */
+    case WASM_OPCODE_LOCAL_GET:
+        return validate_local_get(ctx);
+    case WASM_OPCODE_LOCAL_SET:
+        return validate_local_set(ctx);
+    case WASM_OPCODE_GLOBAL_GET:
+        return validate_global_set(ctx);
+    case WASM_OPCODE_GLOBAL_SET:
+        return validate_global_get(ctx);
+
+    /* Memory instructions */
+    case WASM_OPCODE_I32_LOAD:
+        return validate_load(ctx, OPERAND_TYPE_I32, 2);
+    case WASM_OPCODE_I32_STORE:
+        return validate_store(ctx, OPERAND_TYPE_I32, 2);
+    case WASM_OPCODE_I32_LOAD8_U:
+        return validate_load(ctx, OPERAND_TYPE_I32, 1);
+    case WASM_OPCODE_I32_STORE8:
+        return validate_store(ctx, OPERAND_TYPE_I32, 1);
+
+    /* Numeric instruction */
+    case WASM_OPCODE_I32_CONST:
+        return validate_const(ctx, OPERAND_TYPE_I32);
+    case WASM_OPCODE_I64_CONST:
+        return validate_const(ctx, OPERAND_TYPE_I64);
+    case WASM_OPCODE_F32_CONST:
+        return validate_const(ctx, OPERAND_TYPE_F32);
+    case WASM_OPCODE_F64_CONST:
+        return validate_const(ctx, OPERAND_TYPE_F64);
+    case WASM_OPCODE_I32_EQZ:
+        return validate_testop(ctx, OPERAND_TYPE_I32);
+
+    case WASM_OPCODE_I32_EQ:
+    case WASM_OPCODE_I32_NE:
+    case WASM_OPCODE_I32_LT_S:
+    case WASM_OPCODE_I32_LT_U:
+    case WASM_OPCODE_I32_GT_S:
+    case WASM_OPCODE_I32_GT_U:
+    case WASM_OPCODE_I32_LE_S:
+    case WASM_OPCODE_I32_LE_U:
+    case WASM_OPCODE_I32_GE_S:
+    case WASM_OPCODE_I32_GE_U:
+        return validate_relop(ctx, OPERAND_TYPE_I32);
+
+    case WASM_OPCODE_I32_ADD:
+    case WASM_OPCODE_I32_SUB:
+    case WASM_OPCODE_I32_MUL:
+    case WASM_OPCODE_I32_DIV_S:
+    case WASM_OPCODE_I32_DIV_U:
+    case WASM_OPCODE_I32_REM_S:
+    case WASM_OPCODE_I32_REM_U:
+    case WASM_OPCODE_I32_AND:
+    case WASM_OPCODE_I32_OR:
+    case WASM_OPCODE_I32_XOR:
+    case WASM_OPCODE_I32_SHL:
+    case WASM_OPCODE_I32_SHR_S:
+    case WASM_OPCODE_I32_SHR_U:
+        return validate_binop(ctx, OPERAND_TYPE_I32);
+    default:
+        fprintf(stderr,
+            "WASM validation error: 0x%x unknown opcode\n", opcode);
+        return WASM_ERR;
+    }
+}
+
+static void validate_cleanup(ValidateCtx *ctx) {
+    WASMErr_t err;
+    while (ctx->opd_size > 0) {
+        err = pop_opd(ctx, NULL);
+        assert(!err);
+    }
+    while (ctx->ctrl_size > 0) {
+        err = pop_ctrl(ctx, NULL);
+        assert(!err);
+    }
+}
+
+static WASMErr_t validate_fn(WASMModule *m, uint32_t funcidx) {
+    assert(funcidx < m->function_count);
+    WASMFunction *f = &m->functions[funcidx];
+    WASMFuncType *t = f->type;
+
+    ValidateCtx ctx = {0};
+    ctx.offset = f->code_start;
+    ctx.code_end = f->code_end;
+    ctx.m = m;
+    ctx.f = f;
+    ctx.t = t;
+
+    ERR_CHECK(push_ctrl(&ctx, WASM_BLOCKTYPE_NONE, WASM_BLOCKTYPE_NONE));
+
+    uint8_t opcode;
+    while (ctx.offset < ctx.code_end) {
+        if (read_u8(&ctx.offset, ctx.code_end, &opcode)) goto ERROR;
+        if (validate_instr(&ctx, opcode)) goto ERROR;
+    }
+
+    if (t->result_count > 0) {
+        pop_expect_opd(&ctx, (OperandType)t->result_type, NULL);
+    }
+    ERR_CHECK(pop_ctrl(&ctx, NULL));
+
+    assert(ctx.opd_stack == NULL && ctx.opd_size == 0);
+    assert(ctx.ctrl_stack == NULL && ctx.ctrl_size == 0);
+    return WASM_OK;
+
+ERROR:
+    validate_cleanup(&ctx);
+    return WASM_ERR;
+}
+
+void wasm_free(WASMModule *m) {
     if (m->types != NULL) {
         free(m->types);
     }
@@ -464,16 +963,7 @@ void free_wasm_module(WASMModule *m) {
     }
 }
 
-static void free_sections(WASMSection *sections_list) {
-    WASMSection *s = sections_list;
-    while (s != NULL) {
-        WASMSection *next = s->next;
-        free(s);
-        s = next;
-    }
-}
-
-WASMErr_t load_wasm_module(WASMModule *m, uint8_t *start, uint32_t len) {
+WASMErr_t wasm_decode(WASMModule *m, uint8_t *start, uint32_t len) {
     assert(m != NULL && start != NULL);
     memset(m, 0, sizeof(struct WASMModule));
 
@@ -578,6 +1068,10 @@ WASMErr_t load_wasm_module(WASMModule *m, uint8_t *start, uint32_t len) {
 
     free_sections(sections_list);
 
+    for (uint32_t i = 0; i < m->function_count; i++) {
+        if (validate_fn(m, i)) goto ERROR;
+    }
+
     /* Function internal name */
     for (uint32_t i = 0; i < m->function_count; i++) {
         int n = snprintf(
@@ -593,7 +1087,7 @@ WASMErr_t load_wasm_module(WASMModule *m, uint8_t *start, uint32_t len) {
 
 ERROR:
     free_sections(sections_list);
-    free_wasm_module(m);
+    wasm_free(m);
     return WASM_ERR;
 
 }

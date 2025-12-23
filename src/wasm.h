@@ -134,6 +134,7 @@ typedef enum WASMOpcode {
     WASM_OPCODE_LOOP          = 0x03,
     WASM_OPCODE_IF            = 0x04,
     WASM_OPCODE_ELSE          = 0x05,
+    WASM_OPCODE_END           = 0x0B,
     WASM_OPCODE_BRANCH        = 0x0C,
     WASM_OPCODE_BRANCH_IF     = 0x0D,
     WASM_OPCODE_BRANCH_TABLE  = 0x0E,
@@ -233,8 +234,8 @@ WASMErr_t read_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
 WASMErr_t read_u8(uint8_t **buf, uint8_t *buf_end, uint8_t *out);
 WASMErr_t readULEB128_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
 WASMErr_t readILEB128_i32(uint8_t **buf, uint8_t *buf_end, int32_t *out);
-WASMErr_t load_wasm_module(WASMModule *m, uint8_t *start, uint32_t len);
+WASMErr_t wasm_decode(WASMModule *m, uint8_t *start, uint32_t len);
 WASMValtype wasm_valtype_of(WASMFunction *f, uint32_t localidx);
-void free_wasm_module(WASMModule *m);
+void wasm_free(WASMModule *m);
 
 #endif
