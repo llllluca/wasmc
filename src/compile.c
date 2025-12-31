@@ -4,41 +4,54 @@
 #include <assert.h>
 #include "wasm.h"
 #include "libqbe.h"
-#include "listx.h"
 #include "aot.h"
 #include "compile.h"
 
-typedef struct ValueStackEntry {
-    struct list_head next;
-    WASMValtype valtype;
+typedef struct OperandStackEntry {
+    struct OperandStackEntry *next;
     Ref r;
-} ValueStackEntry;
+    WASMValtype t;
+} OperandStackEntry;
 
-typedef struct LabelStackEntry {
-    struct list_head next;
-    list *results;
-    Blk *b;
-    WASMBlocktype blktype;
-} LabelStackEntry;
-
-typedef enum SkipFlag {
-    SKIP_FLAG_NONE,
-    SKIP_FLAG_BR,
-    SKIP_FLAG_RETURN,
-} SkipFlag;
+typedef struct ControlStackEntry {
+    struct ControlStackEntry *next;
+    enum {
+        CTRL_STACK_ENTRY_DUMMY,
+        CTRL_STACK_ENTRY_IF,
+        CTRL_STACK_ENTRY_ELSE,
+        CTRL_STACK_ENTRY_BLOCK,
+        CTRL_STACK_ENTRY_LOOP,
+    } kind;
+    /* Type of the associated label (used to type-check branches) */
+    WASMBlocktype label_type;
+    /* The result type of the block (used to check its result) */
+    WASMBlocktype end_type;
+    /* Blk of the associated label (used as a target of jmp/jnz on braches) */
+    Blk *label_blk;
+    /* If/block/loop blk header */
+    Blk *start_blk;
+    /* List containing the result of a if/block/loop if end_type is not
+     * equal to WASM_BLOCKTYPE_NONE. end_results is NULL is end_type is
+     * equal to WASM_BLOCKTYPE_NONE */
+    list *end_results;
+    /* The height of the operand stack at the start of the block
+     * (used to check that operands do not underflow the current block) */
+    uint32_t height;
+    /* Flag recording whether the remainder of the block is unreachable
+     * (used to handle code after a br or return) */
+    bool unreachable;
+} ControlStackEntry;
 
 typedef struct CompileCtx {
     WASMModule *m;
     uint32_t funcidx;
     WASMFunction *wasm_func;
     Fn *ir_func;
-    uint32_t local_count;
     uint8_t *offset;
-    SkipFlag skip_flag;
-    struct list_head value_stack;
-    uint32_t value_stack_length;
-    struct list_head label_stack;
-    uint32_t label_stack_length;
+    OperandStackEntry *opd_stack;
+    uint32_t opd_size;
+    ControlStackEntry  *ctrl_stack;
+    uint32_t ctrl_size;
     Blk *curr_block;
     Ref a0;
     Ref mem0_ptr;
@@ -47,117 +60,137 @@ typedef struct CompileCtx {
 
 #define ERR_CHECK(x) if (x) return COMPILE_ERR
 
-#define INIT_BOTTOM(x)                                \
-    do {                                              \
-        (x) = malloc(sizeof(struct ValueStackEntry)); \
-        if ((x) == NULL) return COMPILE_ERR;          \
-        (x)->valtype = -1;                            \
-        (x)->r = UNDEFINED_REF;                       \
-        if ((x) == NULL) return COMPILE_ERR;          \
-    } while (0);
-
-#define INIT_LABEL(x, block, type)                    \
-    do {                                              \
-        (x) = malloc(sizeof(struct LabelStackEntry)); \
-        if ((x) == NULL) return COMPILE_ERR;          \
-        (x)->b = block;                               \
-        (x)->blktype = type;                          \
-        (x)->results = listCreate();                  \
-        listSetFreeMethod((x)->results, free);        \
-    } while (0);
 
 /* rega.c */
 extern void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr);
 
 static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode);
-static void write_local(Blk *b, uint32_t index, Ref value);
+static void write_local(CompileCtx *ctx, Blk *b, uint32_t localidx, Ref value);
 static Ref read_local(CompileCtx *ctx, Blk *b, uint32_t index);
 static Ref read_local_rec(CompileCtx *ctx, Blk *b, uint32_t index);
 static Ref add_phi_operands(CompileCtx *ctx, listNode *phi_node, uint32_t index);
 static Ref try_remove_trivial_phi(CompileCtx *ctx, listNode *phi_node);
 static void seal_block(CompileCtx *ctx, Blk *b);
 static IRType cast(WASMValtype t);
+static Ref get_default(WASMValtype t);
 
-static CompileErr_t label_stack_pop(CompileCtx *ctx, LabelStackEntry *l) {
-    if (list_empty(&ctx->label_stack)) return COMPILE_ERR;
-    struct list_head *next = list_next(&ctx->label_stack);
-    list_del(next);
-    LabelStackEntry *top = (LabelStackEntry *)next;
-    if (l != NULL) *l = *top;
-    listRelease(top->results);
-    free(top);
-    ctx->label_stack_length--;
-    return COMPILE_OK;
+static void push_opd(CompileCtx *ctx, OperandStackEntry *opd) {
+    opd->next = ctx->opd_stack;
+    ctx->opd_stack = opd;
+    ctx->opd_size++;
 }
 
-static LabelStackEntry *label_stack_get(CompileCtx *ctx, uint32_t index) {
-    uint32_t n = index + 1;
-    if (n > ctx->label_stack_length) return NULL;
+static OperandStackEntry *pop_opd(CompileCtx *ctx) {
+    ControlStackEntry *ctrl = ctx->ctrl_stack;
+    assert(ctrl != NULL);
+    assert(!ctrl->unreachable);
+    assert(ctx->opd_size > ctrl->height);
+    OperandStackEntry *opd = ctx->opd_stack;
+    assert(opd != NULL);
+    ctx->opd_stack = opd->next;
+    ctx->opd_size--;
+    return opd;
+}
 
-    struct list_head *iter = &ctx->label_stack;
-    for (uint32_t i = 0; i < n; i++) {
-        iter = list_next(iter);
+static OperandStackEntry *top_opd(CompileCtx *ctx) {
+    OperandStackEntry *opd = ctx->opd_stack;
+    assert(opd != NULL);
+    return opd;
+}
+
+static void push_ctrl(CompileCtx *ctx, ControlStackEntry *ctrl) {
+    if (ctrl->end_results != NULL) {
+        listSetFreeMethod(ctrl->end_results, free);
     }
-    return (LabelStackEntry *)iter;
+    ctrl->height = ctx->opd_size;
+    ctrl->next = ctx->ctrl_stack;
+    ctx->ctrl_stack = ctrl;
+    ctx->ctrl_size++;
 }
 
-static void label_stack_push(CompileCtx *ctx, LabelStackEntry *l) {
-    list_add(&l->next, &ctx->label_stack);
-    ctx->label_stack_length++;
+
+static ControlStackEntry *top_ctrl(CompileCtx *ctx) {
+    ControlStackEntry *top = ctx->ctrl_stack;
+    assert(top != NULL);
+    return top;
 }
 
-static LabelStackEntry *label_stack_top(CompileCtx *ctx) {
-    if (list_empty(&ctx->label_stack)) return NULL;
-    return (LabelStackEntry *)list_next(&ctx->label_stack);
+static ControlStackEntry *pop_ctrl(CompileCtx *ctx) {
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->end_type != WASM_BLOCKTYPE_NONE && !top->unreachable) {
+        assert(top->end_results != NULL);
+        Phi_arg *pa = malloc(sizeof(struct Phi_arg));
+        if (pa == NULL) return NULL;
+        OperandStackEntry *opd = pop_opd(ctx);
+        pa->r = opd->r;
+        pa->b = ctx->curr_block;
+        listPush(top->end_results, pa);
+        free(opd);
+    }
+    assert(ctx->opd_size == top->height);
+    ctx->ctrl_stack = top->next;
+    ctx->ctrl_size--;
+    return top;
 }
 
-static void value_stack_push(CompileCtx *ctx, ValueStackEntry *v) {
-    list_add(&v->next, &ctx->value_stack);
-    ctx->value_stack_length++;
+static void unreachable(CompileCtx *ctx) {
+    ControlStackEntry *top = top_ctrl(ctx);
+    while (ctx->opd_size != top->height) {
+        free(pop_opd(ctx));
+    }
+    top->unreachable = true;
+    ctx->curr_block = NULL;
 }
 
-static CompileErr_t value_stack_pop(CompileCtx *ctx, ValueStackEntry *v) {
-    if (list_empty(&ctx->value_stack)) return COMPILE_ERR;
-    struct list_head *next = list_next(&ctx->value_stack);
-    list_del(next);
-    ValueStackEntry *top = (ValueStackEntry *)next;
-    if (v != NULL) *v = *top;
-    free(top);
-    ctx->value_stack_length--;
-    return COMPILE_OK;
-}
-
-static ValueStackEntry *value_stack_top(CompileCtx *ctx) {
-    if (list_empty(&ctx->value_stack)) return NULL;
-    return (ValueStackEntry *)list_next(&ctx->value_stack);
+static ControlStackEntry *ctrl_get(CompileCtx *ctx, uint32_t index) {
+    assert(index < ctx->ctrl_size - 1);
+    ControlStackEntry *iter = ctx->ctrl_stack;
+    for (uint32_t i = 0; i < index; i++) {
+        iter = iter->next;
+    }
+    return iter;
 }
 
 static CompileErr_t compile_local_get(CompileCtx *ctx) {
-    uint32_t localidx;
     WASMFunction *f = ctx->wasm_func;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &localidx));
-    Ref local = read_local(ctx, ctx->curr_block, localidx);
+    Blk *b = ctx->curr_block;
+    uint32_t localidx;
+    readULEB128_u32(&ctx->offset, f->code_end, &localidx);
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    WASMValtype valtype = wasm_valtype_of(f, localidx);
+    Ref local = read_local(ctx, b, localidx);
+    /* local can be undefind if there is a read before a write */
     if (local.type == REF_TYPE_UNDEFINED) {
-        local = INT32_CONST(0);
+        local = get_default(valtype);
     }
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = wasm_valtype_of(ctx->wasm_func, localidx);
-    v->r = local;
-    value_stack_push(ctx, v);
+
+    OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+    if (opd == NULL) return COMPILE_ERR;
+    opd->r = local;
+    opd->t = valtype;
+    push_opd(ctx, opd);
+
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_local_set(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
-    uint32_t index;
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &index));
-    WASMValtype valtype = wasm_valtype_of(f, index);
-    if (v.valtype != valtype) return COMPILE_ERR;
-    write_local(ctx->curr_block, index, v.r);
+    uint32_t localidx;
+    readULEB128_u32(&ctx->offset, f->code_end, &localidx);
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *opd = pop_opd(ctx);
+    write_local(ctx, ctx->curr_block, localidx, opd->r);
+    free(opd);
+
     return COMPILE_OK;
 }
 
@@ -165,10 +198,16 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
 
     uint32_t globalidx;
     WASMFunction *f = ctx->wasm_func;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &globalidx));
-    if (globalidx >= ctx->m->global_count) return COMPILE_ERR;
-    WASMGlobal *g = &ctx->m->globals[globalidx];
+    readULEB128_u32(&ctx->offset, f->code_end, &globalidx);
 
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+    if (opd == NULL) return COMPILE_ERR;
+
+    WASMGlobal *g = &ctx->m->globals[globalidx];
     Blk *b = ctx->curr_block;
     Ref r;
     if (g->is_mutable) {
@@ -179,11 +218,10 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
         r = INT32_CONST(g->as.i32);
     }
 
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = g->type;
-    v->r = r;
-    value_stack_push(ctx, v);
+    opd->t = g->type;
+    opd->r = r;
+    push_opd(ctx, opd);
+
     return COMPILE_OK;
 }
 
@@ -192,16 +230,20 @@ static CompileErr_t compile_global_set(CompileCtx *ctx) {
     WASMFunction *f = ctx->wasm_func;
     Blk *b = ctx->curr_block;
     uint32_t globalidx;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &globalidx));
-    if (globalidx >= ctx->m->global_count) return COMPILE_ERR;
+    readULEB128_u32(&ctx->offset, f->code_end, &globalidx);
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
     WASMGlobal *g = &ctx->m->globals[globalidx];
     if (!g->is_mutable) return COMPILE_ERR;
 
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    if (v.valtype != g->type) return COMPILE_ERR;
+    OperandStackEntry *opd = pop_opd(ctx);
     Ref offset = INT32_CONST(sizeof(uint32_t) * globalidx);
-    APPEND_STORE(b, cast(g->type), v.r, offset, ctx->globals_start);
+    APPEND_STORE(b, cast(g->type), opd->r, offset, ctx->globals_start);
+    free(opd);
+
     return COMPILE_OK;
 }
 
@@ -210,558 +252,602 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
     WASMFunction *f = ctx->wasm_func;
     Blk *b = ctx->curr_block;
     uint32_t funcidx;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &funcidx));
-    if (funcidx >= ctx->m->function_count) return COMPILE_ERR;
+    readULEB128_u32(&ctx->offset, f->code_end, &funcidx);
 
-    WASMFunction *called_func = &ctx->m->functions[funcidx];
-    WASMFuncType *t = called_func->type;
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    if (ctx->value_stack_length < t->param_count) {
-        return COMPILE_ERR;
-    }
+    WASMFunction *callee = &ctx->m->functions[funcidx];
+    WASMFuncType *t = callee->type;
+
     newFuncCallArg(b, IR_TYPE_I32, ctx->a0);
-    if (t->param_count > 0) {
-        uint32_t n = t->param_count;
-        if (ctx->value_stack_length < n) return COMPILE_ERR;
-        struct list_head *iter = &ctx->value_stack;
-        for (uint32_t i = 0; i < n; i++) {
-            iter = list_next(iter);
+    uint32_t n = t->param_count;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t argidx = n-i-1;
+        OperandStackEntry *iter = ctx->opd_stack;
+        for (uint32_t j = 0; j < argidx; j++) {
+            iter = iter->next;
         }
-
-        for (uint32_t i = 0; i < n; i++) {
-            ValueStackEntry *v = (ValueStackEntry *)iter;
-            if (v->valtype != t->param_types[i]) return COMPILE_ERR;
-            newFuncCallArg(b, cast(t->param_types[i]), v->r);
-            iter = list_prev(iter);
-        }
-
-        for (uint32_t i = 0; i < n; i++) {
-            ERR_CHECK(value_stack_pop(ctx, NULL));
-        }
+        newFuncCallArg(b, cast(t->param_types[argidx]), iter->r);
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        free(pop_opd(ctx));
     }
 
-    Ref called_addr = NEW_NAME(called_func->name);
+    Ref callee_name = NEW_NAME(callee->name);
     if (t->result_count == 0) {
-        APPEND_VOID_CALL(b, called_addr);
+        APPEND_VOID_CALL(b, callee_name);
         return COMPILE_OK;
     }
 
     Ref result = newTemp(ctx->ir_func);
     IRType ret_type = cast(t->result_type);
-    APPEND_CALL(b, ret_type, result, called_addr);
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = t->result_type;
-    v->r = result;
-    value_stack_push(ctx, v);
-    return COMPILE_OK;
-}
+    APPEND_CALL(b, ret_type, result, callee_name);
+    OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+    if (opd == NULL) return COMPILE_ERR;
+    opd->r = result;
+    opd->t = t->result_type;
+    push_opd(ctx, opd);
 
-static CompileErr_t unwind_value_stack(CompileCtx *ctx, ValueStackEntry *v) {
-    ValueStackEntry *top = value_stack_top(ctx);
-    while(top != v && top != NULL) {
-        value_stack_pop(ctx, NULL);
-        top = value_stack_top(ctx);
-    }
-    if (top == NULL) return COMPILE_ERR;
-    else return COMPILE_OK;
+    return COMPILE_OK;
 }
 
 static CompileErr_t compile_br(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     uint32_t labelidx;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &labelidx));
+    readULEB128_u32(&ctx->offset, f->code_end, &labelidx);
 
-    LabelStackEntry *l = label_stack_get(ctx, labelidx);
-    if (l == NULL) return COMPILE_ERR;
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    if (l->blktype != WASM_BLOCKTYPE_NONE) {
-        ValueStackEntry v;
-        ERR_CHECK(value_stack_pop(ctx, &v));
-        if (v.valtype != (WASMValtype)l->blktype) return COMPILE_ERR;
+    ControlStackEntry *ctrl = ctrl_get(ctx, labelidx);
+
+    if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
+        assert(ctrl->end_results != NULL);
         Phi_arg *pa = malloc(sizeof(struct Phi_arg));
         if (pa == NULL) return COMPILE_ERR;
+        OperandStackEntry *opd = pop_opd(ctx);
+        pa->r = opd->r;
         pa->b = ctx->curr_block;
-        pa->r = v.r;
-        listPush(l->results, pa);
+        listPush(ctrl->end_results, pa);
+        free(opd);
     }
-    if (l->b->is_loop_header) {
-        listAddNodeTail(l->b->loop_end_blk_list, ctx->curr_block);
+
+    if (ctrl->label_blk->is_loop_header) {
+        listAddNodeTail(ctrl->label_blk->loop_end_blk_list, ctx->curr_block);
     }
-    jmp(ctx->ir_func, ctx->curr_block, l->b);
-    ctx->skip_flag = SKIP_FLAG_BR;
-    ctx->curr_block = NULL;
+    jmp(ctx->ir_func, ctx->curr_block, ctrl->label_blk);
+    unreachable(ctx);
 
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_br_if(CompileCtx *ctx) {
+
     WASMFunction *f = ctx->wasm_func;
     uint32_t labelidx;
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
+    readULEB128_u32(&ctx->offset, f->code_end, &labelidx);
 
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &labelidx));
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    LabelStackEntry *l = label_stack_get(ctx, labelidx);
-    if (l == NULL) return COMPILE_ERR;
+    OperandStackEntry *ifcond = pop_opd(ctx);
+    ControlStackEntry *ctrl = ctrl_get(ctx, labelidx);
 
-    if (l->blktype != WASM_BLOCKTYPE_NONE) {
-        ValueStackEntry *result = value_stack_top(ctx);
-        if (result == NULL) return COMPILE_ERR;
-        if (result->valtype != (WASMValtype)l->blktype) return COMPILE_ERR;
+    if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
+        assert(ctrl->end_results != NULL);
         Phi_arg *pa = malloc(sizeof(struct Phi_arg));
         if (pa == NULL) return COMPILE_ERR;
+        OperandStackEntry *opd = top_opd(ctx);
+        pa->r = opd->r;
         pa->b = ctx->curr_block;
-        pa->r = result->r;
-        listPush(l->results, pa);
+        listPush(ctrl->end_results, pa);
     }
-    if (l->b->is_loop_header) {
-        listAddNodeTail(l->b->loop_end_blk_list, ctx->curr_block);
+
+    if (ctrl->label_blk->is_loop_header) {
+        listAddNodeTail(ctrl->label_blk->loop_end_blk_list, ctx->curr_block);
     }
-    Blk *continue_blk = newBlock(ctx->local_count);
-    jnz(ctx->ir_func, ctx->curr_block, v.r, l->b, continue_blk);
+    Blk *continue_blk = newBlock(ctx->ir_func);
+    jnz(ctx->ir_func, ctx->curr_block, ifcond->r, ctrl->label_blk, continue_blk);
     seal_block(ctx, continue_blk);
     ctx->curr_block = continue_blk;
+    free(ifcond);
 
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_return(CompileCtx *ctx) {
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
     WASMFuncType *t = ctx->wasm_func->type;
     if (t->result_count != 0) {
-        ValueStackEntry e;
-        ERR_CHECK(value_stack_pop(ctx, &e));
-        if (e.valtype != t->result_type) return COMPILE_ERR;
-        if (ctx->curr_block != NULL) {
-            retRef(ctx->ir_func, ctx->curr_block, e.r);
-        }
+        OperandStackEntry *opd = pop_opd(ctx);
+        retRef(ctx->ir_func, ctx->curr_block, opd->r);
+        free(opd);
     } else {
-        if (ctx->curr_block != NULL) {
-            ret(ctx->ir_func, ctx->curr_block);
-        }
+        ret(ctx->ir_func, ctx->curr_block);
     }
-    ctx->skip_flag = SKIP_FLAG_RETURN;
-    ctx->curr_block = NULL;
-    return COMPILE_OK;
-}
-
-static CompileErr_t finalize_block_body(
-    CompileCtx *ctx, ValueStackEntry *bottom) {
-
-    switch (ctx->skip_flag) {
-    case SKIP_FLAG_BR:
-    case SKIP_FLAG_RETURN: {
-        ctx->skip_flag = SKIP_FLAG_NONE;
-        ERR_CHECK(unwind_value_stack(ctx, bottom));
-    } break;
-    case SKIP_FLAG_NONE: {
-        LabelStackEntry *l = label_stack_top(ctx);
-        if (l == NULL) return COMPILE_ERR;
-        if (ctx->curr_block != NULL) {
-            jmp(ctx->ir_func, ctx->curr_block, l->b);
-        }
-        if (l->blktype != WASM_BLOCKTYPE_NONE) {
-            ValueStackEntry v;
-            ERR_CHECK(value_stack_pop(ctx, &v));
-            if (v.valtype != (WASMValtype)l->blktype) return COMPILE_ERR;
-
-            Phi_arg *pa = malloc(sizeof(struct Phi_arg));
-            if (pa == NULL) return COMPILE_ERR;
-            pa->r = v.r;
-            pa->b = ctx->curr_block;
-            listPush(l->results, pa);
-        }
-    } break;
-    default:
-        return COMPILE_ERR;
-    }
-
-    if (value_stack_top(ctx) != bottom) return COMPILE_ERR;
-    ERR_CHECK(value_stack_pop(ctx, NULL));
-    return COMPILE_OK;
-}
-
-static CompileErr_t compile_then(CompileCtx *ctx, uint8_t *last_opcode) {
-
-    WASMFunction *f = ctx->wasm_func;
-
-    ValueStackEntry *bottom;
-    INIT_BOTTOM(bottom);
-    value_stack_push(ctx, bottom);
-
-    uint8_t opcode;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    while (opcode != 0x0B && opcode != WASM_OPCODE_ELSE) {
-        ERR_CHECK(compile_instr(ctx, opcode));
-        ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    }
-    *last_opcode = opcode;
-
-    ERR_CHECK(finalize_block_body(ctx, bottom));
-    return COMPILE_OK;
-}
-
-static CompileErr_t compile_else(CompileCtx *ctx) {
-
-    WASMFunction *f = ctx->wasm_func;
-
-    ValueStackEntry *bottom;
-    INIT_BOTTOM(bottom);
-    value_stack_push(ctx, bottom);
-
-    uint8_t opcode;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    while (opcode != 0x0B) {
-        ERR_CHECK(compile_instr(ctx, opcode));
-        ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    }
-    ERR_CHECK(finalize_block_body(ctx, bottom));
-    return COMPILE_OK;
-}
-
-static CompileErr_t finalize_block(CompileCtx *ctx, LabelStackEntry *l) {
-    seal_block(ctx, l->b);
-    ctx->curr_block = l->b;
-    if (l->blktype != WASM_BLOCKTYPE_NONE) {
-        uint32_t result_size = listLength(l->results);
-        Ref r;
-        if (result_size == 1) {
-            Phi_arg *pa = listPop(l->results);
-            r = pa->r;
-            free(pa);
-        } else if (result_size > 1) {
-            r = newTemp(ctx->ir_func);
-            listNode *phi_node;
-            phi_node = newPhi(ctx->curr_block, r, cast((WASMValtype)l->blktype));
-            for (uint32_t i = 0; i < result_size; i++) {
-                Phi_arg *pa = listPop(l->results);
-                phiAppendOperand(phi_node, pa->b, pa->r);
-                free(pa);
-            }
-        } else {
-            r = INT32_CONST(0);
-        }
-
-        ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
-        if (result == NULL) return COMPILE_ERR;
-        result->valtype = (WASMValtype)l->blktype;
-        result->r = r;
-        value_stack_push(ctx, result);
-    }
-
-    ERR_CHECK(label_stack_pop(ctx, NULL));
+    unreachable(ctx);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_if(CompileCtx *ctx) {
 
-    WASMFunction *f = ctx->wasm_func;
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    if (v.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
+    WASMBlocktype end_type;
+    read_u8(&ctx->offset, ctx->wasm_func->code_end, &end_type);
+    ControlStackEntry *top = top_ctrl(ctx);
+    ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
+    if (ctrl == NULL) return COMPILE_ERR;
 
-    Blk *then_blk = newBlock(ctx->local_count);
-    Blk *else_blk = newBlock(ctx->local_count);
-    Blk *end_blk  = newBlock(ctx->local_count);
-
-    WASMBlocktype blktype;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &blktype));
-    if (!IS_WASM_BLOCK_TYPE(blktype)) return COMPILE_ERR;
-
-    LabelStackEntry *l;
-    INIT_LABEL(l, end_blk, blktype)
-    label_stack_push(ctx, l);
-
-    assert(ctx->curr_block->is_sealed);
-    jnz(ctx->ir_func, ctx->curr_block, v.r, then_blk, else_blk);
-    seal_block(ctx, then_blk);
-    seal_block(ctx, else_blk);
-
-    ctx->curr_block = then_blk;
-    uint8_t last_opcode;
-    ERR_CHECK(compile_then(ctx, &last_opcode));
-    if (label_stack_top(ctx) != l) return COMPILE_ERR;
-
-    ctx->curr_block = else_blk;
-    if (last_opcode == WASM_OPCODE_ELSE) {
-        ERR_CHECK(compile_else(ctx));
-        if (label_stack_top(ctx) != l) return COMPILE_ERR;
-    } else {
-        jmp(ctx->ir_func, ctx->curr_block, end_blk);
+    /* if the top of the control stack is in a unreachable state
+     * (e.g. if after a br) we want to skip the compilation of the if */
+    if (top->unreachable) {
+        memset(ctrl, 0, sizeof(struct ControlStackEntry));
+        ctrl->unreachable = true;
+        ctrl->kind = CTRL_STACK_ENTRY_DUMMY;
+        push_ctrl(ctx, ctrl);
+        return COMPILE_OK;
     }
-    ERR_CHECK(finalize_block(ctx, l));
+    /* if top->unreachable is false, ctx->curr_block must be not NULL */
+    assert(ctx->curr_block != NULL);
+
+
+    OperandStackEntry *ifcond = pop_opd(ctx);
+    Blk *then_blk = newBlock(ctx->ir_func);
+    Blk *end_blk  = newBlock(ctx->ir_func);
+    /* at the moment we don't know if there a matching else branch,
+     * hence we put NULL as a else branch block. We will fix the NULL
+     * later with the else branch block if there is a matching else,
+     * otherwise we will fix the NULL with the if end block */
+    jnz(ctx->ir_func, ctx->curr_block, ifcond->r, then_blk, NULL);
+    seal_block(ctx, then_blk);
+    free(ifcond);
+
+    list *end_results = NULL;
+    if (end_type != WASM_BLOCKTYPE_NONE) {
+        end_results = listCreate();
+    }
+    ctrl->kind = CTRL_STACK_ENTRY_IF;
+    ctrl->label_type = end_type;
+    ctrl->end_type = end_type;
+    ctrl->label_blk = end_blk;
+    ctrl->start_blk = ctx->curr_block;
+    ctrl->end_results = end_results;
+    ctrl->unreachable = false;
+    push_ctrl(ctx, ctrl);
+    ctx->curr_block = then_blk;
+
+    return COMPILE_OK;
+}
+
+static CompileErr_t compile_else(CompileCtx *ctx) {
+
+    ControlStackEntry *top;
+    top = pop_ctrl(ctx);
+    if (top == NULL) return COMPILE_ERR;
+
+    /* if we had skipped the compilation of a then branch because
+     * the top of the control stack was in a unreachable state at
+     * the start of the if compilation, skip also the compilation
+     * of the else branch */
+    if (top->kind == CTRL_STACK_ENTRY_DUMMY) {
+        push_ctrl(ctx, top);
+        return COMPILE_OK;
+    }
+
+    if (!top->unreachable) {
+        assert(ctx->curr_block != NULL);
+        jmp(ctx->ir_func, ctx->curr_block, top->label_blk);
+    }
+    top->kind = CTRL_STACK_ENTRY_ELSE;
+    top->unreachable = false;
+    push_ctrl(ctx, top);
+
+    /* fix the NULL in the jnz */
+    Blk *else_blk  = newBlock(ctx->ir_func);
+    Blk *b = top->start_blk;
+    b->succ[1] = else_blk;
+    listAddNodeTail(else_blk->preds, b);
+
+    seal_block(ctx, else_blk);
+    ctx->curr_block = else_blk;
+
+    return COMPILE_OK;
+}
+
+static CompileErr_t compile_end(CompileCtx *ctx) {
+
+    ControlStackEntry *top = pop_ctrl(ctx);
+    if (top == NULL) return COMPILE_ERR;
+    Blk *s = top->start_blk;
+    Blk *l = top->label_blk;
+    list *res = top->end_results;
+    WASMBlocktype t = top->end_type;
+
+    /* if we had skipped the compilation of a if/block/loop because
+     * the top of the control stack was in a unreachable state at
+     * the start of the if/block/loop compilation, just return */
+    if (top->kind == CTRL_STACK_ENTRY_DUMMY) {
+        free(top);
+        return COMPILE_OK;
+    }
+
+    seal_block(ctx, l);
+    if (top->kind != CTRL_STACK_ENTRY_LOOP) {
+        if (ctx->curr_block != NULL) {
+            jmp(ctx->ir_func, ctx->curr_block, l);
+        }
+        ctx->curr_block = l;
+    }
+
+    /* fix the NULL of the jnz if this is the
+     * end of a if without a matching else */
+    if (top->kind == CTRL_STACK_ENTRY_IF) {
+        s->succ[1] = l;
+        listAddNodeTail(l->preds, s);
+    }
+
+    if (t != WASM_BLOCKTYPE_NONE) {
+        assert(res != NULL);
+        uint32_t n = listLength(res);
+        OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+        if (opd == NULL) return COMPILE_ERR;
+        opd->t = (WASMValtype)t;
+        if (n == 1) {
+            Phi_arg *pa = listNodeValue(listFirst(res));
+            opd->r = pa->r;
+            listRelease(res);
+        } else if (n > 1) {
+            opd->r = newTemp(ctx->ir_func);
+            listNode *phi_node;
+            phi_node = newPhi(ctx->curr_block, opd->r, cast((WASMValtype)t));
+            Phi *phi = listNodeValue(phi_node);
+            phi->phi_arg_list = res;
+        } else {
+         /* There are some situation in which there is a if-else/block that
+            must produce a value, there some other code after the
+            if-else/block and inside the if-else/block the control is
+            transfered in a part of the code that is not the code after
+            the if-else/block. In these situations the code after the
+            if-else/block is death code. Here is an example:
+
+            i32.const 1
+            (if (result i32)
+             (then
+               i32.const 9
+               (block (result i32)
+                   i32.const 22
+                   i32.const 20
+                   i32.add
+                   br 1)
+               i32.sub)
+             (else i32.const 3))
+
+            This snippet produce the value 42.
+            the 'i32.sub' statement is death code.
+            When the compilation arrives at the matching end opcode of the
+            block the 'end_results' list associated with the block is empty
+            but the block must push on the operand stack a i32 value. We push
+            a default value to continue the compilation, the choice of the
+            value to push is influential because the code after the block is
+            death code. */
+            opd->r = get_default((WASMValtype)t);
+            listRelease(res);
+        }
+        push_opd(ctx, opd);
+    }
+
+    if (top->kind == CTRL_STACK_ENTRY_LOOP) {
+        if (listLength(l->loop_end_blk_list) == 0) {
+            listRelease(l->loop_end_blk_list);
+            l->loop_end_blk_list = NULL;
+            l->is_loop_header = false;
+        }
+        if (ctx->curr_block == NULL) {
+         /* When the body of loop end with a br or return statement
+            ctx->curr_block is NULL. If there are some code after the
+            loop but in the same scope of the loop statement we need
+            a new blk to continue the compilation. The code after the
+            loop is most probably death code. */
+            if (ctx->offset[0] != WASM_OPCODE_END ||
+                ctx->offset == ctx->wasm_func->code_end) {
+                Blk *continue_blk = newBlock(ctx->ir_func);
+                ctx->curr_block = continue_blk;
+                seal_block(ctx, continue_blk);
+            }
+        }
+    }
+
+    free(top);
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_block(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
-    Blk *end_blk = newBlock(ctx->local_count);
+    WASMBlocktype end_type;
+    read_u8(&ctx->offset, f->code_end, &end_type);
+    ControlStackEntry *top = top_ctrl(ctx);
+    ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
+    if (ctrl == NULL) return COMPILE_ERR;
 
-    WASMBlocktype blktype;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &blktype));
-    if (!IS_WASM_BLOCK_TYPE(blktype)) return COMPILE_ERR;
-
-    LabelStackEntry *l;
-    INIT_LABEL(l, end_blk, blktype)
-    label_stack_push(ctx, l);
-
-    ValueStackEntry *bottom;
-    INIT_BOTTOM(bottom);
-    value_stack_push(ctx, bottom);
-
-    uint8_t opcode;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    while (opcode != 0x0B) {
-        ERR_CHECK(compile_instr(ctx, opcode));
-        ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
+    /* if the top of the control stack is in a unreachable state
+     * (e.g. block after a br) we want to skip the compilation of the block */
+    if (top->unreachable) {
+        memset(ctrl, 0, sizeof(struct ControlStackEntry));
+        ctrl->kind = CTRL_STACK_ENTRY_DUMMY;
+        ctrl->unreachable = true;
+        push_ctrl(ctx, ctrl);
+        return COMPILE_OK;
     }
+    /* if top->unreachable is false, ctx->curr_block must be not NULL */
+    assert(ctx->curr_block != NULL);
 
-    if (label_stack_top(ctx) != l) return COMPILE_ERR;
-    ERR_CHECK(finalize_block_body(ctx, bottom));
-    ERR_CHECK(finalize_block(ctx, l));
+    Blk *end_blk = newBlock(ctx->ir_func);
+    list *end_results = NULL;
+    if (end_type != WASM_BLOCKTYPE_NONE) {
+        end_results = listCreate();
+    }
+    ctrl->kind = CTRL_STACK_ENTRY_BLOCK;
+    ctrl->label_type = end_type;
+    ctrl->end_type = end_type;
+    ctrl->label_blk = end_blk;
+    ctrl->start_blk = ctx->curr_block;
+    ctrl->end_results = end_results;
+    ctrl->unreachable = false;
+    push_ctrl(ctx, ctrl);
+
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_loop(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
-    Blk *loop_header = newBlock(ctx->local_count);
+    WASMBlocktype end_type;
+    read_u8(&ctx->offset, f->code_end, &end_type);
+    ControlStackEntry *top = top_ctrl(ctx);
+    ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
+    if (ctrl == NULL) return COMPILE_ERR;
+
+    /* if the top of the control stack is in a unreachable state
+     * (e.g. loop after a br) we want to skip the compilation of the loop */
+    if (top->unreachable) {
+        memset(ctrl, 0, sizeof(struct ControlStackEntry));
+        ctrl->unreachable = true;
+        ctrl->kind = CTRL_STACK_ENTRY_DUMMY;
+        push_ctrl(ctx, ctrl);
+        return COMPILE_OK;
+    }
+    /* if top->unreachable is false, ctx->curr_block must be not NULL */
+    assert(ctx->curr_block != NULL);
+
+    Blk *loop_header = newBlock(ctx->ir_func);
     loop_header->is_loop_header = true;
     loop_header->loop_end_blk_list = listCreate();
     jmp(ctx->ir_func, ctx->curr_block, loop_header);
     ctx->curr_block = loop_header;
 
-    WASMBlocktype blktype;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &blktype));
-    if (!IS_WASM_BLOCK_TYPE(blktype)) return COMPILE_ERR;
-
-    LabelStackEntry *l;
-    INIT_LABEL(l, loop_header, blktype);
-    label_stack_push(ctx, l);
-
-    ValueStackEntry *bottom;
-    INIT_BOTTOM(bottom);
-    value_stack_push(ctx, bottom);
-
-    uint8_t opcode;
-    ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
-    while (opcode != 0x0B) {
-        ERR_CHECK(compile_instr(ctx, opcode));
-        ERR_CHECK(read_u8(&ctx->offset, f->code_end, &opcode));
+    list *end_results = NULL;
+    if (end_type != WASM_BLOCKTYPE_NONE) {
+        end_results = listCreate();
     }
+    ctrl->kind = CTRL_STACK_ENTRY_LOOP;
+    ctrl->label_type  = WASM_BLOCKTYPE_NONE;
+    ctrl->end_type    = end_type;
+    ctrl->label_blk   = loop_header;
+    ctrl->start_blk   = ctx->curr_block;
+    ctrl->end_results = end_results;
+    ctrl->unreachable = false;
+    push_ctrl(ctx, ctrl);
 
-    ValueStackEntry v;
-    switch (ctx->skip_flag) {
-    case SKIP_FLAG_BR:
-    case SKIP_FLAG_RETURN: {
-        ctx->skip_flag = SKIP_FLAG_NONE;
-        ERR_CHECK(unwind_value_stack(ctx, bottom));
-    } break;
-    case SKIP_FLAG_NONE: {
-        if (blktype != WASM_BLOCKTYPE_NONE) {
-            ERR_CHECK(value_stack_pop(ctx, &v));
-            if (v.valtype != (WASMValtype)l->blktype) return COMPILE_ERR;
-        }
-    } break;
-    default:
-        return COMPILE_ERR;
-    }
+    return COMPILE_OK;
+}
 
-    if (value_stack_top(ctx) != bottom) return COMPILE_ERR;
-    ERR_CHECK(value_stack_pop(ctx, NULL));
+static CompileErr_t compile_drop(CompileCtx *ctx) {
 
-    if (blktype != WASM_BLOCKTYPE_NONE) {
-        ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
-        if (result == NULL) return COMPILE_ERR;
-        *result = v;
-        value_stack_push(ctx, result);
-    }
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    if (label_stack_top(ctx) != l) return COMPILE_ERR;
-    ERR_CHECK(label_stack_pop(ctx, NULL));
-    seal_block(ctx, loop_header);
-    if (listLength(loop_header->loop_end_blk_list) == 0) {
-        listRelease(loop_header->loop_end_blk_list);
-        loop_header->loop_end_blk_list = NULL;
-        loop_header->is_loop_header = false;
-    }
+    free(pop_opd(ctx));
     return COMPILE_OK;
 }
 
 static CompileErr_t compile_select(CompileCtx *ctx) {
 
-    ValueStackEntry v, v1, v2;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    if (v.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
-    ERR_CHECK(value_stack_pop(ctx, &v2));
-    ERR_CHECK(value_stack_pop(ctx, &v1));
-    if (v1.valtype != v2.valtype) return COMPILE_ERR;
-    WASMValtype valtype = v1.valtype;
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    Blk *select_fst = newBlock(ctx->local_count);
-    Blk *select_snd = newBlock(ctx->local_count);
-    Blk *end = newBlock(ctx->local_count);
+    OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
+    if (result == NULL) return COMPILE_ERR;
 
-    jnz(ctx->ir_func, ctx->curr_block, v.r, select_fst, select_snd);
-    jmp(ctx->ir_func, select_fst, end);
-    jmp(ctx->ir_func, select_snd, end);
+    OperandStackEntry *cond, *arg1, *arg2;
+    cond = pop_opd(ctx);
+    arg2 = pop_opd(ctx);
+    arg1 = pop_opd(ctx);
+
+    Blk *select_arg1 = newBlock(ctx->ir_func);
+    Blk *select_arg2 = newBlock(ctx->ir_func);
+    Blk *end = newBlock(ctx->ir_func);
+
+    assert(ctx->curr_block != NULL);
+    jnz(ctx->ir_func, ctx->curr_block, cond->r, select_arg1, select_arg2);
+    free(cond);
+
+    jmp(ctx->ir_func, select_arg1, end);
+    jmp(ctx->ir_func, select_arg2, end);
     ctx->curr_block = end;
 
-    Ref r = newTemp(ctx->ir_func);
-    listNode *phi_node = newPhi(end, r, cast(valtype));
-    phiAppendOperand(phi_node, select_fst, v1.r);
-    phiAppendOperand(phi_node, select_snd, v2.r);
+    result->t = arg1->t;
+    result->r = newTemp(ctx->ir_func);
+    listNode *phi_node = newPhi(end, result->r, cast(result->t));
+    phiAppendOperand(phi_node, select_arg1, arg1->r);
+    phiAppendOperand(phi_node, select_arg2, arg2->r);
 
-    ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
-    if (result == NULL) return COMPILE_ERR;
-    result->r = r;
-    result->valtype = valtype;
-    value_stack_push(ctx, result);
+    free(arg1);
+    free(arg2);
+    push_opd(ctx, result);
+
     return COMPILE_OK;
 }
 
-static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype type, IROpcode ir_opcode) {
-
-    if (ctx->m->memories_count < 1) return COMPILE_ERR;
+static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype t, IROpcode op) {
 
     WASMFunction *f = ctx->wasm_func;
     Blk *b = ctx->curr_block;
     //TODO: how to properly use align?
     uint32_t align, offset;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &align));
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &offset));
+    readULEB128_u32(&ctx->offset, f->code_end, &align);
+    readULEB128_u32(&ctx->offset, f->code_end, &offset);
 
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    if (v.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
+    OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
+    if (result == NULL) return COMPILE_ERR;
+
+    OperandStackEntry *memidx = pop_opd(ctx);
     Ref ptr = newTemp(ctx->ir_func);
-    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, v.r);
+    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
+    free(memidx);
     //TODO: out of bound memory check
-    Ref r = newTemp(ctx->ir_func);
-    ir_append_ins(b, ir_opcode, cast(type), r, INT32_CONST(offset), ptr);
 
-    ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
-    if (result == NULL) return COMPILE_ERR;
-    result->valtype = type;
+    Ref r = newTemp(ctx->ir_func);
+    ir_append_ins(b, op, cast(t), r, INT32_CONST(offset), ptr);
+
+    result->t = t;
     result->r = r;
-    value_stack_push(ctx, result);
+    push_opd(ctx, result);
+
     return COMPILE_OK;
 }
 
-static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype type, IROpcode ir_opcode) {
-
-    if (ctx->m->memories_count < 1) return COMPILE_ERR;
+static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
 
     WASMFunction *f = ctx->wasm_func;
+    Blk *b = ctx->curr_block;
     //TODO: how to properly use align?
     uint32_t align, offset;
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &align));
-    ERR_CHECK(readULEB128_u32(&ctx->offset, f->code_end, &offset));
+    readULEB128_u32(&ctx->offset, f->code_end, &align);
+    readULEB128_u32(&ctx->offset, f->code_end, &offset);
 
-    ValueStackEntry v, addr;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    ERR_CHECK(value_stack_pop(ctx, &addr));
-    if (v.valtype != type) return COMPILE_ERR;
-    if (addr.valtype != WASM_VALTYPE_I32) return COMPILE_ERR;
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    Blk *b = ctx->curr_block;
+    OperandStackEntry *value, *memidx;
+    value  = pop_opd(ctx);
+    memidx = pop_opd(ctx);
+
     Ref ptr = newTemp(ctx->ir_func);
-    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, addr.r);
-    ir_append_ins(b, ir_opcode, cast(type), v.r, INT32_CONST(offset), ptr);
+    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
+    ir_append_ins(b, op, cast(t), value->r, INT32_CONST(offset), ptr);
+    free(value);
+    free(memidx);
+
     return COMPILE_OK;
 }
 
-static CompileErr_t compile_binop(CompileCtx *ctx, WASMValtype type,
-                                  IROpcode ir_opcode) {
+static CompileErr_t compile_binop(CompileCtx *ctx, IROpcode op) {
 
-    Blk *b = ctx->curr_block;
-    ValueStackEntry arg1, arg2;
-    ERR_CHECK(value_stack_pop(ctx, &arg2));
-    ERR_CHECK(value_stack_pop(ctx, &arg1));
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
 
-    if (arg1.valtype != type) return COMPILE_ERR;
-    if (arg2.valtype != type) return COMPILE_ERR;
-
-    Ref result = newTemp(ctx->ir_func);
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = type;
-    v->r = result;
-    value_stack_push(ctx, v);
-    ir_append_ins(b, ir_opcode, cast(type), result, arg1.r, arg2.r);
-    return COMPILE_OK;
-}
-
-static CompileErr_t compile_testop(CompileCtx *ctx, WASMValtype type,
-                                  IROpcode ir_opcode) {
-    Blk *b = ctx->curr_block;
-    ValueStackEntry v;
-    ERR_CHECK(value_stack_pop(ctx, &v));
-    if (v.valtype != type) return COMPILE_ERR;
-    Ref r = newTemp(ctx->ir_func);
-    ValueStackEntry *result = malloc(sizeof(struct ValueStackEntry));
+    OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
     if (result == NULL) return COMPILE_ERR;
-    result->valtype = WASM_VALTYPE_I32;
-    result->r = r;
-    ir_append_ins(b, ir_opcode, IR_TYPE_I32, r, v.r, UNDEFINED_REF);
-    value_stack_push(ctx, result);
-    return COMPILE_OK;
-}
 
-static CompileErr_t compile_relop(CompileCtx *ctx, WASMValtype type,
-                                  IROpcode ir_opcode) {
     Blk *b = ctx->curr_block;
-    ValueStackEntry arg1, arg2;
-    ERR_CHECK(value_stack_pop(ctx, &arg2));
-    ERR_CHECK(value_stack_pop(ctx, &arg1));
+    OperandStackEntry *arg1, *arg2;
+    arg2 = pop_opd(ctx);
+    arg1 = pop_opd(ctx);
 
-    if (arg1.valtype != type) return COMPILE_ERR;
-    if (arg2.valtype != type) return COMPILE_ERR;
+    result->r = newTemp(ctx->ir_func);
+    result->t = arg1->t;
+    ir_append_ins(b, op, cast(arg1->t), result->r, arg1->r, arg2->r);
 
-    Ref result = newTemp(ctx->ir_func);
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = WASM_VALTYPE_I32;
-    v->r = result;
-    value_stack_push(ctx, v);
-    ir_append_ins(b, ir_opcode, cast(type), result, arg1.r, arg2.r);
+    free(arg1);
+    free(arg2);
+    push_opd(ctx, result);
+
     return COMPILE_OK;
 }
 
-static CompileErr_t compile_const(CompileCtx *ctx, WASMValtype type) {
-    WASMFunction *f = ctx->wasm_func;
-    Ref c;
-    switch (type) {
-    case WASM_VALTYPE_I32: {
-        int32_t n;
-        ERR_CHECK(readILEB128_i32(&ctx->offset, f->code_end, &n));
-        c = INT32_CONST(n);
-    } break;
-    case WASM_VALTYPE_F32:
-    case WASM_VALTYPE_I64:
-    case WASM_VALTYPE_F64:
-        /* not implemented */
-        assert(0);
-    default:
-        return COMPILE_ERR;
-    }
-    ValueStackEntry *v = malloc(sizeof(struct ValueStackEntry));
-    if (v == NULL) return COMPILE_ERR;
-    v->valtype = type;
-    v->r = c;
-    value_stack_push(ctx, v);
+static CompileErr_t compile_testop(CompileCtx *ctx, IROpcode op) {
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
+    if (result == NULL) return COMPILE_ERR;
+
+    Blk *b = ctx->curr_block;
+    OperandStackEntry *v = pop_opd(ctx);
+    result->r = newTemp(ctx->ir_func);
+    result->t = WASM_VALTYPE_I32;
+    ir_append_ins(b, op, IR_TYPE_I32, result->r, v->r, UNDEFINED_REF);
+
+    free(v);
+    push_opd(ctx, result);
+
     return COMPILE_OK;
 }
+
+static CompileErr_t compile_relop(CompileCtx *ctx, IROpcode op) {
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
+    if (result == NULL) return COMPILE_ERR;
+
+    Blk *b = ctx->curr_block;
+    OperandStackEntry *arg2 = pop_opd(ctx);
+    OperandStackEntry *arg1 = pop_opd(ctx);
+
+    result->r = newTemp(ctx->ir_func);
+    result->t = WASM_VALTYPE_I32;
+    ir_append_ins(b, op, IR_TYPE_I32, result->r, arg1->r, arg2->r);
+
+    free(arg1);
+    free(arg2);
+    push_opd(ctx, result);
+
+    return COMPILE_OK;
+}
+
+static CompileErr_t compile_i32const(CompileCtx *ctx) {
+
+    int32_t n;
+    readILEB128_i32(&ctx->offset, ctx->wasm_func->code_end, &n);
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
+    if (opd == NULL) return COMPILE_ERR;
+    opd->t = WASM_VALTYPE_I32;
+    opd->r = INT32_CONST(n);
+    push_opd(ctx, opd);
+
+    return COMPILE_OK;
+}
+
+
 
 static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
-    /* If the branch_flag is SKIP_FLAG_BR(RETURN), we are trying to compile an
-     * instruction between a 'br'('return') and the end of the closest block,
-     * so skip it.*/
-    if (ctx->skip_flag != SKIP_FLAG_NONE) return COMPILE_OK;
 
     switch (opcode) {
     /* Control instructions */
@@ -776,6 +862,10 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
         return compile_block(ctx);
     case WASM_OPCODE_IF:
         return compile_if(ctx);
+    case WASM_OPCODE_ELSE:
+        return compile_else(ctx);
+    case WASM_OPCODE_END:
+        return compile_end(ctx);
     case WASM_OPCODE_BRANCH:
         return compile_br(ctx);
     case WASM_OPCODE_BRANCH_IF:
@@ -786,11 +876,11 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
         return compile_return(ctx);
 
     /* Parametric instruction */
-        case WASM_OPCODE_DROP:
-            return value_stack_pop(ctx, NULL);
-        case WASM_OPCODE_SELECT:
-            return compile_select(ctx);
-        
+    case WASM_OPCODE_DROP:
+        return compile_drop(ctx);
+    case WASM_OPCODE_SELECT:
+        return compile_select(ctx);
+
     /* Variable instructions */
     case WASM_OPCODE_LOCAL_GET:
         return compile_local_get(ctx);
@@ -813,78 +903,84 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
 
     /* Numeric instruction */
     case WASM_OPCODE_I32_CONST:
-        return compile_const(ctx, WASM_VALTYPE_I32);
+        return compile_i32const(ctx);
     case WASM_OPCODE_I32_EQZ:
-        return compile_testop(ctx, WASM_VALTYPE_I32, IR_OPCODE_EQZ);
+        return compile_testop(ctx, IR_OPCODE_EQZ);
     case WASM_OPCODE_I32_EQ:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_EQ);
+        return compile_relop(ctx, IR_OPCODE_EQ);
     case WASM_OPCODE_I32_NE:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_NE);
+        return compile_relop(ctx, IR_OPCODE_NE);
     case WASM_OPCODE_I32_LT_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SLT);
+        return compile_relop(ctx, IR_OPCODE_SLT);
     case WASM_OPCODE_I32_LT_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULT);
+        return compile_relop(ctx, IR_OPCODE_ULT);
     case WASM_OPCODE_I32_GT_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SGT);
+        return compile_relop(ctx, IR_OPCODE_SGT);
     case WASM_OPCODE_I32_GT_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UGT);
+        return compile_relop(ctx, IR_OPCODE_UGT);
     case WASM_OPCODE_I32_LE_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SLE);
+        return compile_relop(ctx, IR_OPCODE_SLE);
     case WASM_OPCODE_I32_LE_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULE);
+        return compile_relop(ctx, IR_OPCODE_ULE);
     case WASM_OPCODE_I32_GE_S:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SGE);
+        return compile_relop(ctx, IR_OPCODE_SGE);
     case WASM_OPCODE_I32_GE_U:
-        return compile_relop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UGE);
+        return compile_relop(ctx, IR_OPCODE_UGE);
     case WASM_OPCODE_I32_ADD:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ADD);
+        return compile_binop(ctx, IR_OPCODE_ADD);
     case WASM_OPCODE_I32_SUB:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SUB);
+        return compile_binop(ctx, IR_OPCODE_SUB);
     case WASM_OPCODE_I32_MUL:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_MUL);
+        return compile_binop(ctx, IR_OPCODE_MUL);
     case WASM_OPCODE_I32_DIV_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SDIV);
+        return compile_binop(ctx, IR_OPCODE_SDIV);
     case WASM_OPCODE_I32_DIV_U:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UDIV);
+        return compile_binop(ctx, IR_OPCODE_UDIV);
     case WASM_OPCODE_I32_REM_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SREM);
+        return compile_binop(ctx, IR_OPCODE_SREM);
     case WASM_OPCODE_I32_REM_U:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_UREM);
+        return compile_binop(ctx, IR_OPCODE_UREM);
     case WASM_OPCODE_I32_AND:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_AND);
+        return compile_binop(ctx, IR_OPCODE_AND);
     case WASM_OPCODE_I32_OR:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_OR);
+        return compile_binop(ctx, IR_OPCODE_OR);
     case WASM_OPCODE_I32_XOR:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_XOR);
+        return compile_binop(ctx, IR_OPCODE_XOR);
     case WASM_OPCODE_I32_SHL:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_SHL);
+        return compile_binop(ctx, IR_OPCODE_SHL);
     case WASM_OPCODE_I32_SHR_S:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ASHR);
+        return compile_binop(ctx, IR_OPCODE_ASHR);
     case WASM_OPCODE_I32_SHR_U:
-        return compile_binop(ctx, WASM_VALTYPE_I32, IR_OPCODE_ASHR);
+        return compile_binop(ctx, IR_OPCODE_ASHR);
 
     /* unknown opcode */
     default:
-        assert(0);
         return COMPILE_ERR;
     }
+
+    return COMPILE_OK;
 }
 
 static void cleanup(CompileCtx *ctx) {
-    (void)ctx;
-    /*
-    listRelease(ctx.value_stack);
-    listRelease(ctx.label_stack);
-    listNode *blk_node;
-    listNode *blk_iter = listFirst(func->blk_list);
-    while ((blk_node = listNext(&blk_iter)) != NULL) {
-        Blk *b = listNodeValue(blk_node);
-        free(b->locals);
-        b->locals = NULL;
-        free(b->incomplete_phis);
-        b->incomplete_phis = NULL;
+
+    /* free operand stack */
+    OperandStackEntry *opd = ctx->opd_stack;
+    while (opd != NULL) {
+        OperandStackEntry *next = opd->next;
+        free(opd);
+        opd = next;
     }
-    */
+
+    /* free control stack */
+    ControlStackEntry *ctrl = ctx->ctrl_stack;
+    while (ctrl != NULL) {
+        ControlStackEntry *next = ctrl->next;
+        free(ctrl);
+        ctrl = next;
+    }
+
+    /* free IR funtion */
+    freeFunc(ctx->ir_func);
 }
 
 static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
@@ -894,12 +990,14 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
     WASMFuncType *t = wasm_func->type;
     uint32_t local_count = t->param_count + wasm_func->local_count;
 
+    /* Allocate the IR function */
     IRType ret_type = IR_TYPE_VOID;
     if (t->result_count != 0) {
         ret_type = cast(t->result_type);
     }
-    Blk *start = newBlock(local_count);
-    Fn *ir_func = newFunc(ret_type, wasm_func->name, start);
+    Fn *ir_func = newFunc(ret_type, wasm_func->name, local_count);
+    Blk *start = newBlock(ir_func);
+    ir_func->start = start;
 
     /* Initialize function parameters, the first parameter (a0)
      * always hold a pointer to the struct WASMExecEnv */
@@ -909,40 +1007,53 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
         start->locals[i] = param;
     }
 
-    /* initialize function locals */
+    /* Initialize function locals */
     Ref zero = INT32_CONST(0);
     for (uint32_t i = 0; i < wasm_func->local_count; i++) {
         start->locals[t->param_count + i] = zero;
     }
 
-    Ref WASMModuleInstance_ptr = newTemp(ir_func);
-    APPEND_LOAD(start, IR_TYPE_I32, WASMModuleInstance_ptr, INT32_CONST(8), WASMExecEnv_ptr);
+    Ref WASMModuleInstance_ptr = UNDEFINED_REF;
+    if (m->memories_count > 0 || m->global_count > 0) {
+        WASMModuleInstance_ptr = newTemp(ir_func);
+        APPEND_LOAD(start, IR_TYPE_I32, WASMModuleInstance_ptr,
+                    INT32_CONST(8), WASMExecEnv_ptr);
+    }
+    /* mem0_ptr hold the pointer to the memory 0 in the WAMR AOT runtime */
+    Ref mem0_ptr = UNDEFINED_REF;
+    if (m->memories_count > 0) {
+        mem0_ptr = newTemp(ir_func);
+        APPEND_LOAD(start, IR_TYPE_I32, mem0_ptr,
+                    INT32_CONST(376), WASMModuleInstance_ptr);
+    }
+    /* globals_start hold the pointer to the start of the
+     * array of globals variables in the WAMR AOT runtime */
+    Ref globals_start = UNDEFINED_REF;
+    if (m->global_count > 0) {
+        globals_start = newTemp(ir_func);
+        APPEND_ADD(start, IR_TYPE_I32, globals_start,
+                   WASMModuleInstance_ptr, INT32_CONST(464));
+    }
 
-    Ref mem0_ptr = newTemp(ir_func);
-    APPEND_LOAD(start, IR_TYPE_I32, mem0_ptr, INT32_CONST(376), WASMModuleInstance_ptr);
-    Ref globals_start = newTemp(ir_func);
-    APPEND_ADD(start, IR_TYPE_I32, globals_start, WASMModuleInstance_ptr, INT32_CONST(464));
-
-    CompileCtx ctx = {
-        .m = m,
-        .funcidx = funcidx,
-        .wasm_func = wasm_func,
-        .ir_func = ir_func,
-        .offset = wasm_func->code_start,
-        .local_count = local_count,
-        .skip_flag = SKIP_FLAG_NONE,
-        .curr_block = start,
-        .value_stack_length = 0,
-        .a0 = WASMExecEnv_ptr,
-        .mem0_ptr = mem0_ptr,
-        .globals_start = globals_start,
-    };
-
-    INIT_LIST_HEAD(&ctx.value_stack);
-    INIT_LIST_HEAD(&ctx.label_stack);
+    CompileCtx ctx = {0};
+    ctx.m = m;
+    ctx.funcidx = funcidx;
+    ctx.wasm_func = wasm_func;
+    ctx.ir_func = ir_func;
+    ctx.offset = wasm_func->code_start;
+    ctx.curr_block = start;
+    ctx.a0 = WASMExecEnv_ptr;
+    ctx.mem0_ptr = mem0_ptr;
+    ctx.globals_start = globals_start;
 
     seal_block(&ctx, start);
-    
+
+    ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
+    if (ctrl == NULL) goto ERROR;
+    memset(ctrl, 0, sizeof(struct ControlStackEntry));
+    ctrl->end_type = WASM_BLOCKTYPE_NONE;
+    push_ctrl(&ctx, ctrl);
+
     /* compile the body of the function */
     uint8_t opcode;
     while (ctx.offset < wasm_func->code_end) {
@@ -950,18 +1061,10 @@ static Fn *compile_fn(WASMModule *m, uint32_t funcidx) {
         if (compile_instr(&ctx, opcode)) goto ERROR;
     }
 
-    /* Add an implicit return if there is no explicit return in the wasm code */
-    if (ctx.skip_flag != SKIP_FLAG_RETURN) {
-        if (compile_return(&ctx)) goto ERROR;
-    }
-
-    /* Chech that the value stack is empty */
-    if (!list_empty(&ctx.value_stack)) goto ERROR;
-
-    /* Check the function body code size */
-    if (ctx.offset != wasm_func->code_end) goto ERROR;
-
-    cleanup(&ctx);
+    /* Add an implicit return if there is
+     * no explicit return in the wasm code */
+    compile_return(&ctx);
+    free(pop_ctrl(&ctx));
     return ir_func;
 
 ERROR:
@@ -993,6 +1096,7 @@ CompileErr_t compile(WASMModule *wasm_mod, Target *T,
     for (uint32_t i = 0; i < wasm_mod->function_count; i++) {
         Fn *fn = compile_fn(wasm_mod, i);
         if (fn == NULL) return COMPILE_ERR;
+        printfn(fn, stdout);
         register_allocation(fn);
         WASMFunction *wf = &wasm_mod->functions[i];
         ERR_CHECK(T->emitfn(&aot_mod, fn, wf->typeidx));
@@ -1002,59 +1106,109 @@ CompileErr_t compile(WASMModule *wasm_mod, Target *T,
     return COMPILE_OK;
 }
 
-static void write_local(Blk *b, uint32_t index, Ref value) {
-    Ref *ptr = &b->locals[index];
-    Use_ptr u = { .local = ptr };
 
+static Ref get_default(WASMValtype t) {
+    switch(t) {
+    case WASM_VALTYPE_I32:
+        return INT32_CONST(0);
+    case WASM_VALTYPE_I64:
+    case WASM_VALTYPE_F32:
+    case WASM_VALTYPE_F64:
+        /* not implemented */
+        assert(0);
+    default:
+        assert(0);
+    }
+}
+
+static IRType cast(WASMValtype t) {
+    switch(t) {
+        case WASM_VALTYPE_I32:
+            return IR_TYPE_I32;
+        case WASM_VALTYPE_I64:
+            return IR_TYPE_I64;
+        case WASM_VALTYPE_F32:
+            return IR_TYPE_F32;
+        case WASM_VALTYPE_F64:
+            return IR_TYPE_F64;
+        default:
+            assert(0);
+    }
+}
+
+/* The following SSA construction algorithm is taken from this article:
+ * Simple and Efficient Construction of Static Single Assignment Form.
+ * Authors: Matthias Braun, Sebastian Buchwald, Sebastian Hack,
+ * Roland Leißa, Christoph Mallon, and Andreas Zwinkau */
+
+static void write_local(CompileCtx *ctx, Blk *b, uint32_t localidx, Ref value) {
+
+    (void)ctx;
+    b->locals[localidx] = value;
+
+    Ref *ptr = &b->locals[localidx];
+    Use_ptr u = { .local = ptr };
     if (ptr->type == REF_TYPE_TMP) {
         rmUsage(listNodeValue(ptr->as.tmp_node), ULocal, u);
     }
-    b->locals[index] = value;
     if (value.type == REF_TYPE_TMP) {
         addUsage(listNodeValue(value.as.tmp_node), ULocal, u);
     }
 }
 
-static Ref read_local(CompileCtx *ctx, Blk *b, uint32_t index) {
-    if (b->locals[index].type != REF_TYPE_UNDEFINED) {
-        return b->locals[index];
+static Ref read_local(CompileCtx *ctx, Blk *b, uint32_t localidx) {
+    if (b->locals[localidx].type != REF_TYPE_UNDEFINED) {
+        return b->locals[localidx];
     }
-    return read_local_rec(ctx, b, index);
+    /* If a block currently contains no definition for a variable,
+    * we recursively look for a definition in its predecessors. */
+    return read_local_rec(ctx, b, localidx);
 }
 
-static Ref read_local_rec(CompileCtx *ctx, Blk *b, uint32_t index) {
+static Ref read_local_rec(CompileCtx *ctx, Blk *b, uint32_t localidx) {
+   /* If the block b has a single predecessor (case 2), just query it
+    * recursively for a definition. Otherwise (case 3), we collect the
+    * definitions from all predecessors and construct a phi function,
+    * which joins them into a single new value. This phi function is
+    * recorded as current definition in this basic block.
+    * In both cases, looking for a value in a predecessor might in
+    * turn lead to further recursive look-ups.*/
     Ref value;
     if (!b->is_sealed) {
-        // Incomplete CFG
+        /* (case 1) Incomplete CFG */
         Ref temp = newTemp(ctx->ir_func);
-        IRType phi_type = IR_TYPE_I32;
-        if (index > 0) {
-            phi_type = cast(wasm_valtype_of(ctx->wasm_func, index));
-        }
-        listNode *phi_node = newPhi(b, temp, phi_type);
-        b->incomplete_phis[index] = phi_node;
+        WASMValtype valtype = wasm_valtype_of(ctx->wasm_func, localidx);
+        listNode *phi_node = newPhi(b, temp, cast(valtype));
+        b->incomplete_phis[localidx] = phi_node;
         value = temp;
     } else if (listLength(b->preds) == 1) {
-        // Optimize the common case of one predecessor: no phi needed
+        /* (case 2) The block b has a single predecessor, no phi needed */
         Blk *p = listNodeValue(listFirst(b->preds));
-        value = read_local(ctx, p, index);
+        value = read_local(ctx, p, localidx);
     } else {
-        // Break potential cycles with operandless phi
+        /* (case 3) The block b has Multiple predecessors */
+
+        /* Break potential cycles with operandless phi:
+         * looking for a value in a predecessor might in turn lead to further
+         * recursive look-ups. Due to loops in the program, those might lead
+         * to endless recursion. Therefore, before recursing, we first create
+         * the phi function without operands and record it as the current
+         * definition for the variable in the block. Then, we determine the
+         * phi function’s operands. If a recursive look-up arrives back at the
+         * block, this phi function will provide a definition and the recursion
+         * will end. */
         Ref temp = newTemp(ctx->ir_func);
-        IRType phi_type = IR_TYPE_I32;
-        if (index > 0) {
-            phi_type = cast(wasm_valtype_of(ctx->wasm_func, index));
-        }
-        listNode *phi_node = newPhi(b, temp, phi_type);
-        write_local(b, index, temp);
-        value = add_phi_operands(ctx, phi_node, index);
+        WASMValtype valtype = wasm_valtype_of(ctx->wasm_func, localidx);
+        listNode *phi_node = newPhi(b, temp, cast(valtype));
+        write_local(ctx, b, localidx, temp);
+        value = add_phi_operands(ctx, phi_node, localidx);
     }
-    write_local(b, index, value);
+    write_local(ctx, b, localidx, value);
     return value;
 }
 
 static Ref add_phi_operands(CompileCtx *ctx, listNode *phi_node, uint32_t index) {
-    // Determine phi operands from the predecessors
+    /* Determine phi operands from the predecessors */
     Phi *phi = listNodeValue(phi_node);
     Blk *b = phi->block;
     listNode *node;
@@ -1062,8 +1216,12 @@ static Ref add_phi_operands(CompileCtx *ctx, listNode *phi_node, uint32_t index)
     while ((node = listNext(&iter)) != NULL) {
         Blk *pred = listNodeValue(node);
         Ref l = read_local(ctx, pred, index);
-        phiAppendOperand(phi_node, pred, l);
+        if (l.type != REF_TYPE_UNDEFINED) {
+            phiAppendOperand(phi_node, pred, l);
+        }
     }
+    /* Recursive look-up might leave redundant
+     * phi functions, try to remove them */
     return try_remove_trivial_phi(ctx, phi_node);
 }
 
@@ -1121,19 +1279,43 @@ static void phi_replace_by(listNode *phi_node, Ref r) {
     }
 }
 
+/* A phi function is trivial iff it just references itself
+ * and one other value v any number of times: exists v such
+ * that t = phi(x1, x2, ..., xn) and x1 ..., xn in {t, v}.
+ *
+ * Examples of trivial phi:
+ * - t = phi()
+ * - t = phi(t)
+ * - t = phi(t, t, t, t)
+ * - t = phi(v)
+ * - t = phi(v, v, v)
+ * - t = phi(t, v, t, t)
+ * - t = phi(t, v, t, v, t, v)
+ *
+ * Examples of not trivial phi:
+ * - t = phi(v1, v2)
+ * - t = phi(t, v1, t, v2)
+ * 
+ * A trivial phi function can be removed and the value v is used instead.
+ * As a special case, the phi function might use no other value besides
+ * itself. This means that it is either unreachable or in the start block.
+ * We replace it by an undefined value. */
 static Ref try_remove_trivial_phi(CompileCtx *ctx, listNode *phi_node) {
     Phi *phi = listNodeValue(phi_node);
     Ref same = UNDEFINED_REF;
     listNode *phi_arg_node;
-    listNode *phi_arg_iter = listFirst(phi->phi_arg_list);
+    listNode *phi_arg_iter = NULL;
+    if (phi->phi_arg_list != NULL) {
+        phi_arg_iter = listFirst(phi->phi_arg_list);
+    }
     while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
         Phi_arg *op = listNodeValue(phi_arg_node);
         if (REF_EQ(same, op->r) || REF_EQ(op->r, phi->to)) {
-            // Unique value or self-reference
+            /* Unique value or self-reference */
             continue;
         }
         if (same.type != REF_TYPE_UNDEFINED) {
-            // The phi merges at least two values: not trivial
+            /* The phi merges at least two values: not trivial */
             return phi->to;
         }
         same = op->r;
@@ -1143,13 +1325,17 @@ static Ref try_remove_trivial_phi(CompileCtx *ctx, listNode *phi_node) {
     listNode *to_node = phi->to.as.tmp_node;
     Tmp *to = listNodeValue(to_node);
 
+    /* Reroute all uses of phi to same */
     phi_replace_by(phi_node, same);
+    /* remove 'phi' */
     if (same.type == REF_TYPE_TMP && same.as.tmp_node != NULL) {
         Use_ptr u = { .phi = phi_node };
         rmUsage(listNodeValue(same.as.tmp_node), UPhi, u);
     }
     listDelNode(phi->block->phi_list, phi_node);
 
+    /* Try to recursively remove all phi users,
+     * which might have become trivial */
     listNode *use_node;
     listNode *use_iter = listFirst(to->use_list);
     while ((use_node = listNext(&use_iter)) != NULL) {
@@ -1160,31 +1346,17 @@ static Ref try_remove_trivial_phi(CompileCtx *ctx, listNode *phi_node) {
         listDelNode(to->use_list, use_node);
     }
 
+    /* remove 'to' */
     listDelNode(ctx->ir_func->tmp_list, to_node);
     return same;
 }
 
 static void seal_block(CompileCtx *ctx, Blk *b) {
     assert(b->is_sealed == 0);
-    for (uint32_t i = 0; i < ctx->local_count; i++) {
+    for (uint32_t i = 0; i < ctx->ir_func->local_count; i++) {
         if (b->incomplete_phis[i] == NULL) continue;
         add_phi_operands(ctx, b->incomplete_phis[i], i);
     }
     b->is_sealed = true;
-}
-
-static IRType cast(WASMValtype t) {
-    switch(t) {
-        case WASM_VALTYPE_I32:
-            return IR_TYPE_I32;
-        case WASM_VALTYPE_I64:
-            return IR_TYPE_I64;
-        case WASM_VALTYPE_F32:
-            return IR_TYPE_F32;
-        case WASM_VALTYPE_F64:
-            return IR_TYPE_F64;
-        default:
-            assert(0);
-    }
 }
 

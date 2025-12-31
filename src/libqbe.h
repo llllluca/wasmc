@@ -44,6 +44,7 @@ typedef struct live_interval {
 } live_interval;
 
 struct Tmp {
+    unsigned int id;
     list *use_list;
     live_interval *i;
 };
@@ -103,6 +104,7 @@ struct Blk {
     list *phi_list;
     list *ins_list;
     Jump jmp;
+    // 0 is the 'then' branch, 1 is the 'else' branch
     Blk *succ[2];
     list *preds;
     Ref *locals;
@@ -137,6 +139,9 @@ typedef struct Fn {
     Blk *start;
     IRType ret_type;
     unsigned int num_stack_slots;
+    unsigned int next_tmp_id;
+    unsigned int next_blk_id;
+    uint32_t local_count;
 } Fn;
 
 typedef enum IROpcode {
@@ -242,10 +247,10 @@ struct Use {
 /* libqbe.c */
 void printfn(Fn *fn, FILE *f);
 Ref newMemoryAddr(Fn *f, Blk *b);
-Fn *newFunc(IRType ret_type, char *name, Blk *start);
+Fn *newFunc(IRType ret_type, char *name, uint32_t local_count);
 Ref newFuncParam(Fn *f, IRType type);
 Ref newTemp(Fn *func);
-Blk *newBlock(uint32_t nlocals);
+Blk *newBlock(Fn *f);
 void newFuncCallArg(Blk *b, IRType type, Ref r);
 void ir_append_ins(Blk *b, IROpcode op, IRType type, Ref arg0, Ref arg1, Ref arg2);
 void jmp(Fn *f, Blk *from, Blk *to);

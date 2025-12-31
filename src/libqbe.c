@@ -9,11 +9,8 @@ extern void panic(void);
 extern void *xcalloc(size_t nmemb, size_t size);
 extern void *xmalloc(size_t size);
 
-static unsigned int next_temp_id = 0;
-
 void printref(Ref r, FILE *f);
 
-/*
 char *rname[] = {
     [ZERO] = "zero",
     [RA] = "ra",
@@ -50,54 +47,69 @@ char *rname[] = {
 };
 
 const char *optab[] = {
-    // Arithmetic and Bits
-    [IR_OPCODE_ADD] = "add",
-    [IR_OPCODE_SUB] = "sub",
-    [IR_OPCODE_DIV] = "div",
-    [IR_OPCODE_REM] = "rem",
+    /* Integer Arithmetic Operations */
+    [IR_OPCODE_ADD]  = "add",
+    [IR_OPCODE_SUB]  = "sub",
+    [IR_OPCODE_MUL]  = "mul",
+    [IR_OPCODE_SDIV] = "sdiv",
     [IR_OPCODE_UDIV] = "udiv",
+    [IR_OPCODE_SREM] = "srem",
     [IR_OPCODE_UREM] = "urem",
-    [IR_OPCODE_MUL] = "mul",
-    [IR_OPCODE_AND] = "and",
-    [IR_OPCODE_OR] = "or",
-    [IR_OPCODE_XOR] = "xor",
-    [IR_OPCODE_SAR] = "sar",
-    [IR_OPCODE_SHR] = "shr",
-    [IR_OPCODE_SHL] = "shl",
-    // Comparisons
-    [IR_OPCODE_CEQZI32] = "ceqzi32",
-    [IR_OPCODE_CNEI32] = "cnei32",
-    [IR_OPCODE_CSLTI32] = "cslti32",
-    [IR_OPCODE_CULTI32] = "culti32",
-    // Memory
-    [IR_OPCODE_STORE8] = "store8",
-    [IR_OPCODE_STORE32] = "store32",
-    [IR_OPCODE_LOADU8] = "loadu8",
-    [IR_OPCODE_LOAD32] = "load32",
-    // Conversions
-    [EXTSW_INSTR] = "extsw",
-    // Cast and Copy
-    [COPY_INSTR] = "copy",
-    // Call
-    [CALL_INSTR] = "call",
-    // Other
-    [PAR_INSTR] = "par",
-    [ARG_INSTR] = "arg",
 
-    [PUSH_INSTR] = "push",
-    [POP_INSTR] = "pop",
+    /* Bitwise Operations */
+    [IR_OPCODE_AND]  = "and",
+    [IR_OPCODE_OR]   = "or",
+    [IR_OPCODE_XOR]  = "xor",
+    [IR_OPCODE_SHL]  = "shl",
+    [IR_OPCODE_LSHR] = "lshr",
+    [IR_OPCODE_ASHR] = "ashr",
+
+    /* Comparison Operations */
+    [IR_OPCODE_EQZ] = "eqz",
+    [IR_OPCODE_EQ]  = "eq",
+    [IR_OPCODE_NE]  = "ne",
+    [IR_OPCODE_SLT] = "slt",
+    [IR_OPCODE_ULT] = "ult",
+    [IR_OPCODE_SGT] = "sgt",
+    [IR_OPCODE_UGT] = "ugt",
+    [IR_OPCODE_SLE] = "sle",
+    [IR_OPCODE_ULE] = "ule",
+    [IR_OPCODE_SGE] = "sge",
+    [IR_OPCODE_UGE] = "uge",
+
+    /* Memory Operations */
+    [IR_OPCODE_STORE]  = "store",
+    [IR_OPCODE_LOAD]   = "load",
+    [IR_OPCODE_STORE8] = "store8",
+    [IR_OPCODE_ULOAD8] = "uload8",
+
+/* Function definitions and calls */
+    [IR_OPCODE_CALL] = "call",
+    [IR_OPCODE_PAR]  = "par",
+    [IR_OPCODE_ARG]  = "arg",
+
+    /* Other Operations */
+    [IR_OPCODE_COPY] = "copy",
+    [IR_OPCODE_PUSH] = "push",
+    [IR_OPCODE_POP]  = "pop",
 };
 
 void printfn(Fn *fn, FILE *f) {
-    char ktoc[] = " wlsd";
+    char *type_to_str[5] = {
+        "void",
+        "i32",
+        "i64",
+        "f32",
+        "f64",
+    };
     unsigned int n = 0;
 
-    fprintf(f, "function %c $%s() {\n", ktoc[fn->ret_type], fn->name);
+    fprintf(f, "function %s %s() {\n", type_to_str[fn->ret_type], fn->name);
     listNode *blk_node;
     listNode *blk_iter = listFirst(fn->blk_list);
     while ((blk_node = listNext(&blk_iter)) != NULL) {
         Blk *b = listNodeValue(blk_node);
-        fprintf(f, "@%s\n", b->name);
+        fprintf(f, "@%u\n", b->id);
         listNode *phi_node;
         if (b->phi_list != NULL) {
             listNode *phi_iter = listFirst(b->phi_list);
@@ -105,13 +117,14 @@ void printfn(Fn *fn, FILE *f) {
                 Phi *p = listNodeValue(phi_node);
                 fprintf(f, "\t");
                 printref(p->to, f);
-                fprintf(f, " =%c phi ", ktoc[p->type]);
+                fprintf(f, " = phi %s ", type_to_str[p->type]);
+                if (p->phi_arg_list == NULL) continue;
                 n = 0;
                 listNode *phi_arg_node;
                 listNode *phi_arg_iter = listFirst(p->phi_arg_list);
                 while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
                     Phi_arg *pa = listNodeValue(phi_arg_node);
-                    fprintf(f, "@%s ", pa->b->name);
+                    fprintf(f, "@%u ", pa->b->id);
                     printref(pa->r, f);
                     if (n == listLength(p->phi_arg_list)-1) {
                         fprintf(f, "\n");
@@ -121,7 +134,6 @@ void printfn(Fn *fn, FILE *f) {
                     }
                     n++;
                 }
-                fprintf(f, "\n");
             }
         }
         listNode *ins_node;
@@ -129,9 +141,8 @@ void printfn(Fn *fn, FILE *f) {
         while ((ins_node = listNext(&ins_iter)) != NULL) {
             Ins *i = listNodeValue(ins_node);
             fprintf(f, "\t");
-            if (i->op == IR_OPCODE_STORE32 || i->op == IR_OPCODE_STORE8) {
-                fprintf(f, "%s", optab[i->op]);
-                fprintf(f, " ");
+            if (i->op == IR_OPCODE_STORE || i->op == IR_OPCODE_STORE8) {
+                fprintf(f, "%s ", optab[i->op]);
                 printref(i->to, f);
                 fprintf(f, ", ");
                 printref(i->arg[0], f);
@@ -139,11 +150,11 @@ void printfn(Fn *fn, FILE *f) {
                 printref(i->arg[1], f);
                 fprintf(f, ")");
             } else {
-                if (i->to.type != REF_TYPE_UNDEFINED) {
+                if (i->op != IR_OPCODE_ARG) {
                     printref(i->to, f);
-                    fprintf(f, " =%c ", ktoc[i->type]);
+                    fprintf(f, " = ");
                 }
-                fprintf(f, "%s", optab[i->op]);
+                fprintf(f, "%s %s", optab[i->op], type_to_str[i->type]);
                 if (i->arg[0].type != REF_TYPE_UNDEFINED) {
                     fprintf(f, " ");
                     printref(i->arg[0], f);
@@ -169,13 +180,13 @@ void printfn(Fn *fn, FILE *f) {
                 fprintf(f, "hlt\n");
                 break;
             case JMP_JUMP_TYPE:
-                fprintf(f, "jmp @%s\n", b->succ[0]->name);
+                fprintf(f, "jmp @%u\n", b->succ[0]->id);
                 break;
             case JNZ_JUMP_TYPE:
                 fprintf(f, "jnz ");
                 printref(b->jmp.arg, f);
                 fprintf(f, ", ");
-                fprintf(f, "@%s, @%s\n", b->succ[0]->name, b->succ[1]->name);
+                fprintf(f, "@%u, @%u\n", b->succ[0]->id, b->succ[1]->id);
                 break;
             default:
                 panic();
@@ -192,7 +203,7 @@ void printref(Ref r, FILE *f) {
     case REF_TYPE_TMP:
         if (r.as.tmp_node != NULL) {
             Tmp *t = listNodeValue(r.as.tmp_node);
-            fprintf(f, "%%%s", t->name);
+            fprintf(f, "t%u", t->id);
         }
         break;
     case REF_TYPE_INT32_CONST:
@@ -217,7 +228,6 @@ void printref(Ref r, FILE *f) {
         panic();
     }
 }
-*/
 
 /*
 static void err(char *s, ...) {
@@ -239,50 +249,45 @@ Ref newTemp(Fn *f) {
     listSetFreeMethod(tmp->use_list, free);
     listAddNodeTail(f->tmp_list, tmp);
     tmp->i = NULL;
+    tmp->id = f->next_tmp_id++;
     listNode *tmp_node = listLast(f->tmp_list);
     return (Ref) { .type = REF_TYPE_TMP, .as.tmp_node = tmp_node };
 }
 
-Blk *newBlock(uint32_t nlocals) {
+Blk *newBlock(Fn *f) {
 
-    Blk *b = xmalloc(sizeof(struct Blk));
+    Blk *b = malloc(sizeof(struct Blk));
+    if (b == NULL) return NULL;
+    memset(b, 0, sizeof(struct Blk));
     b->phi_list = listCreate();
     listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
     b->ins_list = listCreate();
     listSetFreeMethod(b->ins_list, free);
-    b->is_loop_header = false;
-    b->loop_end_blk_list = NULL;
-    b->live_in = NULL;
-    b->jmp.type = NONE_JUMP_TYPE;
-    b->jmp.arg = UNDEFINED_REF;
-    b->succ[0] = NULL;
-    b->succ[1] = NULL;
     b->preds = listCreate();
-    b->locals = NULL;
-    b->incomplete_phis = NULL;
-    if (nlocals > 0) {
-        b->locals = xcalloc(nlocals, sizeof(struct Ref));
-        b->incomplete_phis = xcalloc(nlocals, sizeof(listNode *));
-        for (uint32_t i = 0; i < nlocals; i++) {
+    b->id = f->next_blk_id++;
+    uint32_t n = f->local_count;
+    if (n > 0) {
+        b->locals = xcalloc(n, sizeof(struct Ref));
+        b->incomplete_phis = xcalloc(n, sizeof(listNode *));
+        for (uint32_t i = 0; i < n; i++) {
             b->locals[i] = UNDEFINED_REF;
             b->incomplete_phis[i] = NULL;
         }
     }
-    b->is_sealed = false;
-    b->text_start = NULL;
+
     return b;
 }
 
-Fn *newFunc(IRType ret_type, char *name, Blk *start) {
-    next_temp_id = 0;
-    Fn *f = xmalloc(sizeof(struct Fn));
+Fn *newFunc(IRType ret_type, char *name, uint32_t local_count) {
+    Fn *f = malloc(sizeof(struct Fn));
+    if (f == NULL) return NULL;
+    memset(f, 0, sizeof(struct Fn));
     f->tmp_list = listCreate();
     listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
     f->blk_list = listCreate();
     listSetFreeMethod(f->blk_list, (void (*)(void *)) freeBlock);
-    listAddNodeTail(f->blk_list, start);
-    f->start = start;
     f->ret_type = ret_type;
+    f->local_count = local_count;
     strncpy(f->name, name, 16);
     return f;
 }
@@ -322,10 +327,8 @@ void ir_append_ins(Blk *b, IROpcode op, IRType type,
 void jmp(Fn *f, Blk *b, Blk *b0) {
     b->jmp.type = JMP_JUMP_TYPE;
     b->succ[0] = b0;
-    if (f->start != b) {
-        listAddNodeTail(f->blk_list, b);
-    }
     listAddNodeTail(b0->preds, b);
+    listAddNodeTail(f->blk_list, b);
     /*
     if (f->start == b0) {
         err("invalid jump to the start block");
@@ -334,19 +337,14 @@ void jmp(Fn *f, Blk *b, Blk *b0) {
 }
 
 void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
-    assert(b0->is_sealed == 0);
-    assert(b1->is_sealed == 0);
     b->jmp.type = JNZ_JUMP_TYPE;
     b->jmp.arg = r;
     b->succ[0] = b0;
     b->succ[1] = b1;
-    listNode *b_node = listFirst(f->blk_list);
-    if (f->start != b) {
-        listAddNodeTail(f->blk_list, b);
-        b_node = listLast(f->blk_list);
-    }
-    listAddNodeTail(b0->preds, b);
-    listAddNodeTail(b1->preds, b);
+    listNode *b_node = listLast(f->blk_list);
+    if (b0 != NULL) listAddNodeTail(b0->preds, b);
+    if (b1 != NULL) listAddNodeTail(b1->preds, b);
+    listAddNodeTail(f->blk_list, b);
 
     if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
         addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
@@ -359,30 +357,23 @@ void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
 }
 
 void ret(Fn *f, Blk *b) {
-    if (f->start != b) {
-        listAddNodeTail(f->blk_list, b);
-    }
+    listAddNodeTail(f->blk_list, b);
     b->jmp.type = RET0_JUMP_TYPE;
 }
 
 void retRef(Fn *f, Blk *b, Ref r) {
-    listNode *b_node = listFirst(f->blk_list);
-    if (f->start != b) {
-        listAddNodeTail(f->blk_list, b);
-        b_node = listLast(f->blk_list);
-    }
+    listNode *b_node = listLast(f->blk_list);
     b->jmp.type = RET1_JUMP_TYPE;
     b->jmp.arg = r;
+    listAddNodeTail(f->blk_list, b);
     if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
         addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
     }
 }
 
 void halt(Fn *f, Blk *b) {
-    if (f->start != b) {
-        listAddNodeTail(f->blk_list, b);
-    }
     b->jmp.type = HALT_JUMP_TYPE;
+    listAddNodeTail(f->blk_list, b);
 }
 
 void newFuncCallArg(Blk *b, IRType type, Ref r) {
@@ -405,8 +396,7 @@ listNode *newPhi(Blk *b, Ref temp, IRType type) {
     phi->to = temp;
     phi->type = type;
     phi->block = b;
-    phi->phi_arg_list = listCreate();
-    listSetFreeMethod(phi->phi_arg_list, free);
+    phi->phi_arg_list = NULL;
     listAddNodeTail(b->phi_list, phi);
     return listLast(b->phi_list);
 }
@@ -416,6 +406,10 @@ void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg) {
     Phi_arg *pa = xmalloc(sizeof(struct Phi_arg));
     pa->r = arg;
     pa->b = b;
+    if (phi->phi_arg_list == NULL) {
+        phi->phi_arg_list = listCreate();
+        listSetFreeMethod(phi->phi_arg_list, free);
+    }
     listAddNodeTail(phi->phi_arg_list, pa);
     if (arg.type == REF_TYPE_TMP && arg.as.tmp_node != NULL) {
         addUsage(listNodeValue(arg.as.tmp_node), UPhi, (Use_ptr) { .phi = phi_node });

@@ -712,9 +712,6 @@ static WASMErr_t validate_call(ValidateCtx *ctx) {
 
     WASMFunction *called_func = &ctx->m->functions[funcidx];
     WASMFuncType *t = called_func->type;
-    if (ctx->opd_size < t->param_count) {
-        return WASM_ERR;
-    }
     for (uint32_t i = 0; i < t->param_count; i++) {
         WASMValtype valtype = t->param_types[t->param_count - i - 1];
         ERR_CHECK(pop_expect_opd(ctx, (OperandType)valtype, NULL));

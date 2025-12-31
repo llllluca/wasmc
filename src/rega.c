@@ -247,7 +247,7 @@ static void insert_move_sequence(Fn* f,
         pred->succ[0] != NULL && pred->succ[1] != NULL) {
         /* succ has pred and other predecessors and
          * pred has succ and another one successor */
-        Blk *b = newBlock(0);
+        Blk *b = newBlock(f);
         if (pred->succ[0] == succ) {
             pred->succ[0] = b;
         } else {
