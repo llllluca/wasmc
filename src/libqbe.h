@@ -142,6 +142,7 @@ typedef struct Fn {
     unsigned int next_tmp_id;
     unsigned int next_blk_id;
     uint32_t local_count;
+    bool regs_to_preserve[RV32_NUM_REG];
 } Fn;
 
 typedef enum IROpcode {

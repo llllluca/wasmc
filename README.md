@@ -129,7 +129,7 @@ riscv32-unknown-linux-gnu-objdump -r fib2.o
 
 Disassemble a flat riscv32 binary file using objdump:
 ```bash
- riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
+riscv32-unknown-linux-gnu-objdump -b binary -m riscv:rv32 -D text.bin
 ```
 
 ### How to register the AOT format as a [miscellaneous binary format][binfmt_msc].

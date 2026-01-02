@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     fclose(input);
 
     WASMModule m;
-    wasm_decode(&m, wasm_buf, wasm_len);
+    if (wasm_decode(&m, wasm_buf, wasm_len)) return 1;
     uint8_t *buf;
     uint32_t len;
     if (compile(&m, &rv32, &buf, &len)) return 1;

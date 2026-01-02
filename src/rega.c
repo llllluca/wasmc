@@ -604,19 +604,22 @@ static void spill_at_interval(list *active,
     }
 }
 
-static bool try_assign_reg(live_interval *i, rv32_reg_pool *r) {
+static bool try_assign_reg(Fn *f, live_interval *i, rv32_reg_pool *r) {
     for (unsigned int j = 0; j < RV32_NUM_REG; j++) {
         if (r->pool[j]) {
             r->pool[j] = false;
             r->size--;
             i->assign.as.reg = j;
+            if (rv32_is_callee_saved[j]) {
+                f->regs_to_preserve[j] = true;
+            }
             return false;
         }
     }
     return true;
 }
 
-static void assign_reg(live_interval *i,
+static void assign_reg(Fn *f, live_interval *i,
     rv32_reg_pool *gpr, rv32_reg_pool *argr) {
 
     bool err;
@@ -628,6 +631,7 @@ static void assign_reg(live_interval *i,
                 argr->pool[h] = false;
                 argr->size--;
                 i->assign.as.reg = h;
+
                 return;
             }
         } else {
@@ -635,14 +639,17 @@ static void assign_reg(live_interval *i,
                 gpr->pool[h] = false;
                 gpr->size--;
                 i->assign.as.reg = h;
+                if (rv32_is_callee_saved[h]) {
+                    f->regs_to_preserve[h] = true;
+                }
                 return;
             }
         }
     }
 
-    err = try_assign_reg(i, gpr);
+    err = try_assign_reg(f, i, gpr);
     if (!err) return;
-    err = try_assign_reg(i, argr);
+    err = try_assign_reg(f, i, argr);
     if (!err) return;
     assert(0);
 }
@@ -875,7 +882,7 @@ void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr) {
         if (listLength(active) == nreg) {
             spill_at_interval(active, i, &f->num_stack_slots);
         } else {
-            assign_reg(i, gpr, argr);
+            assign_reg(f, i, gpr, argr);
             active_insert(active, i);
         }
     }

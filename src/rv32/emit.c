@@ -15,9 +15,44 @@ static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx);
 
 #define ERR_CHECK(x) if (x) return AOT_ERR;
 
+const bool rv32_is_callee_saved[RV32_NUM_REG] = {
+    [ZERO] = false,
+    [RA]   = false,
+    [SP]   = true,
+    [GP]   = false,
+    [TP]   = false,
+    [T0]   = false,
+    [T1]   = false,
+    [T2]   = false,
+    [FP]   = true,
+    [S1]   = true,
+    [A0]   = false,
+    [A1]   = false,
+    [A2]   = false,
+    [A3]   = false,
+    [A4]   = false,
+    [A5]   = false,
+    [A6]   = false,
+    [A7]   = false,
+    [S2]   = true,
+    [S3]   = true,
+    [S4]   = true,
+    [S5]   = true,
+    [S6]   = true,
+    [S7]   = true,
+    [S8]   = true,
+    [S9]   = true,
+    [S10]  = true,
+    [S11]  = true,
+    [T3]   = false,
+    [T4]   = false,
+    [T5]   = false,
+    [T6]   = false,
+};
+
 const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG] = {
     T0, T1, T2, T3, T4,
-    S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, 
+    S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11,
 };
 
 const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG] = {
@@ -343,6 +378,9 @@ static AOTErr_t emitins(AOTModule *m, Ins *i) {
   |    ...      |
   +-------------+
   |   padding   |
+  +-------------+
+  | callee-save |
+  |  registers  |
   +=============+
 
 */
@@ -409,6 +447,12 @@ static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx) {
     assert(fn->num_stack_slots == 0);
     // TODO: why 16 aligned?
     unsigned int frame = (8 + 4 * fn->num_stack_slots + 15) & ~15;
+    for (unsigned int i = 0; i < RV32_NUM_REG; i++) {
+        if (fn->regs_to_preserve[i]) {
+            frame += 4;
+        }
+    }
+    frame = (frame + 15) & ~15;
     /* 2047 is the maximum positive number that can be represent
      * in the imm field of the addi instruction */
     if (frame <= 2047) {
@@ -416,6 +460,13 @@ static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx) {
     } else {
         if (emit_li(m, T6, frame)) goto ERROR;
         if (emit(m, RV32_SUB(SP, SP, T6))) goto ERROR;
+    }
+
+    for (unsigned int i = 0, off = 0; i < RV32_NUM_REG; i++) {
+        if (fn->regs_to_preserve[i]) {
+            if (emit(m, RV32_SW(i, off, SP))) goto ERROR;
+            off += 4;
+        }
     }
 
     listNode *blk_node;
@@ -435,12 +486,20 @@ static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx) {
                 if (emit(m, RV32_EBREAK)) goto ERROR;
             } break;
             case RET0_JUMP_TYPE: {
+                for (unsigned int i = 0, off = 0; i < RV32_NUM_REG; i++) {
+                    if (fn->regs_to_preserve[i]) {
+                        if (emit(m, RV32_LW(i, off, SP))) goto ERROR;
+                        off += 4;
+                    }
+                }
+
                 if (frame <= 2047) {
                     if (emit(m, RV32_ADDI(SP, SP, frame))) goto ERROR;
                 } else {
                     if (emit_li(m, T6, frame)) goto ERROR;
                     if (emit(m, RV32_SUB(SP, SP, T6))) goto ERROR;
                 }
+
                 /* restore the saved fp */
                 if (emit(m, RV32_LW(RA, 4, FP))) goto ERROR;
                 /* restore the saved ra */

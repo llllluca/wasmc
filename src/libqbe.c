@@ -118,7 +118,10 @@ void printfn(Fn *fn, FILE *f) {
                 fprintf(f, "\t");
                 printref(p->to, f);
                 fprintf(f, " = phi %s ", type_to_str[p->type]);
-                if (p->phi_arg_list == NULL) continue;
+                if (p->phi_arg_list == NULL) {
+                    fprintf(f, "\n");
+                    continue;
+                };
                 n = 0;
                 listNode *phi_arg_node;
                 listNode *phi_arg_iter = listFirst(p->phi_arg_list);

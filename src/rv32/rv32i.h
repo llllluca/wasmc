@@ -40,6 +40,8 @@ typedef enum {
     RV32_NUM_REG
 } rv32_reg;
 
+extern const bool rv32_is_callee_saved[RV32_NUM_REG];
+
 #define RV32_GP_NUM_REG 16
 extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
 

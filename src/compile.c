@@ -194,6 +194,22 @@ static CompileErr_t compile_local_set(CompileCtx *ctx) {
     return COMPILE_OK;
 }
 
+static CompileErr_t compile_local_tee(CompileCtx *ctx) {
+
+    WASMFunction *f = ctx->wasm_func;
+    uint32_t localidx;
+    readULEB128_u32(&ctx->offset, f->code_end, &localidx);
+
+    ControlStackEntry *top = top_ctrl(ctx);
+    if (top->unreachable) return COMPILE_OK;
+    assert(ctx->curr_block != NULL);
+
+    OperandStackEntry *opd = top_opd(ctx);
+    write_local(ctx, ctx->curr_block, localidx, opd->r);
+
+    return COMPILE_OK;
+}
+
 static CompileErr_t compile_global_get(CompileCtx *ctx) {
 
     uint32_t globalidx;
@@ -677,6 +693,9 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
     Blk *select_arg1 = newBlock(ctx->ir_func);
     Blk *select_arg2 = newBlock(ctx->ir_func);
     Blk *end = newBlock(ctx->ir_func);
+    seal_block(ctx, select_arg1);
+    seal_block(ctx, select_arg2);
+    seal_block(ctx, end);
 
     assert(ctx->curr_block != NULL);
     jnz(ctx->ir_func, ctx->curr_block, cond->r, select_arg1, select_arg2);
@@ -716,13 +735,17 @@ static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype t, IROpcode op) {
     if (result == NULL) return COMPILE_ERR;
 
     OperandStackEntry *memidx = pop_opd(ctx);
-    Ref ptr = newTemp(ctx->ir_func);
-    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
-    free(memidx);
-    //TODO: out of bound memory check
-
     Ref r = newTemp(ctx->ir_func);
-    ir_append_ins(b, op, cast(t), r, INT32_CONST(offset), ptr);
+    if (memidx->r.type == REF_TYPE_INT32_CONST) {
+        uint32_t c = memidx->r.as.int32_const + offset;
+        ir_append_ins(b, op, cast(t), r, INT32_CONST(c), ctx->mem0_ptr);
+    } else {
+        Ref ptr = newTemp(ctx->ir_func);
+        APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
+        ir_append_ins(b, op, cast(t), r, INT32_CONST(offset), ptr);
+    }
+    //TODO: out of bound memory check
+    free(memidx);
 
     result->t = t;
     result->r = r;
@@ -748,9 +771,14 @@ static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
     value  = pop_opd(ctx);
     memidx = pop_opd(ctx);
 
-    Ref ptr = newTemp(ctx->ir_func);
-    APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
-    ir_append_ins(b, op, cast(t), value->r, INT32_CONST(offset), ptr);
+    if (memidx->r.type == REF_TYPE_INT32_CONST) {
+        uint32_t c = memidx->r.as.int32_const + offset;
+        ir_append_ins(b, op, cast(t), value->r, INT32_CONST(c), ctx->mem0_ptr);
+    } else {
+        Ref ptr = newTemp(ctx->ir_func);
+        APPEND_ADD(b, IR_TYPE_I32, ptr, ctx->mem0_ptr, memidx->r);
+        ir_append_ins(b, op, cast(t), value->r, INT32_CONST(offset), ptr);
+    }
     free(value);
     free(memidx);
 
@@ -886,6 +914,8 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
         return compile_local_get(ctx);
     case WASM_OPCODE_LOCAL_SET:
         return compile_local_set(ctx);
+    case WASM_OPCODE_LOCAL_TEE:
+        return compile_local_tee(ctx);
     case WASM_OPCODE_GLOBAL_GET:
         return compile_global_get(ctx);
     case WASM_OPCODE_GLOBAL_SET:
@@ -1144,7 +1174,6 @@ static IRType cast(WASMValtype t) {
 static void write_local(CompileCtx *ctx, Blk *b, uint32_t localidx, Ref value) {
 
     (void)ctx;
-    b->locals[localidx] = value;
 
     Ref *ptr = &b->locals[localidx];
     Use_ptr u = { .local = ptr };
@@ -1154,6 +1183,8 @@ static void write_local(CompileCtx *ctx, Blk *b, uint32_t localidx, Ref value) {
     if (value.type == REF_TYPE_TMP) {
         addUsage(listNodeValue(value.as.tmp_node), ULocal, u);
     }
+
+    b->locals[localidx] = value;
 }
 
 static Ref read_local(CompileCtx *ctx, Blk *b, uint32_t localidx) {
@@ -1352,7 +1383,7 @@ static Ref try_remove_trivial_phi(CompileCtx *ctx, listNode *phi_node) {
 }
 
 static void seal_block(CompileCtx *ctx, Blk *b) {
-    assert(b->is_sealed == 0);
+    assert(!b->is_sealed);
     for (uint32_t i = 0; i < ctx->ir_func->local_count; i++) {
         if (b->incomplete_phis[i] == NULL) continue;
         add_phi_operands(ctx, b->incomplete_phis[i], i);

@@ -686,6 +686,17 @@ static WASMErr_t validate_local_set(ValidateCtx *ctx) {
     return WASM_OK;
 }
 
+static WASMErr_t validate_local_tee(ValidateCtx *ctx) {
+    uint32_t localidx;
+    ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &localidx));
+    uint32_t n = ctx->f->local_count + ctx->t->param_count;
+    if (localidx >= n) return WASM_ERR;
+    WASMValtype t = wasm_valtype_of(ctx->f, localidx);
+    ERR_CHECK(pop_expect_opd(ctx, (OperandType)t, NULL));
+    ERR_CHECK(push_opd(ctx, (OperandType)t));
+    return WASM_OK;
+}
+
 static WASMErr_t validate_local_get(ValidateCtx *ctx) {
     uint32_t localidx;
     ERR_CHECK(readULEB128_u32(&ctx->offset, ctx->code_end, &localidx));
@@ -836,6 +847,8 @@ static WASMErr_t validate_instr(ValidateCtx *ctx, uint8_t opcode) {
         return validate_local_get(ctx);
     case WASM_OPCODE_LOCAL_SET:
         return validate_local_set(ctx);
+    case WASM_OPCODE_LOCAL_TEE:
+        return validate_local_tee(ctx);
     case WASM_OPCODE_GLOBAL_GET:
         return validate_global_set(ctx);
     case WASM_OPCODE_GLOBAL_SET:
@@ -1064,6 +1077,7 @@ WASMErr_t wasm_decode(WASMModule *m, uint8_t *start, uint32_t len) {
     }
 
     free_sections(sections_list);
+    sections_list = NULL;
 
     for (uint32_t i = 0; i < m->function_count; i++) {
         if (validate_fn(m, i)) goto ERROR;
