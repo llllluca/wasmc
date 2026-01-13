@@ -27,16 +27,21 @@ int main(int argc, char **argv) {
 
     WASMModule m;
     if (wasm_decode(&m, wasm_buf, wasm_len)) return 1;
+    /*
     uint8_t *buf;
     uint32_t len;
     if (compile(&m, &rv32, &buf, &len)) return 1;
+    */
+    if (compile(&m, NULL, NULL, NULL)) return 1;
 
+    /*
     FILE *output = fopen("a.aot", "w");
     fwrite(buf, 1, len, output);
     fclose(output);
 
-    wasm_free(&m);
-    free(wasm_buf);
     free(buf);
+    */
+    free(wasm_buf);
+    wasm_free(&m);
     return EXIT_SUCCESS;
 }

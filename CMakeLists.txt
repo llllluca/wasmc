@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(wasmc LANGUAGES C)
 
-add_compile_options(-ggdb -Wall -Wextra -Wpedantic)
+add_compile_options(-ggdb -std=gnu17 -Wall -Wextra)
 
 add_executable(
     wasmc
@@ -9,10 +9,10 @@ add_executable(
     src/wasm.c
     src/compile.c
     src/libqbe.c
-    src/utils.c
-    src/adlist.c
     src/rega.c
-    src/aot.c
+    #src/adlist.c
+    #src/rega.c
+    #src/aot.c
     src/rv32/emit.c
 )
 

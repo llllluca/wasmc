@@ -4,49 +4,17 @@
 #include <assert.h>
 #include <stdlib.h>
 
-/* utils.c */
-extern void panic(void);
-extern void *xcalloc(size_t nmemb, size_t size);
-extern void *xmalloc(size_t size);
-
-void printref(Ref r, FILE *f);
-
 char *rname[] = {
-    [ZERO] = "zero",
-    [RA] = "ra",
-    [SP] = "sp",
-    [GP] = "gp",
-    [TP] = "tp",
-    [T0] = "t0",
-    [T1] = "t1",
-    [T2] = "t2",
-    [FP] = "fp",
-    [S1] = "s1",
-    [A0] = "a0",
-    [A1] = "a1",
-    [A2] = "a2",
-    [A3] = "a3",
-    [A4] = "a4",
-    [A5] = "a5",
-    [A6] = "a6",
-    [A7] = "a7",
-    [S2] = "s2",
-    [S3] = "s3",
-    [S4] = "s4",
-    [S5] = "s5",
-    [S6] = "s6",
-    [S7] = "s7",
-    [S8] = "s8",
-    [S9] = "s9",
-    [S10] = "s10",
-    [S11] = "s11",
-    [T3] = "t3",
-    [T4] = "t4",
-    [T5] = "t5",
-    [T6] = "t6",
+    [ZERO] = "zero", [RA] = "ra",   [SP] = "sp",   [GP] = "gp", [TP] = "tp",
+    [T0] = "t0",     [T1] = "t1",   [T2] = "t2",   [FP] = "fp", [S1] = "s1",
+    [A0] = "a0",     [A1] = "a1",   [A2] = "a2",   [A3] = "a3", [A4] = "a4",
+    [A5] = "a5",     [A6] = "a6",   [A7] = "a7",   [S2] = "s2", [S3] = "s3",
+    [S4] = "s4",     [S5] = "s5",   [S6] = "s6",   [S7] = "s7", [S8] = "s8",
+    [S9] = "s9",     [S10] = "s10", [S11] = "s11", [T3] = "t3", [T4] = "t4",
+    [T5] = "t5",     [T6] = "t6",
 };
 
-const char *optab[] = {
+static const char *optab[] = {
     /* Integer Arithmetic Operations */
     [IR_OPCODE_ADD]  = "add",
     [IR_OPCODE_SUB]  = "sub",
@@ -94,378 +62,716 @@ const char *optab[] = {
     [IR_OPCODE_POP]  = "pop",
 };
 
-void printfn(Fn *fn, FILE *f) {
-    char *type_to_str[5] = {
-        "void",
-        "i32",
-        "i64",
-        "f32",
-        "f64",
-    };
-    unsigned int n = 0;
+static char *type2str(IRType type) {
+    switch (type) {
+    case IR_TYPE_VOID: return "void";
+    case IR_TYPE_I32: return "i32";
+    case IR_TYPE_I64: return "i64";
+    case IR_TYPE_F32: return "f32";
+    case IR_TYPE_F64: return "f64";
+    default:
+        assert(0);
+    }
+}
+void ir_print_location(Location *loc, FILE *f) {
+    switch (loc->type) {
+    case LOCATION_TYPE_NONE:
+        fprintf(f, "LOCATION_NONE");
+        break;
+    case LOCATION_TYPE_REGISTER:
+        fprintf(f, "%s", rname[loc->as.reg]);
+        break;
+    case LOCATION_TYPE_STACK_SLOT:
+        fprintf(f, "STACK_SLOT(%u)", loc->as.stack_slot);
+        break;
+    }
+}
 
-    fprintf(f, "function %s %s() {\n", type_to_str[fn->ret_type], fn->name);
-    listNode *blk_node;
-    listNode *blk_iter = listFirst(fn->blk_list);
-    while ((blk_node = listNext(&blk_iter)) != NULL) {
-        Blk *b = listNodeValue(blk_node);
-        fprintf(f, "@%u\n", b->id);
-        listNode *phi_node;
-        if (b->phi_list != NULL) {
-            listNode *phi_iter = listFirst(b->phi_list);
-            while ((phi_node = listNext(&phi_iter)) != NULL) {
-                Phi *p = listNodeValue(phi_node);
-                fprintf(f, "\t");
-                printref(p->to, f);
-                fprintf(f, " = phi %s ", type_to_str[p->type]);
-                if (p->phi_arg_list == NULL) {
-                    fprintf(f, "\n");
-                    continue;
-                };
-                n = 0;
-                listNode *phi_arg_node;
-                listNode *phi_arg_iter = listFirst(p->phi_arg_list);
-                while ((phi_arg_node = listNext(&phi_arg_iter)) != NULL) {
-                    Phi_arg *pa = listNodeValue(phi_arg_node);
-                    fprintf(f, "@%u ", pa->b->id);
-                    printref(pa->r, f);
-                    if (n == listLength(p->phi_arg_list)-1) {
-                        fprintf(f, "\n");
-                        break;
-                    } else {
-                        fprintf(f, ", ");
-                    }
-                    n++;
-                }
-            }
+void ir_print_ref(IRReference r, FILE *f) {
+    switch (r.type) {
+    case IR_REF_TYPE_UNDEFINED:
+        fprintf(f, "UNDEFINED");
+        break;
+    case IR_REF_TYPE_TMP:
+        fprintf(f, "%%t%u", r.as.tmp_id);
+        break;
+    case IR_REF_TYPE_PHI:
+        fprintf(f, "%%t%u", r.as.phi->id);
+        break;
+    case IR_REF_TYPE_I32:
+        printf("%"PRIi32, r.as.i32);
+        break;
+    case IR_REF_TYPE_NAME:
+        printf("%s", r.as.name);
+        break;
+    case IR_REF_TYPE_LOCATION:
+        ir_print_location(r.as.location, f);
+        break;
+    default:
+        assert(0);
+    }
+}
+
+static void ir_print_phi(IRPhi *phi, FILE *f) {
+    fprintf(f, "\t%%t%"PRIu32, phi->id);
+    fprintf(f, " =%s phi ", type2str(phi->type));
+    IRPhiArg *phi_arg;
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+        fprintf(f, "@%u ", phi_arg->predecessor->id);
+        ir_print_ref(phi_arg->value, f);
+        if (phi_arg->next.next != &phi->phi_arg_list) {
+            fprintf(f, ",");
         }
-        listNode *ins_node;
-        listNode *ins_iter = listFirst(b->ins_list);
-        while ((ins_node = listNext(&ins_iter)) != NULL) {
-            Ins *i = listNodeValue(ins_node);
-            fprintf(f, "\t");
-            if (i->op == IR_OPCODE_STORE || i->op == IR_OPCODE_STORE8) {
-                fprintf(f, "%s ", optab[i->op]);
-                printref(i->to, f);
-                fprintf(f, ", ");
-                printref(i->arg[0], f);
-                fprintf(f, "(");
-                printref(i->arg[1], f);
-                fprintf(f, ")");
-            } else {
-                if (i->op != IR_OPCODE_ARG) {
-                    printref(i->to, f);
-                    fprintf(f, " = ");
-                }
-                fprintf(f, "%s %s", optab[i->op], type_to_str[i->type]);
-                if (i->arg[0].type != REF_TYPE_UNDEFINED) {
-                    fprintf(f, " ");
-                    printref(i->arg[0], f);
-                }
-                if (i->arg[1].type != REF_TYPE_UNDEFINED) {
-                    fprintf(f, ", ");
-                    printref(i->arg[1], f);
-                }
-            }
+    }
+    printf("\n");
+}
+
+static void ir_print_instr(IRInstr *i, FILE *f) {
+    fprintf(f, "%u:\t", i->seqnum);
+    switch (i->op) {
+    case IR_OPCODE_STORE:
+    case IR_OPCODE_STORE8:
+        fprintf(f, "%s ", optab[i->op]);
+        ir_print_ref(i->to, f);
+        fprintf(f, ", ");
+        ir_print_ref(i->arg[0], f);
+        fprintf(f, "(");
+        ir_print_ref(i->arg[1], f);
+        fprintf(f, ")");
+        break;
+    case IR_OPCODE_ARG:
+        fprintf(f, "arg %s ", type2str(i->type));
+        ir_print_ref(i->arg[0], f);
+        break;
+    default:
+        ir_print_ref(i->to, f);
+        fprintf(f, " =%s %s", type2str(i->type), optab[i->op]);
+        if (i->arg[0].type != IR_REF_TYPE_UNDEFINED) {
+            fprintf(f, " ");
+            ir_print_ref(i->arg[0], f);
+        }
+        if (i->arg[1].type != IR_REF_TYPE_UNDEFINED) {
+            fprintf(f, ", ");
+            ir_print_ref(i->arg[1], f);
+        }
+        break;
+    }
+    fprintf(f, "\n");
+}
+
+static void ir_print_jump(IRBlock *b, FILE *f) {
+    fprintf(f, "%u:\t", b->jump.seqnum);
+    switch (b->jump.type) {
+        case IR_JUMP_TYPE_RET0:
+            fprintf(f, "ret\n");
+            break;
+        case IR_JUMP_TYPE_RET1:
+            fprintf(f, "ret ");
+            ir_print_ref(b->jump.arg, f);
             fprintf(f, "\n");
+            break;
+        case IR_JUMP_TYPE_HALT:
+            fprintf(f, "hlt\n");
+            break;
+        case IR_JUMP_TYPE_JMP:
+            fprintf(f, "jmp @%u\n", b->succ[0]->id);
+            break;
+        case IR_JUMP_TYPE_JNZ:
+            fprintf(f, "jnz ");
+            ir_print_ref(b->jump.arg, f);
+            fprintf(f, ", @%u, @%u\n", b->succ[0]->id, b->succ[1]->id);
+            break;
+        default:
+            assert(0);
+    }
+}
+
+void ir_print_fn(IRFunction *fn, FILE *f) {
+
+    WASMFunction *wf = fn->wasm_func;
+    WASMFuncType *t = wf->type;
+    IRType return_type = t->result_count > 0 ? ir_cast(t->result_type) : IR_TYPE_VOID;
+    fprintf(f, "function %s %s() {\n", type2str(return_type), wf->name);
+
+    IRBlock *block;
+    list_for_each_entry(block, &fn->block_list, next) {
+        fprintf(f, "%u:@%u\n", block->seqnum, block->id);
+        IRPhi *phi;
+        list_for_each_entry(phi, &block->phi_list, next) {
+            ir_print_phi(phi, f);
         }
-        fprintf(f, "\t");
-        switch (b->jmp.type) {
-            case RET0_JUMP_TYPE:
-                fprintf(f, "ret\n");
-                break;
-            case RET1_JUMP_TYPE:
-                fprintf(f, "ret ");
-                printref(b->jmp.arg, f);
-                fprintf(f, "\n");
-                break;
-            case HALT_JUMP_TYPE:
-                fprintf(f, "hlt\n");
-                break;
-            case JMP_JUMP_TYPE:
-                fprintf(f, "jmp @%u\n", b->succ[0]->id);
-                break;
-            case JNZ_JUMP_TYPE:
-                fprintf(f, "jnz ");
-                printref(b->jmp.arg, f);
-                fprintf(f, ", ");
-                fprintf(f, "@%u, @%u\n", b->succ[0]->id, b->succ[1]->id);
-                break;
-            default:
-                panic();
+        IRInstr *instr;
+        list_for_each_entry(instr, &block->instr_list, next) {
+            ir_print_instr(instr, f);
         }
+        ir_print_jump(block, f);
     }
     fprintf(f, "}\n");
 }
 
-void printref(Ref r, FILE *f) {
-    switch (r.type) {
-    case REF_TYPE_UNDEFINED:
-        fprintf(f, "UNDEFINED_REF");
-        break;
-    case REF_TYPE_TMP:
-        if (r.as.tmp_node != NULL) {
-            Tmp *t = listNodeValue(r.as.tmp_node);
-            fprintf(f, "t%u", t->id);
+bool ir_add_usage(IRReference *ref) {
+    /* The list of uses of ref is only needed in the try_remove_trivial_phi() function.
+     * In the try_remove_trivial_phi() function you need to know the uses of ref
+     * defined in the left hand side of a phi statement. Hence we only record the uses
+     * of ref defined in the left hand size of a phi statement. */
+    if (ref->type == IR_REF_TYPE_PHI) {
+        IRUse *use = malloc(sizeof(struct IRUse));
+        if (use == NULL) return true;
+        use->ref = ref;
+        list_add(&use->next, &ref->as.phi->use_list);
+    }
+    return false;
+}
+
+void ir_rm_usage(IRReference *ref) {
+    if (ref->type != IR_REF_TYPE_PHI) return;
+    IRUse *use;
+    list_for_each_entry(use, &ref->as.phi->use_list, next) {
+        if (use->ref == ref) {
+            list_del(&use->next);
+            free(use);
+            break;
         }
-        break;
-    case REF_TYPE_INT32_CONST:
-        printf("%"PRIi32, r.as.int32_const);
-        break;
-    case REF_TYPE_NAME:
-        printf("%s", r.as.name);
-        break;
-    case REF_TYPE_LOCATION: {
-        switch (r.as.loc.type) {
-            case REGISTER:
-                fprintf(f, "%s", rname[r.as.loc.as.reg]);
-                break;
-            case STACK_SLOT:
-                fprintf(f, "Stack_Slot_%u", r.as.loc.as.stack_slot);
-                break;
-            default:
-                panic();
-        }
-    } break;
-    default:
-        panic();
     }
 }
 
-/*
-static void err(char *s, ...) {
-    va_list ap;
+IRFunction *ir_create_function(WASMFunction *wasm_func) {
 
-    va_start(ap, s);
-    fprintf(stderr, "qbe: ");
-    vfprintf(stderr, s, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-    exit(1);
-}
-*/
+    IRFunction *ir_func = malloc(sizeof(struct IRFunction));
+    if (ir_func == NULL) return NULL;
 
-Ref newTemp(Fn *f) {
+    /* Initialize the IRFunction */
+    ir_func->wasm_func = wasm_func;
+    ir_func->next_tmp_id = 0;
+    ir_func->tmp_count = 0;
+    ir_func->next_block_id = 0;
+    INIT_LIST_HEAD(&ir_func->block_list);
+    INIT_LIST_HEAD(&ir_func->working_block_list);
+    ir_func->stack_slot_count = 0;
+    memset(ir_func->regs_to_preserve, 0, RV32_NUM_REG);
+    uint32_t param_count = wasm_func->type->param_count;
+    ir_func->ir_local_count = wasm_func->local_count + param_count;
+    IRBlock *start = ir_create_sealed_block(ir_func);
+    if (start == NULL) {
+        ir_free_function(ir_func);
+        return NULL;
+    };
+    ir_func->start = start;
 
-    Tmp *tmp = xmalloc(sizeof(Tmp));
-    tmp->use_list = listCreate();
-    listSetFreeMethod(tmp->use_list, free);
-    listAddNodeTail(f->tmp_list, tmp);
-    tmp->i = NULL;
-    tmp->id = f->next_tmp_id++;
-    listNode *tmp_node = listLast(f->tmp_list);
-    return (Ref) { .type = REF_TYPE_TMP, .as.tmp_node = tmp_node };
-}
-
-Blk *newBlock(Fn *f) {
-
-    Blk *b = malloc(sizeof(struct Blk));
-    if (b == NULL) return NULL;
-    memset(b, 0, sizeof(struct Blk));
-    b->phi_list = listCreate();
-    listSetFreeMethod(b->phi_list, (void (*)(void *))freePhi);
-    b->ins_list = listCreate();
-    listSetFreeMethod(b->ins_list, free);
-    b->preds = listCreate();
-    b->id = f->next_blk_id++;
-    uint32_t n = f->local_count;
-    if (n > 0) {
-        b->locals = xcalloc(n, sizeof(struct Ref));
-        b->incomplete_phis = xcalloc(n, sizeof(listNode *));
-        for (uint32_t i = 0; i < n; i++) {
-            b->locals[i] = UNDEFINED_REF;
-            b->incomplete_phis[i] = NULL;
+    /* Initialize function parameters, the first parameter
+     * always hold a pointer to the struct WASMExecEnv (See WAMR code) */
+    ir_func->WASMExecEnv = IR_REF_TMP(ir_func);
+    bool err;
+    err = ir_append_instr1(start, IR_OPCODE_PAR, IR_TYPE_I32, ir_func->WASMExecEnv);
+    if (err) {
+        ir_free_function(ir_func);
+        return NULL;
+    }
+    WASMFuncType *t = wasm_func->type;
+    for (uint32_t i = 0; i < param_count; i++) {
+        IRType type = (IRType)t->param_types[i];
+        IRReference param = IR_REF_TMP(ir_func);
+        err = ir_append_instr1(start, IR_OPCODE_PAR, type, param);
+        if (err) {
+            ir_free_function(ir_func);
+            return NULL;
         }
+        /* Initialize locals that are function parameters */
+        start->locals[i] = param;
     }
 
-    return b;
+    /* Initialize other locals */
+    for (uint32_t i = 0; i < wasm_func->local_count; i++) {
+        uint32_t localidx = t->param_count + i;
+        WASMValtype valtype = wasm_valtype_of(wasm_func, localidx);
+        start->locals[localidx] = ir_get_default(valtype);
+    }
+
+    return ir_func;
 }
 
-Fn *newFunc(IRType ret_type, char *name, uint32_t local_count) {
-    Fn *f = malloc(sizeof(struct Fn));
-    if (f == NULL) return NULL;
-    memset(f, 0, sizeof(struct Fn));
-    f->tmp_list = listCreate();
-    listSetFreeMethod(f->tmp_list, (void (*)(void *)) freeTemp);
-    f->blk_list = listCreate();
-    listSetFreeMethod(f->blk_list, (void (*)(void *)) freeBlock);
-    f->ret_type = ret_type;
-    f->local_count = local_count;
-    strncpy(f->name, name, 16);
-    return f;
+static IRBlock *__ir_create_block(IRFunction *f) {
+    IRBlock *block = malloc(sizeof(struct IRBlock));
+    if (block == NULL) return NULL;
+    memset(block, 0, sizeof(struct IRBlock));
+    INIT_LIST_HEAD(&block->phi_list);
+    INIT_LIST_HEAD(&block->instr_list);
+    INIT_LIST_HEAD(&block->pred_list);
+    INIT_LIST_HEAD(&block->loop_end_block_list);
+    block->id = f->next_block_id++;
+    list_add_tail(&block->next, &f->working_block_list);
+    return block;
 }
 
 
-Ref newFuncParam(Fn *f, IRType type) {
-    Ref r = newTemp(f);
-    Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = IR_OPCODE_PAR;
-    ins->type = type;
-    ins->to = r;
-    ins->arg[0] = UNDEFINED_REF;
-    ins->arg[1] = UNDEFINED_REF;
-    listAddNodeTail(f->start->ins_list, ins);
-    return r;
+IRBlock *ir_create_sealed_block_without_locals(IRFunction *f) {
+
+    /* Initialize a new block */
+    IRBlock *block = __ir_create_block(f);
+    if (block == NULL) return NULL;
+
+    /* Seal the block */
+    block->is_sealed = true;
+
+    return block;
 }
 
-void ir_append_ins(Blk *b, IROpcode op, IRType type,
-                Ref arg0, Ref arg1, Ref arg2) {
+IRBlock *ir_create_sealed_block(IRFunction *f) {
 
-    Ins *ins = xmalloc(sizeof(struct Ins));
+    /* Initialize a new block */
+    IRBlock *block = __ir_create_block(f);
+    if (block == NULL) return NULL;
+
+    /* Seal the block */
+    block->is_sealed = true;
+
+    uint32_t n = f->ir_local_count;
+    if (n == 0) return block;
+
+    /* Inizialize the locals of the block */
+    block->locals = calloc(n, sizeof(struct IRReference));
+    if (block->locals == NULL) return NULL;
+    for (uint32_t i = 0; i < n; i++) {
+        block->locals[i] = IR_REF_UNDEFINED;
+    }
+
+    return block;
+}
+
+IRBlock *ir_create_block(IRFunction *f) {
+
+    /* Initialize a new block */
+    IRBlock *block = __ir_create_block(f);
+    if (block == NULL) return NULL;
+
+    uint32_t n = f->ir_local_count;
+    if (n == 0) return block;
+
+    /* Inizialize the locals of the block */
+    block->locals = calloc(n, sizeof(struct IRReference));
+    if (block->locals == NULL) return NULL;
+    for (uint32_t i = 0; i < n; i++) {
+        block->locals[i] = IR_REF_UNDEFINED;
+    }
+
+    /* Inizialize the incomplete_phi of the block,
+     * this step is only needed if the block is not sealed */
+    block->incomplete_phi = calloc(n, sizeof(IRPhi *));
+    if (block->incomplete_phi == NULL) return NULL;
+    for (uint32_t i = 0; i < n; i++) {
+        block->incomplete_phi[i] = NULL;
+    }
+
+    return block;
+}
+
+bool ir_append_instr1(IRBlock *b, IROpcode op, IRType type, IRReference to) {
+
+    return ir_append_instr3(b, op, type, to, IR_REF_UNDEFINED, IR_REF_UNDEFINED);
+}
+
+bool ir_append_instr2(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0) {
+
+    return ir_append_instr3(b, op, type, to, arg0, IR_REF_UNDEFINED);
+}
+
+bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type,
+                          IRReference to, IRReference arg0, IRReference arg1) {
+
+    IRInstr *ins = malloc(sizeof(struct IRInstr));
+    if (ins == NULL) return true;
     ins->op = op;
     ins->type = type;
-    ins->to = arg0;
-    ins->arg[0] = arg1;
-    ins->arg[1] = arg2;
-    listAddNodeTail(b->ins_list, ins);
-    listNode *ins_node = listLast(b->ins_list);
-    if (arg1.type == REF_TYPE_TMP && arg1.as.tmp_node != NULL) {
-        addUsage(listNodeValue(arg1.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
+    ins->to = to;
+    ins->arg[0] = arg0;
+    ins->arg[1] = arg1;
+    ins->seqnum = 0;
+    list_add_tail(&ins->next, &b->instr_list);
+    //TODO: add a comment here
+    bool err;
+    if (ins->op == IR_OPCODE_STORE || ins->op == IR_OPCODE_STORE8) {
+        err = ir_add_usage(&ins->to);
+        if (err) return NULL;
     }
-    if (arg2.type == REF_TYPE_TMP && arg2.as.tmp_node != NULL) {
-        addUsage(listNodeValue(arg2.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
-    }
+    err = ir_add_usage(&ins->arg[0]);
+    if (err) return true;
+    err = ir_add_usage(&ins->arg[1]);
+    if (err) return true;
+
+    return false;
 }
 
-void jmp(Fn *f, Blk *b, Blk *b0) {
-    b->jmp.type = JMP_JUMP_TYPE;
-    b->succ[0] = b0;
-    listAddNodeTail(b0->preds, b);
-    listAddNodeTail(f->blk_list, b);
-    /*
-    if (f->start == b0) {
-        err("invalid jump to the start block");
-    }
-    */
+bool ir_add_predecessor(IRBlock *block, IRBlock *pred) {
+    if (block == NULL) return false;
+    IRPredecessor *node = malloc(sizeof(struct IRPredecessor));
+    if (node == NULL) return true;
+    node->ptr = pred;
+    list_add_tail(&node->next, &block->pred_list);
+    block->pred_count++;
+    return false;
 }
 
-void jnz(Fn *f, Blk *b, Ref r, Blk *b0, Blk *b1) {
-    b->jmp.type = JNZ_JUMP_TYPE;
-    b->jmp.arg = r;
-    b->succ[0] = b0;
-    b->succ[1] = b1;
-    listNode *b_node = listLast(f->blk_list);
-    if (b0 != NULL) listAddNodeTail(b0->preds, b);
-    if (b1 != NULL) listAddNodeTail(b1->preds, b);
-    listAddNodeTail(f->blk_list, b);
-
-    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
-        addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
-    }
-    /*
-    if (f->start == b0 || f->start == b1) {
-        err("invalid jump to the start block");
-    }
-    */
+bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end) {
+    IRLoopEnd *node = malloc(sizeof(struct IRLoopEnd));
+    if (node == NULL) return true;
+    node->ptr = loop_end;
+    list_add_tail(&node->next, &block->loop_end_block_list);
+    return false;
 }
 
-void ret(Fn *f, Blk *b) {
-    listAddNodeTail(f->blk_list, b);
-    b->jmp.type = RET0_JUMP_TYPE;
+bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival) {
+
+    departure->jump.type = IR_JUMP_TYPE_JMP;
+    departure->succ[0] = arrival;
+
+    /* remove the 'departure' block from the working block list */
+    list_del(&departure->next);
+    list_add_tail(&departure->next, &f->block_list);
+
+    bool err = ir_add_predecessor(arrival, departure);
+    if (err) return true;
+
+    return false;
 }
 
-void retRef(Fn *f, Blk *b, Ref r) {
-    listNode *b_node = listLast(f->blk_list);
-    b->jmp.type = RET1_JUMP_TYPE;
-    b->jmp.arg = r;
-    listAddNodeTail(f->blk_list, b);
-    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
-        addUsage(listNodeValue(r.as.tmp_node), UJmp, (Use_ptr) { .blk = b_node });
-    }
+bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
+            IRBlock *arg_not_zero_arrival, IRBlock *arg_is_zero_arrival) {
+
+    departure->jump.type = IR_JUMP_TYPE_JNZ;
+    departure->jump.arg = arg;
+    departure->succ[0] = arg_not_zero_arrival;
+    departure->succ[1] = arg_is_zero_arrival;
+
+    /* remove the 'departure' block from the working block list */
+    list_del(&departure->next);
+    list_add_tail(&departure->next, &f->block_list);
+
+    bool err = ir_add_usage(&departure->jump.arg);
+    if (err) return true;
+
+    err = ir_add_predecessor(arg_not_zero_arrival, departure);
+    if (err) return true;
+
+    err = ir_add_predecessor(arg_is_zero_arrival, departure);
+    if (err) return true;
+
+    return false;
 }
 
-void halt(Fn *f, Blk *b) {
-    b->jmp.type = HALT_JUMP_TYPE;
-    listAddNodeTail(f->blk_list, b);
+void ir_ret0(IRFunction *f, IRBlock *block) {
+
+    block->jump.type = IR_JUMP_TYPE_RET0;
+    /* remove the block from the working block list */
+    list_del(&block->next);
+    list_add_tail(&block->next, &f->block_list);
 }
 
-void newFuncCallArg(Blk *b, IRType type, Ref r) {
+bool ir_ret1(IRFunction *f, IRBlock *block, IRReference return_value) {
 
-    Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = IR_OPCODE_ARG;
-    ins->type = type;
-    ins->to = UNDEFINED_REF;
-    ins->arg[0] = r;
-    ins->arg[1] = UNDEFINED_REF;
-    listAddNodeTail(b->ins_list, ins);
-    listNode *ins_node = listLast(b->ins_list);
-    if (r.type == REF_TYPE_TMP && r.as.tmp_node != NULL) {
-        addUsage(listNodeValue(r.as.tmp_node), UIns, (Use_ptr) { .ins = ins_node });
-    }
+    block->jump.type = IR_JUMP_TYPE_RET1;
+    block->jump.arg = return_value;
+    /* remove the block from the working block list */
+    list_del(&block->next);
+    list_add_tail(&block->next, &f->block_list);
+    bool err = ir_add_usage(&block->jump.arg);
+    if (err) return true;
+
+    return false;
 }
 
-listNode *newPhi(Blk *b, Ref temp, IRType type) {
-    Phi *phi = xmalloc(sizeof(struct Phi));
-    phi->to = temp;
+void ir_halt(IRFunction *f, IRBlock *block) {
+
+    block->jump.type = IR_JUMP_TYPE_HALT;
+    /* remove the block from the working block list */
+    list_del(&block->next);
+    list_add_tail(&block->next, &f->block_list);
+}
+
+IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type) {
+
+    IRPhi *phi = malloc(sizeof(struct IRPhi));
+    if (phi == NULL) return NULL;
+    phi->id = f->next_tmp_id++;
+    f->tmp_count++;
     phi->type = type;
-    phi->block = b;
-    phi->phi_arg_list = NULL;
-    listAddNodeTail(b->phi_list, phi);
-    return listLast(b->phi_list);
+    phi->block = block;
+    INIT_LIST_HEAD(&phi->phi_arg_list);
+    INIT_LIST_HEAD(&phi->use_list);
+    list_add_tail(&phi->next, &block->phi_list);
+    return phi;
 }
 
-void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg) {
-    Phi *phi = listNodeValue(phi_node);
-    Phi_arg *pa = xmalloc(sizeof(struct Phi_arg));
-    pa->r = arg;
-    pa->b = b;
-    if (phi->phi_arg_list == NULL) {
-        phi->phi_arg_list = listCreate();
-        listSetFreeMethod(phi->phi_arg_list, free);
+bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor) {
+
+    assert(predecessor != NULL);
+    IRPhiArg *phi_arg = malloc(sizeof(struct IRPhiArg));
+    if (phi_arg == NULL) return true;
+    phi_arg->value = value;
+    phi_arg->predecessor = predecessor;
+    list_add_tail(&phi_arg->next, &phi->phi_arg_list);
+
+    if (ir_add_usage(&phi_arg->value)) return true;
+
+    return false;
+}
+
+bool ir_reference_equal(IRReference *ref1, IRReference *ref2) {
+    if (ref1->type != ref2->type) return false;
+
+    switch(ref1->type) {
+    case IR_REF_TYPE_UNDEFINED:
+        return true;
+    case IR_REF_TYPE_TMP:
+        return ref1->as.tmp_id == ref2->as.tmp_id;
+    case IR_REF_TYPE_PHI:
+        return ref1->as.phi == ref2->as.phi;
+    case IR_REF_TYPE_I32:
+        return ref1->as.i32 == ref2->as.i32;
+    case IR_REF_TYPE_NAME:
+        return ref1->as.name == ref2->as.name;
+    default:
+        assert(0);
     }
-    listAddNodeTail(phi->phi_arg_list, pa);
-    if (arg.type == REF_TYPE_TMP && arg.as.tmp_node != NULL) {
-        addUsage(listNodeValue(arg.as.tmp_node), UPhi, (Use_ptr) { .phi = phi_node });
+
+}
+
+IRReference ir_get_default(WASMValtype type) {
+    IRReference result;
+    switch(type) {
+    case WASM_VALTYPE_I32:
+        result = IR_REF_I32(0);
+        break;
+    case WASM_VALTYPE_I64:
+    case WASM_VALTYPE_F32:
+    case WASM_VALTYPE_F64:
+        /* not implemented */
+        assert(0);
+    default:
+        assert(0);
+    }
+    return result;
+}
+
+IRType ir_cast(WASMValtype t) {
+    switch(t) {
+        case WASM_VALTYPE_I32:
+            return IR_TYPE_I32;
+        case WASM_VALTYPE_I64:
+            return IR_TYPE_I64;
+        case WASM_VALTYPE_F32:
+            return IR_TYPE_F32;
+        case WASM_VALTYPE_F64:
+            return IR_TYPE_F64;
+        default:
+            assert(0);
     }
 }
 
-void freePhi(Phi *phi) {
-    listRelease(phi->phi_arg_list);
-    free(phi);
-}
+void ir_free_function(IRFunction *f) {
 
-void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {
-    if (tmp != NULL) {
-        Use *use = xmalloc(sizeof(struct Use));
-        use->type = type;
-        use->u = ptr;
-        listAddNodeTail(tmp->use_list, use);
-    }
-}
-
-void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr) {
-    if (tmp == NULL) return;
-    listNode *use_node;
-    listNode *use_iter = listFirst(tmp->use_list);
-    while ((use_node = listNext(&use_iter)) != NULL) {
-        Use *use = listNodeValue(use_node);
-        if (use->type == type && use->u.ins == ptr.ins) {
-            listDelNode(tmp->use_list, use_node);
-        }
-    }
-}
-
-void freeFunc(Fn *f) {
-    listRelease(f->tmp_list);
-    listRelease(f->blk_list);
+    list_release(&f->block_list, ir_free_block, IRBlock, next);
+    if (f->live_intervals != NULL) free(f->live_intervals);
     free(f);
 }
 
-void freeTemp(Tmp *tmp) {
-    listRelease(tmp->use_list);
-    free(tmp);
+void ir_free_block(IRBlock *b) {
+
+    list_release(&b->phi_list, ir_free_phi, IRPhi, next);
+    list_release(&b->instr_list, free, IRInstr, next);
+    list_release(&b->pred_list, free, IRPredecessor, next);
+    list_release(&b->loop_end_block_list, free, IRLoopEnd, next);
+    if (b->locals != NULL) free(b->locals);
+    if (b->incomplete_phi != NULL) free(b->incomplete_phi);
+    free(b);
 }
 
-void freeBlock(Blk *b) {
-    listRelease(b->phi_list);
-    listRelease(b->ins_list);
-    listRelease(b->preds);
-    if (b->locals != NULL) {
-        free(b->locals);
+void ir_free_phi(IRPhi *phi) {
+
+    list_release(&phi->phi_arg_list, free, IRPhiArg, next);
+    list_release(&phi->use_list, free, IRUse, next);
+    free(phi);
+}
+
+/* The following SSA construction algorithm is taken from this article:
+ * Simple and Efficient Construction of Static Single Assignment Form.
+ * Authors: Matthias Braun, Sebastian Buchwald, Sebastian Hack,
+ * Roland Leißa, Christoph Mallon, and Andreas Zwinkau */
+
+static bool read_local_recursive(IRFunction *f, IRBlock *block,
+                                 uint32_t localidx, IRReference *out);
+static bool add_phi_operands(IRFunction *f, IRPhi *phi,
+                             uint32_t localidx, IRReference *out);
+static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out);
+
+
+void ir_write_local(IRBlock *block, uint32_t localidx, IRReference value) {
+
+    block->locals[localidx] = value;
+    ir_rm_usage(&block->locals[localidx]);
+    ir_add_usage(&block->locals[localidx]);
+}
+
+bool ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out) {
+
+    if (block->locals[localidx].type != IR_REF_TYPE_UNDEFINED) {
+        if (out != NULL) *out = block->locals[localidx];
+        return false;
     }
-    if (b->incomplete_phis != NULL) {
-        free(b->incomplete_phis);
+
+    /* If a block currently contains no definition for a variable,
+    * we recursively look for a definition in its predecessors. */
+    return read_local_recursive(f, block, localidx, out);
+}
+
+static bool read_local_recursive(IRFunction *f, IRBlock *block,
+                                uint32_t localidx, IRReference *out) {
+   IRReference value;
+    if (!block->is_sealed) {
+        /* Incomplete CFG */
+        WASMValtype valtype = wasm_valtype_of(f->wasm_func, localidx);
+        IRPhi *phi = ir_create_phi(f, block, (IRType)valtype);
+        if (phi == NULL) return true;
+        block->incomplete_phi[localidx] = phi;
+        value = IR_REF_PHI(phi);
+    } else if (block->pred_count == 0) {
+        /* If the block has no predecessors, this means that
+         * it is unreachable. Just return a default value. */
+        WASMValtype valtype = wasm_valtype_of(f->wasm_func, localidx);
+        value = ir_get_default(valtype);
+    } else if (block->pred_count == 1) {
+        /* If the block has a single predecessor, just query
+         * it recursively for a definition. No phi needed */
+        struct list_head *head = list_next(&block->pred_list);
+        IRPredecessor *pred = container_of(head, IRPredecessor, next);
+        bool err = ir_read_local(f, pred->ptr, localidx, &value);
+        if (err) return true;
+    } else {
+       /* If the block has multiple predecessors we collect the
+        * definitions from all predecessors and construct a phi function,
+        * which joins them into a single new value. This phi function is
+        * recorded as current definition in this basic block.
+        * In both cases, looking for a value in a predecessor might in
+        * turn lead to further recursive look-ups.*/
+
+        /* Break potential cycles with operandless phi:
+         * looking for a value in a predecessor might in turn lead to further
+         * recursive look-ups. Due to loops in the program, those might lead
+         * to endless recursion. Therefore, before recursing, we first create
+         * the phi function without operands and record it as the current
+         * definition for the variable in the block. Then, we determine the
+         * phi function’s operands. If a recursive look-up arrives back at the
+         * block, this phi function will provide a definition and the recursion
+         * will end. */
+        WASMValtype valtype = wasm_valtype_of(f->wasm_func, localidx);
+        IRPhi *phi = ir_create_phi(f, block, (IRType)valtype);
+        if (phi == NULL) return true;
+        value = IR_REF_PHI(phi);
+        ir_write_local(block, localidx, value);
+        bool err = add_phi_operands(f, phi, localidx, &value);
+        if (err) return true;
     }
-    free(b);
+    ir_write_local(block, localidx, value);
+    if (out != NULL) *out = value;
+    return false;
+}
+
+static bool add_phi_operands(IRFunction *f, IRPhi *phi,
+                             uint32_t localidx, IRReference *out) {
+
+    /* Determine phi operands from the predecessors */
+    IRReference local;
+    bool err;
+
+    IRPredecessor *pred;
+    list_for_each_entry(pred, &phi->block->pred_list, next) {
+        err = ir_read_local(f, pred->ptr, localidx, &local);
+        if (err) return true;
+        err = ir_append_phi_arg(phi, local, pred->ptr);
+        if (err) return true;
+    }
+    /* Recursive look-up might leave redundant
+     * phi functions, try to remove them */
+    err = try_remove_trivial_phi(f, phi, out);
+    if (err) return true;
+
+    return false;
+}
+
+/* A phi function is trivial iff it just references itself
+ * and one other value v any number of times: exists v such
+ * that t = phi(x1, x2, ..., xn) and x1 ..., xn in {t, v}.
+ *
+ * Examples of trivial phi:
+ * - t = phi()
+ * - t = phi(t)
+ * - t = phi(t, t, t, t)
+ * - t = phi(v)
+ * - t = phi(v, v, v)
+ * - t = phi(t, v, t, t)
+ * - t = phi(t, v, t, v, t, v)
+ *
+ * Examples of not trivial phi:
+ * - t = phi(v1, v2)
+ * - t = phi(t, v1, t, v2)
+ * 
+ * A trivial phi function can be removed and the value v is used instead.
+ * As a special case, the phi function might use no other value besides
+ * itself. This means that it is unreachable, We replace it by a default value. */
+static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) {
+
+    IRReference same =  IR_REF_UNDEFINED;
+    IRPhiArg *phi_arg;
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+        if (ir_reference_equal(&same, &phi_arg->value) ||
+            (phi_arg->value.type == IR_REF_TYPE_PHI && phi_arg->value.as.phi == phi)) {
+            /* Unique value or self-reference */
+            continue;
+        }
+        if (same.type != IR_REF_TYPE_UNDEFINED) {
+            /* The phi merges at least two values: not trivial */
+            if (out != NULL) {
+                *out = (IRReference) {
+                    .type = IR_REF_TYPE_PHI,
+                    .as.phi = phi,
+                };
+            }
+            return false;
+        }
+        same = phi_arg->value;
+    }
+
+    if (same.type == IR_REF_TYPE_UNDEFINED) {
+        same = ir_get_default((WASMValtype)phi->type);
+    }
+
+    /* Reroute all uses of phi to same */
+    IRUse *use;
+    list_for_each_entry(use, &phi->use_list, next) {
+        *use->ref = same;
+        ir_add_usage(use->ref);
+    }
+
+    /* remove 'phi' */
+    list_del(&phi->next);
+    f->tmp_count--;
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+       ir_rm_usage(&phi_arg->value);
+    }
+    ir_free_phi(phi);
+
+    if (out != NULL) *out = same;
+    return false;
+}
+
+bool ir_seal_block(IRFunction *f, IRBlock *block) {
+    for (uint32_t i = 0; i < f->ir_local_count; i++) {
+        if (block->incomplete_phi[i] == NULL) continue;
+        bool err = add_phi_operands(f, block->incomplete_phi[i], i, NULL);
+        if (err) return true;
+    }
+    block->is_sealed = true;
+    free(block->incomplete_phi);
+    block->incomplete_phi = NULL;
+    return false;
 }
 

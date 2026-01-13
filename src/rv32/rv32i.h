@@ -51,17 +51,6 @@ extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
 #define RV32_RESERVED_NUM_REG 2
 extern const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG];
 
-typedef struct rv32_reg_pool {
-    bool pool[RV32_NUM_REG];
-    unsigned int size;
-} rv32_reg_pool;
-
-typedef enum location_type {
-    LOCATION_NONE,
-    REGISTER,
-    STACK_SLOT,
-} location_type;
-
 typedef struct r_ins_fmt {
     unsigned int op:7;
     unsigned int rd:5;

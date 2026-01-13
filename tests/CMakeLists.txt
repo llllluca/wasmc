@@ -2,11 +2,8 @@ include_directories(../src/)
 
 function(test name expected_result iwasm)
     add_test(NAME ${name}
-        COMMAND sh -c "${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm && ${iwasm}"
+        COMMAND ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-    set_property(TEST ${name}
-        PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
-
     add_test(NAME memcheck_${name}
         COMMAND valgrind
         --error-exitcode=1
@@ -15,7 +12,25 @@ function(test name expected_result iwasm)
         --track-origins=yes
         ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
 endfunction()
+
+# function(test name expected_result iwasm)
+#     add_test(NAME ${name}
+#         COMMAND sh -c "${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm && ${iwasm}"
+#         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+#     set_property(TEST ${name}
+#         PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
+#
+#     add_test(NAME memcheck_${name}
+#         COMMAND valgrind
+#         --error-exitcode=1
+#         --tool=memcheck
+#         --leak-check=full
+#         --track-origins=yes
+#         ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
+#     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+# endfunction()
 
 # Function to test a WASM module generated from a handwritten WAT file
 function(test_wat name expected_result)
@@ -79,7 +94,7 @@ test_c(max-O2 "0xff:i32")
 # max-O3 is equal to max-O2
 test_c(isort-O0 "0x0:i32")
 test_c(isort-O1 "0x0:i32")
-#test_c(isort-O2 "0x0:i32")
+test_c(isort-O2 "0x0:i32")
 test_c(fib2 "0x59:i32")
 test_c(msort "0x15:i32")
 test_c(qsort "0x66:i32")

@@ -7,143 +7,116 @@
 #include "adlist.h"
 #include "rv32/rv32i.h"
 
-typedef struct Phi Phi;
-typedef struct Ins Ins;
-typedef struct Use Use;
-typedef struct Blk Blk;
-typedef struct Tmp Tmp;
+#include "listx.h"
+#include "wasm.h"
 
-typedef enum __attribute__ ((__packed__)) IRType {
-    IR_TYPE_VOID,
-    IR_TYPE_I32,
-    IR_TYPE_I64,
-    IR_TYPE_F32,
-    IR_TYPE_F64,
-} IRType;
+typedef struct IRFunction IRFunction;
+typedef struct IRBlock IRBlock;
+typedef struct IRPhi IRPhi;
+typedef struct Location Location;
+typedef struct LiveInterval LiveInterval;
 
-typedef struct location {
-    location_type type;
-    union {
-        rv32_reg reg;
-        unsigned int stack_slot;
-    } as;
-} location;
-
-#define LOCATION_EQ(a, b) ( \
-    ((a).type == LOCATION_NONE && (b).type == LOCATION_NONE) || \
-    ((a).type == REGISTER && (b).type == REGISTER && \
-     (a).as.reg == (b).as.reg) || \
-    ((a).type == STACK_SLOT && (b).type == STACK_SLOT && \
-     (a).as.stack_slot == (b).as.stack_slot))
-
-typedef struct live_interval {
-    unsigned int start;
-    unsigned int end;
-    location assign;
-    rv32_reg register_hint;
-} live_interval;
-
-struct Tmp {
-    unsigned int id;
-    list *use_list;
-    live_interval *i;
-};
-
-typedef struct Ref {
+typedef struct IRReference {
     enum {
-        REF_TYPE_UNDEFINED,
-        REF_TYPE_TMP,
-        REF_TYPE_INT32_CONST,
-        REF_TYPE_NAME,
-        REF_TYPE_LOCATION,
+        IR_REF_TYPE_UNDEFINED,
+        IR_REF_TYPE_TMP,
+        IR_REF_TYPE_PHI,
+        IR_REF_TYPE_I32,
+        IR_REF_TYPE_NAME,
+        IR_REF_TYPE_LOCATION,
     } type;
     union {
-        listNode *tmp_node;
-        int32_t int32_const;
+        uint32_t tmp_id;
+        IRPhi *phi;
+        int32_t i32;
         char *name;
-        location loc;
+        Location *location;
     } as;
-} Ref;
+} IRReference;
 
-#define UNDEFINED_REF \
-    (Ref){ .type = REF_TYPE_UNDEFINED, }
+struct IRFunction {
+    WASMFunction *wasm_func;
+    struct list_head working_block_list;
+    struct list_head block_list;
+    IRBlock *start;
+    IRReference WASMExecEnv;
+    uint32_t next_tmp_id;
+    uint32_t next_block_id;
+    uint32_t ir_local_count;
+    uint32_t tmp_count;
+    uint32_t stack_slot_count;
+    LiveInterval *live_intervals;
+    bool regs_to_preserve[RV32_NUM_REG];
+};
 
-#define INT32_CONST(val) \
-    (Ref){ .type = REF_TYPE_INT32_CONST, .as.int32_const = (val) }
+typedef struct IRPredecessor {
+    struct list_head next;
+    IRBlock *ptr;
+} IRPredecessor;
 
-#define NEW_NAME(val) \
-    (Ref){ .type = REF_TYPE_NAME, .as.name = (val) }
+typedef struct IRLoopEnd {
+    struct list_head next;
+    IRBlock *ptr;
+} IRLoopEnd;
 
-#define REF_EQ(a, b) \
-    (((a).type == REF_TYPE_UNDEFINED && (b).type == REF_TYPE_UNDEFINED) || \
-    ((a).type == REF_TYPE_TMP && (b).type == REF_TYPE_TMP && \
-        (a).as.tmp_node == (b).as.tmp_node) || \
-    ((a).type == REF_TYPE_INT32_CONST && (b).type == REF_TYPE_INT32_CONST && \
-        (a).as.int32_const == (b).as.int32_const) || \
-    ((a).type == REF_TYPE_NAME && (b).type == REF_TYPE_NAME && \
-        (a).as.name == (b).as.name) || \
-    ((a).type == REF_TYPE_LOCATION && (b).type == REF_TYPE_LOCATION && \
-        LOCATION_EQ((a).as.loc, (b).as.loc)))
-
-typedef enum Jump_type {
-    NONE_JUMP_TYPE,
-    JMP_JUMP_TYPE,
-    JNZ_JUMP_TYPE,
-    RET0_JUMP_TYPE,
-    RET1_JUMP_TYPE,
-    HALT_JUMP_TYPE
-} Jump_type;
-
-typedef struct Jump {
-    Jump_type type;
-    Ref arg;
+struct IRBlock {
     unsigned int id;
-} Jump;
+    struct list_head next;
+    struct list_head phi_list;
+    struct list_head instr_list;
+    struct {
+        enum {
+            IR_JUMP_TYPE_NONE,
+            IR_JUMP_TYPE_JMP,
+            IR_JUMP_TYPE_JNZ,
+            IR_JUMP_TYPE_RET0,
+            IR_JUMP_TYPE_RET1,
+            IR_JUMP_TYPE_HALT,
+        } type;
+        IRReference arg;
+        unsigned int seqnum;
+    } jump;
 
-struct Blk {
-    list *phi_list;
-    list *ins_list;
-    Jump jmp;
     // 0 is the 'then' branch, 1 is the 'else' branch
-    Blk *succ[2];
-    list *preds;
-    Ref *locals;
-    listNode **incomplete_phis;
+    IRBlock *succ[2];
+    struct list_head pred_list;
+    uint32_t pred_count;
+    IRReference *locals;
+    IRPhi **incomplete_phi;
     bool is_sealed;
-/* list of variable that are live at the beginning of the block */
-    list *live_in;
-    unsigned int id;
+
+/* bitmap of variable that are live at the beginning of the block */
+    unsigned long *live_in;
+    unsigned int seqnum;
 
     bool is_loop_header;
-    list* loop_end_blk_list;
+    struct list_head loop_end_block_list;
 
     uint8_t *text_start;
 };
 
-typedef struct Phi_arg {
-    Ref r;
-    Blk *b;
-} Phi_arg;
+typedef enum __attribute__ ((__packed__)) IRType {
+    IR_TYPE_VOID = 0,
+    IR_TYPE_I32 = WASM_VALTYPE_I32,
+    IR_TYPE_I64 = WASM_VALTYPE_I64,
+    IR_TYPE_F32 = WASM_VALTYPE_F32,
+    IR_TYPE_F64 = WASM_VALTYPE_F64,
+} IRType;
 
-struct Phi {
-    Ref to;
-    list *phi_arg_list;
+typedef struct IRPhiArg {
+    struct list_head next;
+    IRReference value;
+    IRBlock *predecessor;
+} IRPhiArg;
+
+struct IRPhi {
+    struct list_head next;
+    IRBlock *block;
+    uint32_t id;
     IRType type;
-    Blk *block;
+    struct list_head phi_arg_list;
+    struct list_head use_list;
 };
-
-typedef struct Fn {
-    list *tmp_list;
-    list *blk_list;
-    char name[16];
-    Blk *start;
-    IRType ret_type;
-    unsigned int num_stack_slots;
-    unsigned int next_tmp_id;
-    unsigned int next_blk_id;
-    uint32_t local_count;
-    bool regs_to_preserve[RV32_NUM_REG];
-} Fn;
 
 typedef enum IROpcode {
 
@@ -198,76 +171,112 @@ typedef enum IROpcode {
     IR_OPCODE_COUNT,
 } IROpcode;
 
-
-struct Ins {
+typedef struct IRInstr {
+    struct list_head next;
     IROpcode op;
     IRType type;
-    Ref to;
-    Ref arg[2];
-    unsigned int id;
+    IRReference to;
+    IRReference arg[2];
+    unsigned int seqnum;
+} IRInstr;
+
+struct Location {
+    enum {
+        LOCATION_TYPE_NONE,
+        LOCATION_TYPE_REGISTER,
+        LOCATION_TYPE_STACK_SLOT,
+    } type;
+    union {
+        rv32_reg reg;
+        unsigned int stack_slot;
+    } as;
 };
 
-typedef enum Use_type {
-    UPhi,
-    UIns,
-    UJmp,
-    ULocal,
-} Use_type;
-
-typedef union Use_ptr {
-    listNode *ins;
-    listNode *phi;
-    listNode *blk;
-    Ref *local; 
-} Use_ptr;
-
-struct Use {
-    Use_type type;
-    Use_ptr u;
+struct LiveInterval {
+    struct list_head link;
+    unsigned int start;
+    unsigned int end;
+    Location assign;
+    int register_hint;
 };
 
-#define APPEND_ADD(b, type, result, opd1, opd2) \
-    ir_append_ins(b, IR_OPCODE_ADD, type, result, opd1, opd2)
-
-#define APPEND_STORE(b, type, value, offset, ptr) \
-    ir_append_ins(b, IR_OPCODE_STORE, type, value, offset, ptr)
-
-#define APPEND_LOAD(b, type, result, offset, ptr) \
-    ir_append_ins(b, IR_OPCODE_LOAD, type, result, offset, ptr)
-
-#define APPEND_CALL(b, type, result, f) \
-    ir_append_ins(b, IR_OPCODE_CALL, type, result, f, UNDEFINED_REF)
-
-#define APPEND_VOID_CALL(b, f) \
-    ir_append_ins(b, IR_OPCODE_CALL, IR_TYPE_VOID, UNDEFINED_REF, f, UNDEFINED_REF)
+typedef struct IRUse {
+    struct list_head next;
+    IRReference *ref;
+} IRUse;
 
 
+#define IR_REF_UNDEFINED \
+    (IRReference) { .type = IR_REF_TYPE_UNDEFINED }
+
+#define IR_REF_TMP(ir_func) \
+    (IRReference) { \
+        .type = IR_REF_TYPE_TMP, \
+        .as.tmp_id = ((ir_func)->tmp_count++, (ir_func)->next_tmp_id++) \
+    }
+
+#define IR_REF_PHI(_phi) \
+    (IRReference) { .type = IR_REF_TYPE_PHI, .as.phi = _phi }
+
+#define IR_REF_I32(value) \
+    (IRReference) { .type = IR_REF_TYPE_I32, .as.i32 = value }
+
+#define IR_REF_NAME(str) \
+    (IRReference){ .type = IR_REF_TYPE_NAME, .as.name = str }
 
 
+#define ir_append_func_call_arg(block, arg_type, arg_value) \
+    ir_append_instr3(block, IR_OPCODE_ARG, arg_type, \
+                     IR_REF_UNDEFINED, arg_value, IR_REF_UNDEFINED)
 
-/* libqbe.c */
-void printfn(Fn *fn, FILE *f);
-Ref newMemoryAddr(Fn *f, Blk *b);
-Fn *newFunc(IRType ret_type, char *name, uint32_t local_count);
-Ref newFuncParam(Fn *f, IRType type);
-Ref newTemp(Fn *func);
-Blk *newBlock(Fn *f);
-void newFuncCallArg(Blk *b, IRType type, Ref r);
-void ir_append_ins(Blk *b, IROpcode op, IRType type, Ref arg0, Ref arg1, Ref arg2);
-void jmp(Fn *f, Blk *from, Blk *to);
-void jnz(Fn *f, Blk *from, Ref r, Blk *b0, Blk *b1);
-void ret(Fn *f, Blk *b);
-void retRef(Fn *f, Blk *b, Ref r);
-void halt(Fn *f, Blk *b);
-void optimizeFunc(Fn *fn);
-void typecheck(Fn *fn);
-listNode *newPhi(Blk *b, Ref temp, IRType type);
-void phiAppendOperand(listNode *phi_node, Blk *b, Ref arg);
-void addUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
-void rmUsage(Tmp *tmp, Use_type type, Use_ptr ptr);
-void freeFunc(Fn *f);
-void freeTemp(Tmp *tmp);
-void freePhi(Phi *phi);
-void freeBlock(Blk *b);
+#define ir_append_void_func_call(block, func_name) \
+    ir_append_instr3(block, IR_OPCODE_CALL, IR_TYPE_VOID, \
+                     IR_REF_UNDEFINED, func_name, IR_REF_UNDEFINED)
+
+#define ir_append_func_call(block, return_type, return_value, func_name) \
+    ir_append_instr3(block, IR_OPCODE_CALL, return_type, \
+                     return_value, func_name, IR_REF_UNDEFINED)
+
+#define ir_append_load(block, type, destination, offset, pointer) \
+    ir_append_instr3(block, IR_OPCODE_LOAD, type, destination, offset, pointer)
+
+#define ir_append_store(block, type, source, offset, pointer) \
+    ir_append_instr3(block, IR_OPCODE_STORE, type, source, offset, pointer)
+
+#define ir_append_add(block, type, result, left_operand, right_opendard) \
+    ir_append_instr3(block, IR_OPCODE_ADD, type, result, left_operand, right_opendard)
+
+IRFunction *ir_create_function(WASMFunction *wasm_func);
+IRBlock *ir_create_block(IRFunction *f);
+IRBlock *ir_create_sealed_block(IRFunction *f);
+IRBlock *ir_create_sealed_block_without_locals(IRFunction *f);
+bool ir_append_instr1(IRBlock *b, IROpcode op, IRType type, IRReference to);
+bool ir_append_instr2(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0);
+bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0, IRReference arg1);
+bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival);
+bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
+            IRBlock *arg_not_zero_arrival, IRBlock *arg_is_zero_arrival);
+void ir_ret0(IRFunction *f, IRBlock *b);
+bool ir_ret1(IRFunction *f, IRBlock *b, IRReference return_value);
+void ir_halt(IRFunction *f, IRBlock *b);
+IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type);
+bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor);
+bool ir_add_predecessor(IRBlock *block, IRBlock *pred);
+bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end);
+bool ir_add_usage(IRReference *ref);
+IRReference ir_get_default(WASMValtype t);
+IRType ir_cast(WASMValtype t);
+bool ir_reference_equal(IRReference *ref1, IRReference *ref2);
+void ir_print_fn(IRFunction *fn, FILE *f);
+void ir_print_location(Location *loc, FILE *f);
+void ir_print_ref(IRReference r, FILE *f);
+
+void ir_free_function(IRFunction *f);
+void ir_free_block(IRBlock *b);
+void ir_free_phi(IRPhi *phi);
+
+bool ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out);
+bool ir_seal_block(IRFunction *f, IRBlock *block);
+void ir_write_local(IRBlock *block, uint32_t localidx, IRReference value);
 
 #endif 

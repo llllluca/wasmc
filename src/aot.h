@@ -152,7 +152,7 @@ typedef struct AOTModule {
 typedef struct Target {
     char *name;
     AOTErr_t (*emit_target_info)(AOTModule *);
-    AOTErr_t (*emitfn)(AOTModule *, Fn *, uint32_t);
+    AOTErr_t (*emitfn)(AOTModule *, IRFunction *, uint32_t);
 } Target;
 
 #define ALIGN_PTR(p, align) ((void *)((((uintptr_t)p) + (align-1)) & ~(align-1)))

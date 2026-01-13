@@ -5,14 +5,6 @@
 #include "../libqbe.h"
 #include "../aot.h"
 
-static AOTErr_t emit(AOTModule *m, ins_fmt ins);
-static AOTErr_t fix_arg(AOTModule *m, Ref *arg, rv32_reg r);
-static bool imm(Ref r, int imm_min, int imm_max);
-static AOTErr_t emit_li(AOTModule *m, uint32_t rd, int32_t imm);
-static AOTErr_t emitins(AOTModule *aotm, Ins *i);
-static AOTErr_t rv32_emit_target_info(AOTModule *m);
-static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx);
-
 #define ERR_CHECK(x) if (x) return AOT_ERR;
 
 const bool rv32_is_callee_saved[RV32_NUM_REG] = {
@@ -63,11 +55,21 @@ const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG] = {
     T5, T6
 };
 
+#if 0
 Target rv32 = {
     .name = "riscv32",
     .emit_target_info = &rv32_emit_target_info,
     .emitfn = &rv32_emitfn,
 };
+
+static AOTErr_t emit(AOTModule *m, ins_fmt ins);
+static AOTErr_t fix_arg(AOTModule *m, Ref *arg, rv32_reg r);
+static bool imm(Ref r, int imm_min, int imm_max);
+static AOTErr_t emit_li(AOTModule *m, uint32_t rd, int32_t imm);
+static AOTErr_t emitins(AOTModule *aotm, Ins *i);
+static AOTErr_t rv32_emit_target_info(AOTModule *m);
+static AOTErr_t rv32_emitfn(AOTModule *m, Fn *fn, uint32_t typeidx);
+
 
 static AOTErr_t emit(AOTModule *m, ins_fmt ins) {
     unsigned long size = m->buf_end - m->offset;
@@ -621,4 +623,4 @@ static AOTErr_t rv32_emit_target_info(AOTModule *m) {
     WRITE_BYTE_ARRAY(m, target_info.arch, sizeof(target_info.arch));
     return AOT_OK;
 }
-
+#endif
