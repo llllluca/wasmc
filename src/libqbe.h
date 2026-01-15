@@ -4,7 +4,6 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "adlist.h"
 #include "rv32/rv32i.h"
 
 #include "listx.h"
@@ -264,6 +263,8 @@ bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor);
 bool ir_add_predecessor(IRBlock *block, IRBlock *pred);
 bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end);
 bool ir_add_usage(IRReference *ref);
+void ir_rm_usage(IRReference *ref);
+
 IRReference ir_get_default(WASMValtype t);
 IRType ir_cast(WASMValtype t);
 bool ir_reference_equal(IRReference *ref1, IRReference *ref2);

@@ -96,6 +96,7 @@ void ir_print_ref(IRReference r, FILE *f) {
         fprintf(f, "%%t%u", r.as.tmp_id);
         break;
     case IR_REF_TYPE_PHI:
+        //assert(0);
         fprintf(f, "%%t%u", r.as.phi->id);
         break;
     case IR_REF_TYPE_I32:
@@ -142,6 +143,16 @@ static void ir_print_instr(IRInstr *i, FILE *f) {
     case IR_OPCODE_ARG:
         fprintf(f, "arg %s ", type2str(i->type));
         ir_print_ref(i->arg[0], f);
+        break;
+    case IR_OPCODE_CALL:
+        if (i->type == IR_TYPE_VOID) {
+            fprintf(f, "%s ", optab[i->op]);
+            ir_print_ref(i->arg[0], f);
+        } else {
+            ir_print_ref(i->to, f);
+            fprintf(f, " =%s %s ", type2str(i->type), optab[i->op]);
+            ir_print_ref(i->arg[0], f);
+        }
         break;
     default:
         ir_print_ref(i->to, f);

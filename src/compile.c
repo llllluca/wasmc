@@ -60,10 +60,8 @@ typedef struct CompileCtx {
 
 #define ERR_CHECK(x) if (x) return COMPILE_ERR
 
-
 /* rega.c */
-//extern void linear_scan(Fn *f, rv32_reg_pool *gpr, rv32_reg_pool *argr);
-
+extern bool register_allocation(IRFunction *f);
 
 
 static void push_opd(CompileCtx *ctx, OperandStackEntry *opd) {
@@ -838,19 +836,16 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
 
     IRBlock *select_arg1 = ir_create_sealed_block(ctx->ir_func);
     if (select_arg1 == NULL) goto ERROR;
-    IRBlock *select_arg2 = ir_create_sealed_block(ctx->ir_func);
-    if (select_arg2 == NULL) goto ERROR;
+    IRBlock *select_arg2 = ctx->curr_block;
     IRBlock *end = ir_create_sealed_block(ctx->ir_func);
     if (end == NULL) goto ERROR;
 
     assert(ctx->curr_block != NULL);
     bool err;
-    err = ir_jnz(ctx->ir_func, ctx->curr_block, cond->ref, select_arg1, select_arg2);
+    err = ir_jnz(ctx->ir_func, ctx->curr_block, cond->ref, select_arg1, end);
     if (err) goto ERROR;
 
     err = ir_jmp(ctx->ir_func, select_arg1, end);
-    if (err) goto ERROR;
-    err = ir_jmp(ctx->ir_func, select_arg2, end);
     if (err) goto ERROR;
     ctx->curr_block = end;
 
@@ -860,7 +855,6 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
     if (err) goto ERROR;
     err = ir_append_phi_arg(phi, arg2->ref, select_arg2);
     if (err) goto ERROR;
-
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
     if (result == NULL) goto ERROR;
@@ -1277,25 +1271,6 @@ ERROR:
     return NULL;
 }
 
-/*
-static void register_allocation(Fn *fn) {
-    rv32_reg_pool gpr;
-    memset(gpr.pool, false, RV32_NUM_REG);
-    gpr.size = RV32_GP_NUM_REG;
-    for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
-        gpr.pool[rv32_gp_reg[i]] = true;
-    }
-    rv32_reg_pool argr;
-    memset(argr.pool, false, RV32_NUM_REG);
-    argr.size = RV32_ARG_NUM_REG;
-        for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
-        argr.pool[rv32_arg_reg[i]] = true;
-    }
-    linear_scan(fn, &gpr, &argr);
-}
-*/
-
-bool register_allocation(IRFunction *f);
 
 
 CompileErr_t compile(WASMModule *wasm_mod, Target *T,

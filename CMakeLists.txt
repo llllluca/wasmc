@@ -10,9 +10,7 @@ add_executable(
     src/compile.c
     src/libqbe.c
     src/rega.c
-    #src/adlist.c
-    #src/rega.c
-    #src/aot.c
+    src/aot.c
     src/rv32/emit.c
 )
 

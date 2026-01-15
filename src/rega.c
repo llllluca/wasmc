@@ -16,7 +16,7 @@ typedef enum MoveStatus {
 typedef struct Move {
     struct list_head link;
     IRReference from;
-    Location to;
+    Location *to;
     MoveStatus status;
 } Move;
 
@@ -36,6 +36,46 @@ typedef struct Move {
         .as.stack_slot = (ir_func)->stack_slot_count++ \
     }
 
+static Location tmp = {
+    .type = LOCATION_TYPE_REGISTER,
+    .as.reg = T5,
+};
+
+static Location args[RV32_ARG_NUM_REG] = {
+    [0] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A0,
+    },
+    [1] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A1,
+    },
+    [2] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A2,
+    },
+    [3] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A3,
+    },
+    [4] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A4,
+    },
+    [5] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A5,
+    },
+    [6] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A6,
+    },
+    [7] = {
+        .type = LOCATION_TYPE_REGISTER,
+        .as.reg = A7,
+    }
+};
+
 static bool location_equal(Location *loc1, Location *loc2) {
     if (loc1->type != loc2->type) return false;
     switch (loc1->type) {
@@ -47,14 +87,6 @@ static bool location_equal(Location *loc1, Location *loc2) {
         return loc1->as.stack_slot == loc2->as.stack_slot;
     default:
         assert(0);
-    }
-}
-
-void print_live_intervals(LiveInterval *live_intervals, unsigned int len) {
-    for (unsigned int tmp_id = 0; tmp_id < len; tmp_id++) {
-        printf("tmp_id: %u\n", tmp_id);
-        printf("    start: %u\n", live_intervals[tmp_id].start);
-        printf("    end:   %u\n", live_intervals[tmp_id].end);
     }
 }
 
@@ -365,6 +397,26 @@ static void register_hints(IRFunction *f) {
             }
         }
     }
+
+    list_for_each_entry(block, &f->block_list, next) {
+        IRPhi *phi;
+        list_for_each_entry(phi, &block->phi_list, next) {
+            LiveInterval *phi_live_int = &f->live_intervals[phi->id];
+            if (phi_live_int->register_hint == -1) continue;
+            IRPhiArg *phi_arg;
+            list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+                IRReference arg = phi_arg->value;
+                if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
+                    tmp_id = arg.type == IR_REF_TYPE_TMP ? arg.as.tmp_id : arg.as.phi->id;
+                    LiveInterval *live_int = &f->live_intervals[tmp_id];
+                    if (live_int->register_hint == -1) {
+                        live_int->register_hint = phi_live_int->register_hint;
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 static __always_inline void
@@ -386,10 +438,12 @@ assign_register(IRFunction *f, LiveInterval *live_int,
                 unsigned long *reg_pool, unsigned int nreg) {
 
     unsigned long reg;
-    if (live_int->register_hint != -1) {
-        reg = live_int->register_hint;
+    int hint = live_int->register_hint;
+    if (hint != -1 && bitmap_test_bit(reg_pool, hint)) {
+        reg = hint;
     } else {
         reg = find_next_bit(reg_pool, nreg, 0);
+        assert(reg != nreg);
     }
     live_int->assign.type = LOCATION_TYPE_REGISTER;
     bitmap_clear_bit(reg_pool, reg);
@@ -417,7 +471,7 @@ static void linear_scan(IRFunction *f, LiveInterval **sorted_intervals,
         /* Expire old intervals */
         LiveInterval *active_int, *iter;
         /* for each interval in order of encreasing end point */
-        list_for_each_entry_safe_reverse(active_int, iter, &active_list, link) {
+        list_for_each_entry_safe(active_int, iter, &active_list, link) {
             if (active_int->end > live_int->start) break;
             /* remove active_int from active_list */
             list_del(&active_int->link);
@@ -464,7 +518,7 @@ replace_tmp_with_location(IRFunction *f, IRReference *r) {
     r->as.location = &f->live_intervals[tmp_id].assign;
 }
 
-static void replace_tmps_with_locations(IRFunction *f) {
+static void replace_references_with_locations(IRFunction *f) {
 
     IRBlock *block;
     list_for_each_entry(block, &f->block_list, next) {
@@ -481,93 +535,27 @@ static void replace_tmps_with_locations(IRFunction *f) {
     }
 }
 
-#if 0
+static bool have_same_location(IRFunction *f, Location *to_loc, IRReference *from) {
 
-#define MOVE_FROM_EQ_TO(from, to) \
-    (from.type != CONST && LOCATION_EQ(from.as.loc, to))
+    unsigned int from_id;
+    Location *from_loc;
 
-static Ins *alloc_copy(location *dst, move_from *src) {
-    Ins *ins = xmalloc(sizeof(struct Ins));
-    ins->op = IR_OPCODE_COPY;
-    ins->type = IR_TYPE_I32;
-
-    ins->to.type = REF_TYPE_LOCATION;
-    ins->to.as.loc = *dst;
-
-    switch (src->type) {
-        case CONST:
-            ins->arg[0].type = REF_TYPE_INT32_CONST;
-            ins->arg[0].as.int32_const = src->as.int32_const;
-            break;
-        case LOCATION: {
-            ins->arg[0].type = REF_TYPE_LOCATION;
-            ins->arg[0].as.loc = src->as.loc;
-        } break;
-        default:
-            panic();
-    }
-    ins->arg[1] = UNDEFINED_REF;
-    return ins;
-}
-
-
-
-static void insert_move_at_start(Blk *b, list *ins_list) {
-    listNode *ins_node;
-    listNode *ins_iter = listLast(ins_list);
-    while ((ins_node = listPrev(&ins_iter)) != NULL) {
-        listUnlinkNode(ins_list, ins_node);
-        listLinkNodeHead(b->ins_list, ins_node);
-    }
-}
-
-static void insert_move_at_end(Blk *b, list *ins_list) {
-    listNode *ins_node;
-    listNode *ins_iter = listLast(ins_list);
-    while ((ins_node = listPrev(&ins_iter)) != NULL) {
-        listUnlinkNode(ins_list, ins_node);
-        listLinkNodeTail(b->ins_list, ins_node);
-    }
-}
-
-static void insert_move_sequence(Fn* f,
-    list *move_seq, Blk *pred, Blk *succ) {
-
-    if (listLength(move_seq) == 0) return;
-    if (listLength(succ->preds) > 1 &&
-        pred->succ[0] != NULL && pred->succ[1] != NULL) {
-        /* succ has pred and other predecessors and
-         * pred has succ and another one successor */
-        Blk *b = newBlock(f);
-        if (pred->succ[0] == succ) {
-            pred->succ[0] = b;
-        } else {
-            pred->succ[1] = b;
-        }
-        insert_move_at_start(b, move_seq);
-        jmp(f, b, succ);
-    } else if (pred->succ[0] != NULL && pred->succ[1] != NULL) {
-        /* succ has only pred as predecessor and
-         * pred has succ and another one successor */
-        insert_move_at_start(succ, move_seq);
-    } else {
-        /* succ has pred and other predecessors and
-         * pred has only succ as successor */
-        insert_move_at_end(pred, move_seq);
-    }
-}
-
-
-#endif
-
-static bool has_same_location(IRFunction *f, unsigned int to_id, IRReference *from) {
-    if (from->type != IR_REF_TYPE_TMP && from->type != IR_REF_TYPE_PHI) {
+    switch (from->type) {
+    case IR_REF_TYPE_TMP:
+        from_id = from->as.tmp_id;
+        from_loc = &f->live_intervals[from_id].assign;
+        break;
+    case IR_REF_TYPE_PHI:
+        from_id = from->as.phi->id;
+        from_loc = &f->live_intervals[from_id].assign;
+        break;
+    case IR_REF_TYPE_LOCATION:
+        from_loc = from->as.location;
+        break;
+    default:
         return false;
     }
-    Location *to_loc = &f->live_intervals[to_id].assign;
-    unsigned int from_id;
-    from_id = from->type == IR_REF_TYPE_TMP ? from->as.tmp_id : from->as.phi->id;
-    Location *from_loc = &f->live_intervals[from_id].assign;
+
     return location_equal(to_loc, from_loc);
 }
 
@@ -576,79 +564,171 @@ static bool parallel_move_from_phis(IRFunction *f, IRBlock *pred,
     IRPhi *phi;
     list_for_each_entry(phi, &succ->phi_list, next) {
         IRPhiArg *phi_arg = input_of(phi, pred);
-        if (!has_same_location(f, phi->id, &phi_arg->value)) {
+        Location *to_loc = &f->live_intervals[phi->id].assign;
+        if (!have_same_location(f, to_loc, &phi_arg->value)) {
             Move *move = malloc(sizeof(struct Move));
             if (move == NULL) return true;
-            move->to = f->live_intervals[phi->id].assign;
-            move->from = phi_arg->value;
+            move->to = &f->live_intervals[phi->id].assign;
+            if (phi_arg->value.type == IR_REF_TYPE_PHI) {
+                move->from.type = IR_REF_TYPE_TMP;
+                move->from.as.tmp_id = phi_arg->value.as.phi->id;
+            } else {
+                move->from = phi_arg->value;
+            }
             list_add_tail(&move->link, out);
         }
     }
     return false;
 }
 
-/*
-static void move_one(move *m, list* par_move, list *move_seq) {
-    if (MOVE_FROM_EQ_TO(m->from, m->to)) return;
+static __always_inline IRInstr *alloc_copy(Location *dst, IRReference *src) {
+    IRInstr *ins = malloc(sizeof(struct IRInstr));
+    if (ins == NULL) return NULL;
+    ins->op = IR_OPCODE_COPY;
+    ins->type = IR_TYPE_I32;
+    ins->to.type = IR_REF_TYPE_LOCATION;
+    ins->to.as.location = dst;
+    if (src->type == IR_REF_TYPE_PHI) {
+        ins->arg[0].type = IR_REF_TYPE_TMP;
+        ins->arg[0].as.tmp_id = src->as.phi->id;
+    } else {
+        ins->arg[0] = *src;
+    }
+    ins->arg[1].type = IR_REF_TYPE_UNDEFINED;
+    ins->seqnum = 0;
+    return ins;
+}
+
+static bool move_one(IRFunction *f, Move *m,
+                     struct list_head *pmove, struct list_head *smove) {
+
+    if (have_same_location(f, m->to, &m->from)) {
+        return false;
+    }
     m->status = BEING_MOVED;
-    location tmp = {
-        .type = REGISTER,
-        .as.reg = rv32_priv_reg[0],
-    };
-    listNode *move_node;
-    listNode *move_iter = listFirst(par_move);
-    while ((move_node = listNext(&move_iter)) != NULL) {
-        move *x = listNodeValue(move_node);
-        if (MOVE_FROM_EQ_TO(x->from, m->to)) {
+    Move *x;
+    list_for_each_entry(x, pmove, link) {
+        if (have_same_location(f, x->to, &x->from)) {
             switch (x->status) {
-                case TO_MOVE:
-                    move_one(x, par_move, move_seq);
-                    break;
-                case BEING_MOVED: {
-                    Ins *i = alloc_copy(&tmp, &x->from);
-                    listAddNodeTail(move_seq, i);
-                    x->from.type = LOCATION;
-                    x->from.as.loc = tmp;
-                } break;
-                case MOVED:
-                    break;
-                default:
-                    panic();
+            case TO_MOVE: {
+                bool err = move_one(f, x, pmove, smove);
+                if (err) return true;
+            } break;
+            case BEING_MOVED: {
+                IRInstr *ins = alloc_copy(&tmp, &x->from);
+                if (ins == NULL) return true;
+                list_add_tail(&ins->next, smove);
+                x->from.type = IR_REF_TYPE_LOCATION;
+                x->from.as.location = &tmp;
+            } break;
+            case MOVED:
+                break;
+            default:
+                assert(0);
             }
         }
     }
-    Ins *i = alloc_copy(&m->to, &m->from);
-    listAddNodeHead(move_seq, i);
+    IRInstr *ins = alloc_copy(m->to, &m->from);
+    if (ins == NULL) return true;
+    list_add_tail(&ins->next, smove);
     m->status = MOVED;
+    return false;
 }
 
-static list *sequentialize(list *par_move) {
-    list *move_seq = listCreate();
-    listNode *move_node;
-    listNode *move_iter = listFirst(par_move);
-    while ((move_node = listNext(&move_iter)) != NULL) {
-        move *move = listNodeValue(move_node);
+static bool sequentialize_parallel_move(IRFunction *f, struct list_head *pmove,
+                                        struct list_head *smove) {
+    Move *move;
+    list_for_each_entry(move, pmove, link) {
         move->status = TO_MOVE;
     }
 
-    move_iter = listFirst(par_move);
-    while ((move_node = listNext(&move_iter)) != NULL) {
-        move *move = listNodeValue(move_node);
+    bool err;
+    list_for_each_entry(move, pmove, link) {
         if (move->status == TO_MOVE) {
-            move_one(move, par_move, move_seq);
+            err = move_one(f, move, pmove, smove);
+            if (err) return true;
         }
     }
-
-    return move_seq;
+    return false;
 }
-*/
+
+
+static __always_inline void
+insert_move_at_start(IRBlock *b, struct list_head *smove) {
+
+    IRInstr *ins, *iter;
+    list_for_each_entry_safe(ins, iter, smove, next) {
+        list_del(&ins->next);
+        list_add(&ins->next, &b->instr_list);
+    }
+}
+
+static __always_inline void
+insert_move_at_end(IRBlock *b, struct list_head *smove) {
+
+    IRInstr *ins, *iter;
+    list_for_each_entry_safe(ins, iter, smove, next) {
+        list_del(&ins->next);
+        list_add_tail(&ins->next, &b->instr_list);
+    }
+}
+
+static bool insert_sequence_of_moves(IRFunction *f, struct list_head *smove,
+                                     IRBlock *pred, IRBlock *succ) {
+    if (list_empty(smove)) {
+        return false;
+    }
+
+    bool err;
+    if (succ->pred_count > 1 &&
+        pred->succ[0] != NULL && pred->succ[1] != NULL) {
+        /* 'succ' has 'pred' and other block as predecessors
+         * 'pred' has 'succ' and another block as successors
+         * => the edge between 'pred' and 'succ' is a critical edge */
+
+        /* Critical edge splitting */
+        IRBlock *block = ir_create_sealed_block_without_locals(f);
+        if (block == NULL) return true;
+        if (pred->succ[0] == succ) {
+            pred->succ[0] = block;
+        } else {
+            pred->succ[1] = block;
+        }
+        /* 'block' is an empty block, insert the sequence of moves
+         * at the start or at then end of 'block' if the same */
+        insert_move_at_start(block, smove);
+
+        /* add a jmp from 'block' to 'succ' */
+        block->jump.type = IR_JUMP_TYPE_JMP;
+        block->succ[0] = succ;
+        err = ir_add_predecessor(succ, block);
+        if (err) return true;
+
+    } else if (pred->succ[0] != NULL && pred->succ[1] != NULL) {
+        /* 'succ' has only 'pred' as predecessor
+         * 'pred' has 'succ' and another block as successors
+         * => insert the sequence of moves at the start of 'succ' */
+        insert_move_at_start(succ, smove);
+    } else {
+        /* 'succ' has 'pred' and other block as predecessors
+         * 'pred' has only 'succ' as successor
+         * => insert the sequence of moves at the end of 'pred' */
+        insert_move_at_end(pred, smove);
+    }
+    return false;
+}
 
 static bool resolve_edge(IRFunction *f, IRBlock *pred, IRBlock *succ) {
+
+    Move *move, *move_iter;
+    IRInstr *ins, *ins_iter;
+    bool err = false;
 
     struct list_head pmove;
     INIT_LIST_HEAD(&pmove);
 
-    bool err = false;
+    struct list_head smove;
+    INIT_LIST_HEAD(&smove);
 
     err = parallel_move_from_phis(f, pred, succ, &pmove);
     if (err) goto ERROR;
@@ -657,33 +737,44 @@ static bool resolve_edge(IRFunction *f, IRBlock *pred, IRBlock *succ) {
     if (!list_empty(&pmove)) {
         printf("parallel move:\n");
     }
-    Move *move2, *iter2;
-    list_for_each_entry_safe(move2, iter2, &pmove, link) {
-        ir_print_location(&move2->to, stdout);
+    list_for_each_entry(move, &pmove, link) {
+        ir_print_location(move->to, stdout);
         printf(" = ");
-        ir_print_ref(move2->from, stdout);
+        ir_print_ref(move->from, stdout);
         printf("\n");
     }
     */
 
-    struct list_head smove;
-    INIT_LIST_HEAD(&smove);
+    err = sequentialize_parallel_move(f, &pmove, &smove);
+    if (err) goto ERROR;
 
-    //err = sequentialize_parallel_copy(&pmove, &smove);
-    //if (err) goto ERROR;
+    /*
+    if (!list_empty(&smove)) {
+        printf("sequence move:\n");
+    }
+    IRInstr *ins;
+    list_for_each_entry(ins, &smove, next) {
+        ir_print_ref(ins->to, stdout);
+        printf(" = ");
+        ir_print_ref(ins->arg[0], stdout);
+        printf("\n");
+    }
+    */
 
-    //err = insert_copy_sequence(f, &smove, pred, succ);
-    //if (err) goto ERROR;
+    err = insert_sequence_of_moves(f, &smove, pred, succ);
+    if (err) goto ERROR;
 
 ERROR:
-    ; /* avoid c parser errors */
     /* free pmove */
-    Move *move, *iter;
-    list_for_each_entry_safe(move, iter, &pmove, link) {
+    list_for_each_entry_safe(move, move_iter, &pmove, link) {
         list_del(&move->link);
         free(move);
     }
     /* free smove */
+    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
+        list_del(&ins->next);
+        free(move);
+    }
     return err;
 }
 
@@ -692,7 +783,7 @@ ERROR:
  * called SSA destruction. */
 static bool ssa_deconstruction(IRFunction *f) {
 
-    IRBlock *block;
+    IRBlock *block, *iter;
     IRBlock *successor;
     bool err;
 
@@ -707,6 +798,14 @@ static bool ssa_deconstruction(IRFunction *f) {
             err = resolve_edge(f, block, successor);
             if (err) return err;
         }
+    }
+
+    /* All the blocks created from critical edge splitting was placed in the
+     * 'f->working_block_list' (we cannont modify the 'f->block_list' while
+     * iterate on it), move them in the 'f->block_list' */
+    list_for_each_entry_safe(block, iter, &f->working_block_list, next) {
+        list_del(&block->next);
+        list_add_tail(&block->next, &block->succ[0]->next);
     }
 
     /* phis don't exists anymore, replace the phi references with tmp references */
@@ -733,211 +832,269 @@ static bool ssa_deconstruction(IRFunction *f) {
     return false;
 }
 
-#if 0
-static void ensure_abi_constraints(IRFunction *f) {
-    location a0 = {
-        .type = REGISTER,
-        .as.reg = A0,
-    };
-    list *par_move = listCreate();
-    listSetFreeMethod(par_move, free);
-    unsigned int arg_index = 0;
+static bool ensure_function_parameters_constraints(IRFunction *f) {
 
-    listNode *ins_node;
-    listNode *ins_iter = listFirst(f->start->ins_list);
-    while ((ins_node = listNext(&ins_iter)) != NULL) {
-        Ins *ins = listNodeValue(ins_node);
+    bool err = false;
+    struct list_head pmove;
+    struct list_head smove;
+    INIT_LIST_HEAD(&pmove);
+    INIT_LIST_HEAD(&smove);
+    unsigned int par_index = 0;
+    IRInstr *ins, *ins_iter;
+    Move *move, *move_iter;
+
+    /* Ensure functions receive parameters from their caller */
+        list_for_each_entry_safe(ins, ins_iter, &f->start->instr_list, next) {
         if (ins->op != IR_OPCODE_PAR) break;
-        assert(ins->to.type == REF_TYPE_TMP);
-        Tmp *t = listNodeValue(ins->to.as.tmp_node);
-        if (arg_index > RV32_ARG_NUM_REG) panic();
-        move_from from = {
-            .type = LOCATION,
-            .as.loc = {
-                .type = REGISTER,
-                .as.reg = rv32_arg_reg[arg_index++],
-            },
+        if (par_index > RV32_ARG_NUM_REG) {
+        /* Passing function parameters through the stack is not implemented */
+            assert(0);
+        }
+        IRReference from = {
+            .type = IR_REF_TYPE_LOCATION,
+            .as.location = &args[par_index++],
         };
-        location to = t->i->assign;
-        if (!MOVE_FROM_EQ_TO(from, to)) {
-            move *move = xmalloc(sizeof(struct move));
-            move->from = from;
+        Location *to = &f->live_intervals[ins->to.as.tmp_id].assign;
+
+        if (!have_same_location(f, to, &from)) {
+            Move *move = malloc(sizeof(struct Move));
+            if (move == NULL) {
+                err = true;
+                goto ERROR;
+            }
             move->to = to;
-            listAddNodeTail(par_move, move);
+            move->from = from;
+            list_add_tail(&move->link, &pmove);
         }
-        listDelNode(f->start->ins_list, ins_node);
+        list_del(&ins->next);
+        free(ins);
     }
+    err = sequentialize_parallel_move(f, &pmove, &smove);
+    if (err) goto ERROR;
+    insert_move_at_start(f->start, &smove);
 
-    list *move_seq = sequentialize(par_move);
-    listNode *copy_node;
-    listNode *copy_iter = listFirst(move_seq);
-    while ((copy_node = listNext(&copy_iter)) != NULL) {
-        listUnlinkNode(move_seq, copy_node);
-        listLinkNodeHead(f->start->ins_list, copy_node);
+ERROR:
+    /* free pmove */
+    list_for_each_entry_safe(move, move_iter, &pmove, link) {
+        list_del(&move->link);
+        free(move);
     }
-    arg_index = 0;
-    listRelease(move_seq);
-    listEmpty(par_move);
-
-    listNode *blk_node;
-    listNode *blk_iter = listFirst(f->blk_list);
-    while ((blk_node = listNext(&blk_iter)) != NULL) {
-        Blk *b = listNodeValue(blk_node);
-
-        listNode *ins_node;
-        listNode *ins_iter = listFirst(b->ins_list);
-        while ((ins_node = listNext(&ins_iter)) != NULL) {
-            Ins *ins = listNodeValue(ins_node);
-            if (ins->op == IR_OPCODE_ARG) {
-                Ref *r = &ins->arg[0];
-                move_from from;
-                switch (r->type) {
-                    case REF_TYPE_TMP: {
-                        Tmp *t = listNodeValue(r->as.tmp_node);
-                        from.type = LOCATION;
-                        from.as.loc = t->i->assign;
-                    } break;
-                    case REF_TYPE_INT32_CONST: {
-                        from.type = CONST;
-                        from.as.int32_const = r->as.int32_const;
-                    } break;
-                    default:
-                        assert(0);
-                }
-                listDelNode(b->ins_list, ins_node);
-
-                location to;
-                to.type = REGISTER;
-                if (arg_index > RV32_ARG_NUM_REG) panic();
-                to.as.reg = rv32_arg_reg[arg_index++];
-
-                if (!MOVE_FROM_EQ_TO(from, to)) {
-                    move *move = xmalloc(sizeof(struct move));
-                    move->from = from;
-                    move->to = to;
-                    listAddNodeTail(par_move, move);
-                }
-            }
-            else if (ins->op == IR_OPCODE_CALL) {
-                listNode *call_node = ins_node;
-
-                Ins *func_call = listNodeValue(call_node);
-                list *survivors = listCreate();
-                for (unsigned int j = 0; intervals[j] != NULL; j++) {
-                    live_interval *li = intervals[j];
-                    if (li->assign.type == REGISTER &&
-                        li->start < func_call->id &&
-                        li->end > func_call->id) {
-
-                        listAddNodeTail(survivors, li);
-                    }
-                }
-
-                listNode *survivor_node;
-                listNode *survivor_iter = listFirst(survivors);
-                while ((survivor_node = listNext(&survivor_iter)) != NULL) {
-                    live_interval *li = listNodeValue(survivor_node);
-                    Ins *push_ins = xmalloc(sizeof(struct Ins));
-                    push_ins->op = IR_OPCODE_PUSH;
-                    push_ins->type = IR_TYPE_I32;
-                    push_ins->to = UNDEFINED_REF;
-                    push_ins->arg[0].type = REF_TYPE_LOCATION;
-                    push_ins->arg[0].as.loc = li->assign;
-                    push_ins->arg[1] = UNDEFINED_REF;
-                    listInsertNodeBefore(b->ins_list, call_node, push_ins);
-                }
-
-                survivor_iter = listFirst(survivors);
-                while ((survivor_node = listNext(&survivor_iter)) != NULL) {
-                    live_interval *li = listNodeValue(survivor_node);
-                    Ins *pop_ins = xmalloc(sizeof(struct Ins));
-                    pop_ins->op = IR_OPCODE_POP;
-                    pop_ins->type = IR_TYPE_I32;
-                    pop_ins->to.type = REF_TYPE_LOCATION;
-                    pop_ins->to.as.loc = li->assign;
-                    pop_ins->arg[0] = UNDEFINED_REF;
-                    pop_ins->arg[1] = UNDEFINED_REF;
-                    listInsertNodeAfter(b->ins_list, call_node, pop_ins);
-                }
-
-                listRelease(survivors);
-
-                list *move_seq = sequentialize(par_move);
-                listNode *copy_node;
-                listNode *copy_iter = listLast(move_seq);
-                while ((copy_node = listPrev(&copy_iter)) != NULL) {
-                    listUnlinkNode(move_seq, copy_node);
-                    listLinkNodeBefore(b->ins_list, call_node, copy_node);
-                }
-                arg_index = 0;
-                listRelease(move_seq);
-                listEmpty(par_move);
-
-                if (func_call->to.type == REF_TYPE_TMP && func_call->to.as.tmp_node != NULL) {
-                    Tmp *t = listNodeValue(func_call->to.as.tmp_node);
-                    if (!LOCATION_EQ(a0, t->i->assign)) {
-                        move_from src = {
-                            .type = LOCATION,
-                            .as.loc = a0
-                        };
-                        Ins *ins = alloc_copy(&t->i->assign, &src);
-                        listInsertNodeAfter(b->ins_list, call_node, ins);
-                    }
-                    func_call->to = UNDEFINED_REF;
-                }
-            }
-        }
-
-        if (b->jmp.type == RET1_JUMP_TYPE) {
-            move_from src;
-            Ref *r = &b->jmp.arg;
-            switch (r->type) {
-                case REF_TYPE_TMP: {
-                    Tmp *t = listNodeValue(r->as.tmp_node);
-                    src.type = LOCATION;
-                    src.as.loc = t->i->assign;
-                } break;
-                case REF_TYPE_INT32_CONST: {
-                    src.type = CONST;
-                    src.as.int32_const = r->as.int32_const;
-                } break;
-                default:
-                    assert(0);
-            }
-            if (!MOVE_FROM_EQ_TO(src, a0)) {
-                Ins *ins = alloc_copy(&a0, &src);
-                listAddNodeTail(b->ins_list, ins);
-            }
-            b->jmp.type = RET0_JUMP_TYPE;
-        }
+    /* free smove */
+    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
+        list_del(&ins->next);
+        free(move);
     }
-    listRelease(par_move);
+    return err;
 }
-#endif
+
+static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **intervals) {
+
+    bool err = false;
+    struct list_head pmove;
+    struct list_head smove;
+    INIT_LIST_HEAD(&pmove);
+    INIT_LIST_HEAD(&smove);
+    unsigned int interval_count = f->tmp_count;
+    unsigned int arg_index = 0;
+    IRInstr *ins, *ins_iter;
+    Move *move, *move_iter;
+
+    IRBlock *block;
+    list_for_each_entry(block, &f->block_list, next) {
+
+        list_for_each_entry_safe(ins, ins_iter, &block->instr_list, next) {
+            switch (ins->op) {
+            case IR_OPCODE_ARG: {
+                if (arg_index > RV32_ARG_NUM_REG) {
+                /* Passing function call arguments through the stack is not implemented */
+                    assert(0);
+                }
+                IRReference from = ins->arg[0];
+                Location *to = &args[arg_index++];
+                if (!have_same_location(f, to, &from)) {
+                    Move *move = malloc(sizeof(struct Move));
+                    if (move == NULL) {
+                        err = true;
+                        goto ERROR;
+                    }
+                    move->to = to;
+                    move->from = from;
+                    list_add_tail(&move->link, &pmove);
+                }
+                ir_rm_usage(&ins->arg[0]);
+                list_del(&ins->next);
+                free(ins);
+            } break;
+            case IR_OPCODE_CALL: {
+
+                struct list_head survivors;
+                INIT_LIST_HEAD(&survivors);
+                IRInstr *call = ins;
+
+                for (unsigned int j = 0; j < interval_count; j++) {
+                    LiveInterval *live_int = intervals[j];
+                    if (live_int->assign.type == LOCATION_TYPE_REGISTER &&
+                        !rv32_is_callee_saved[live_int->assign.as.reg] &&
+                        live_int->start < call->seqnum && live_int->end > call->seqnum) {
+                            list_add_tail(&live_int->link, &survivors);
+                    }
+                }
+
+                LiveInterval *live_int, *live_int_iter;
+                list_for_each_entry(live_int, &survivors, link) {
+                    IRInstr *push = malloc(sizeof(struct IRInstr));
+                    if (push == NULL) {
+                        err = true;
+                        goto ERROR;
+                    }
+                    push->op = IR_OPCODE_PUSH;
+                    push->type = IR_TYPE_I32;
+                    push->to.type = IR_REF_TYPE_UNDEFINED;
+                    push->arg[0].type = IR_REF_TYPE_LOCATION;
+                    push->arg[0].as.location = &live_int->assign;
+                    push->arg[1].type = IR_REF_TYPE_UNDEFINED;
+                    push->seqnum = 0;
+                    /* Insert 'push' before 'call' */
+                    list_add_tail(&push->next, &call->next);
+                }
+
+                list_for_each_entry(live_int, &survivors, link) {
+                    IRInstr *pop = malloc(sizeof(struct IRInstr));
+                    if (pop == NULL) {
+                        err = true;
+                        goto ERROR;
+                    }
+                    pop->op = IR_OPCODE_POP;
+                    pop->type = IR_TYPE_I32;
+                    pop->to.type = IR_REF_TYPE_LOCATION;
+                    pop->to.as.location = &live_int->assign;
+                    pop->arg[0].type = IR_REF_TYPE_UNDEFINED;
+                    pop->arg[1].type = IR_REF_TYPE_UNDEFINED;
+                    pop->seqnum = 0;
+                    /* Insert 'pop' after 'call' */
+                    list_add(&pop->next, &call->next);
+                }
+
+                /* Clean the survivors list */
+                list_for_each_entry_safe(live_int, live_int_iter, &survivors, link) {
+                    list_del(&live_int->link);
+                }
+
+                err = sequentialize_parallel_move(f, &pmove, &smove);
+                if (err) goto ERROR;
+
+                /* Insert the copies before 'call' */
+                IRInstr *ins2, *ins2_iter;
+                list_for_each_entry_safe(ins2, ins2_iter, &smove, next) {
+                    list_del(&ins2->next);
+                    list_add_tail(&ins2->next, &call->next);
+                }
+
+                /* Reset arg_index */
+                arg_index = 0;
+                /* free pmove */
+                list_for_each_entry_safe(move, move_iter, &pmove, link) {
+                    list_del(&move->link);
+                    free(move);
+                }
+
+                if (call->to.type != IR_REF_TYPE_UNDEFINED) {
+                    if (!have_same_location(f, &args[0], &call->to)) {
+                        IRInstr *ins = alloc_copy(&args[0], &call->to);
+                        if (ins == NULL) {
+                            err = true;
+                            goto ERROR;
+                        }
+                        list_add(&ins->next, &call->next);
+                    }
+                }
+                call->to.type = IR_REF_TYPE_UNDEFINED;
+                call->type = IR_TYPE_VOID;
+            } break;
+            default:
+                continue;
+            }
+        }
+    }
+
+ERROR:
+    /* free pmove */
+    list_for_each_entry_safe(move, move_iter, &pmove, link) {
+        list_del(&move->link);
+        free(move);
+    }
+    /* free smove */
+    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
+        list_del(&ins->next);
+        free(move);
+    }
+    return err;
+
+}
+
+static bool ensure_function_return_value_constraints(IRFunction *f) {
+
+    IRBlock *block;
+    list_for_each_entry(block, &f->block_list, next) {
+        if (block->jump.type == IR_JUMP_TYPE_RET1) {
+            if (!have_same_location(f, &args[0], &block->jump.arg)) {
+                IRInstr *ins = alloc_copy(&args[0], &block->jump.arg);
+                if (ins == NULL) return true;
+                list_add_tail(&ins->next, &block->instr_list);
+            }
+        }
+    }
+    return false;
+}
+
+static bool ensure_abi_constraints(IRFunction *f, LiveInterval **intervals) {
+
+    bool err;
+    err = ensure_function_parameters_constraints(f);
+    if (err) return true;
+
+    err = ensure_function_calls_constraints(f, intervals);
+    if (err) return true;
+
+    err = ensure_function_return_value_constraints(f);
+    if (err) return true;
+
+    return false;
+}
 
 bool register_allocation(IRFunction *f) {
 
     number_instructions(f);
     LiveInterval **sorted_intervals = build_intervals(f);
     if (sorted_intervals == NULL) return true;
-    register_hints(f);
 
+    /*
+    for (unsigned int tmp_id = 0; tmp_id < f->next_tmp_id; tmp_id++) {
+        printf("tmp_id: %u\n", tmp_id);
+        printf("    start: %u\n", f->live_intervals[tmp_id].start);
+        printf("    end:   %u\n", f->live_intervals[tmp_id].end);
+    }
+    */
+
+    register_hints(f);
+    /* create the registers pool */
     unsigned long reg_pool = 0;
     unsigned int nreg = RV32_GP_NUM_REG + RV32_ARG_NUM_REG;
     for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
         bitmap_set_bit(&reg_pool, rv32_gp_reg[i]);
     }
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
-        bitmap_set_bit(&reg_pool, rv32_gp_reg[i]);
+        bitmap_set_bit(&reg_pool, rv32_arg_reg[i]);
     }
     linear_scan(f, sorted_intervals, &reg_pool, nreg);
-    free(sorted_intervals);
-    //ensure_abi_constraints(f);
 
     bool err;
+    err = ensure_abi_constraints(f, sorted_intervals);
+    if (err) return true;
+    free(sorted_intervals);
+
     err = ssa_deconstruction(f);
     if (err) return true;
-    replace_tmps_with_locations(f);
-
+    replace_references_with_locations(f);
     return false;
 }
