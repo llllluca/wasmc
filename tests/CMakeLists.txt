@@ -1,18 +1,19 @@
 include_directories(../src/)
 
 function(test name expected_result iwasm)
-    add_test(NAME ${name}
-        COMMAND ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-    add_test(NAME memcheck_${name}
+    add_test(
+        NAME memcheck_${name}
         COMMAND valgrind
         --error-exitcode=1
         --tool=memcheck
         --leak-check=full
         --track-origins=yes
-        ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
+        ${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-
 endfunction()
 
 # function(test name expected_result iwasm)

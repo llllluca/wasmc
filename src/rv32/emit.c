@@ -55,6 +55,18 @@ const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG] = {
     T5, T6
 };
 
+const AOTTargetInfo target_info = {
+    .bin_type = BIN_TYPE_ELF32L,
+    .abi_type = 0,
+    .e_type = E_TYPE_REL,
+    .e_machine = E_MACHINE_RISCV,
+    .e_version = E_VERSION_CURRENT,
+    .e_flags = 0,
+    .feature_flags = 0,
+    .reserved = 0,
+    .arch = "riscv32",
+};
+
 #if 0
 Target rv32 = {
     .name = "riscv32",
@@ -596,31 +608,5 @@ ERROR:
 }
 
 
-static AOTErr_t rv32_emit_target_info(AOTModule *m) {
 
-    static const AOTTargetInfo target_info = {
-        .bin_type = BIN_TYPE_ELF32L,
-        .abi_type = 0,
-        .e_type = E_TYPE_REL,
-        .e_machine = E_MACHINE_RISCV,
-        .e_version = E_VERSION_CURRENT,
-        .e_flags = 0,
-        .feature_flags = 0,
-        .reserved = 0,
-        .arch = "riscv32",
-    };
-
-    WRITE_UINT32(m, AOT_SECTION_TYPE_TARGET_INFO);
-    WRITE_UINT32(m, sizeof(struct AOTTargetInfo));
-    WRITE_UINT16(m, target_info.bin_type);
-    WRITE_UINT16(m, target_info.abi_type);
-    WRITE_UINT16(m, target_info.e_type);
-    WRITE_UINT16(m, target_info.e_machine);
-    WRITE_UINT32(m, target_info.e_version);
-    WRITE_UINT32(m, target_info.e_flags);
-    WRITE_UINT64(m, target_info.reserved);
-    WRITE_UINT64(m, target_info.feature_flags);
-    WRITE_BYTE_ARRAY(m, target_info.arch, sizeof(target_info.arch));
-    return AOT_OK;
-}
 #endif

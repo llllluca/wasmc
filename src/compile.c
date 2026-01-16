@@ -5,7 +5,11 @@
 #include "wasm.h"
 #include "libqbe.h"
 #include "aot.h"
-#include "compile.h"
+
+typedef enum CompileErr_t {
+    COMPILE_OK = 0,
+    COMPILE_ERR,
+} CompileErr_t;
 
 typedef struct OperandStackEntry {
     struct OperandStackEntry *next;
@@ -1271,8 +1275,48 @@ ERROR:
     return NULL;
 }
 
+int compile(uint8_t *wasm_buf, unsigned int wasm_len,
+            uint8_t *aot_buf, unsigned int aot_len) {
+
+    WASMModule wasm_mod;
+    WASMErr_t wasm_err;
+    wasm_err = wasm_decode(&wasm_mod, wasm_buf, wasm_len);
+    if (wasm_err) return -1;
+
+    AOTModule aot_mod;
+    AOTErr_t aot_err;
+    aot_err = aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod);
+    if (aot_err) return -1;
+    aot_err = emit_target_info(&aot_mod);
+    if (aot_err) return -1;
+    //emit_init_data(&aot_mod);
+    wasm_free(&wasm_mod);
+
+    return aot_mod.offset - aot_mod.buf;
+}
 
 
+/*
+CompileErr_t compile(WASMModule *wasm_mod, uint8_t *buf, unsigned int len) {
+
+
+    aot_module_init(&aot_mod, &buf, len, wasm_mod);
+    emit_target_info(&aot_mod);
+    emit_init_data(&aot_mod);
+    for (uint32_t i = 0; i < wasm_mod->function_count; i++) {
+        IRFunction *fn = compile_fn(wasm_mod, i);
+        if (fn == NULL) return COMPILE_ERR;
+        emit_text(&aot_mod, fn);
+        ir_free_function(fn);
+    }
+    emit_function(&aot_mod);
+    emit_export(&aot_mod);
+    emit_relocation(&aot_mod);
+    return COMPILE_OK;
+}
+*/
+
+/*
 CompileErr_t compile(WASMModule *wasm_mod, Target *T,
              uint8_t **out_buf, uint32_t *out_len) {
 
@@ -1296,6 +1340,7 @@ CompileErr_t compile(WASMModule *wasm_mod, Target *T,
     //ERR_CHECK(aot_module_finalize(&aot_mod, out_buf, out_len));
     return COMPILE_OK;
 }
+*/
 
 
 

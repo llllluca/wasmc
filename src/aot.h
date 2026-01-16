@@ -188,9 +188,13 @@ typedef struct Target {
         (m)->offset += len; \
     } while (0)
 
-AOTErr_t aot_module_finalize(AOTModule *m, uint8_t **buf, uint32_t *len);
-AOTErr_t aot_module_init(AOTModule *m, WASMModule *w, Target *t);
-void aot_module_cleanup(AOTModule *m);
+
+AOTErr_t aot_module_init(AOTModule *aot_mod, uint8_t *aot_buf,
+                         unsigned int aot_len, WASMModule *w);
+AOTErr_t emit_target_info(AOTModule *m);
+
+//AOTErr_t aot_module_finalize(AOTModule *m, uint8_t **buf, uint32_t *len);
+//void aot_module_cleanup(AOTModule *m);
 
 #endif
 

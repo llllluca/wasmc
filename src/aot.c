@@ -2,7 +2,41 @@
 #include <string.h>
 #include <stdlib.h>
 
-static AOTErr_t emit_init_data(AOTModule *m) {
+extern AOTTargetInfo target_info;
+
+AOTErr_t aot_module_init(AOTModule *m, uint8_t *buf,
+                         unsigned int buf_len, WASMModule *wasm_mod) {
+
+    memset(m, 0, sizeof(struct AOTModule));
+    m->wasm_mod = wasm_mod;
+    m->buf_len = buf_len;
+    m->buf = buf;
+    m->offset = m->buf;
+    m->buf_end = m->buf + m->buf_len;
+
+    WRITE_UINT32(m, AOT_MAGIC_NUMBER);
+    WRITE_UINT32(m, AOT_CURRENT_VERSION);
+    return AOT_OK;
+}
+
+
+AOTErr_t emit_target_info(AOTModule *m) {
+
+    WRITE_UINT32(m, AOT_SECTION_TYPE_TARGET_INFO);
+    WRITE_UINT32(m, sizeof(struct AOTTargetInfo));
+    WRITE_UINT16(m, target_info.bin_type);
+    WRITE_UINT16(m, target_info.abi_type);
+    WRITE_UINT16(m, target_info.e_type);
+    WRITE_UINT16(m, target_info.e_machine);
+    WRITE_UINT32(m, target_info.e_version);
+    WRITE_UINT32(m, target_info.e_flags);
+    WRITE_UINT64(m, target_info.reserved);
+    WRITE_UINT64(m, target_info.feature_flags);
+    WRITE_BYTE_ARRAY(m, target_info.arch, sizeof(target_info.arch));
+    return AOT_OK;
+}
+
+AOTErr_t emit_init_data(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
 
@@ -351,30 +385,6 @@ void aot_module_cleanup(AOTModule *m) {
         free(r);
         r = next;
     }
-}
-
-AOTErr_t aot_module_init(AOTModule *m, WASMModule *w, Target *t) {
-
-    memset(m, 0, sizeof(struct AOTModule));
-    m->wasm_mod = w;
-    m->buf_len = 16 * 1024;
-    m->buf = calloc(m->buf_len, sizeof(uint8_t));
-    if (m->buf == NULL) goto ERROR;
-    m->offset = m->buf;
-    m->buf_end = m->buf + m->buf_len;
-
-    WRITE_UINT32(m, AOT_MAGIC_NUMBER);
-    WRITE_UINT32(m, AOT_CURRENT_VERSION);
-
-    if (t->emit_target_info(m)) goto ERROR;
-    if (emit_init_data(m)) goto ERROR;
-    if (init_text(m)) goto ERROR;
-
-    return AOT_OK;
-
-ERROR:
-    aot_module_cleanup(m);
-    return AOT_ERR;
 }
 
 
