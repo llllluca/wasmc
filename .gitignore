@@ -9,4 +9,7 @@ esp32c3-idf/Debug/
 esp32c3-idf/sdkconfig.old
 esp32c3-idf/compile_commands.json
 Debug/
-compile_commands.json
+.aspell.en.prepl
+.aspell.en.pws
+aotfmt.tex.bak
+aspell.sh

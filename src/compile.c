@@ -1284,14 +1284,14 @@ int compile(uint8_t *wasm_buf, unsigned int wasm_len,
     if (wasm_err) return -1;
 
     AOTModule aot_mod;
-    AOTErr_t aot_err;
-    aot_err = aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod);
-    if (aot_err) return -1;
-    aot_err = emit_target_info(&aot_mod);
-    if (aot_err) return -1;
-    //emit_init_data(&aot_mod);
-    wasm_free(&wasm_mod);
+    if (aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod)) return -1;
+    if (emit_target_info(&aot_mod)) return -1;
+    if (emit_init_data(&aot_mod)) return -1;
+    if (emit_function(&aot_mod)) return -1;
+    if (emit_export(&aot_mod)) return -1;
+    if (emit_relocation(&aot_mod)) return -1;
 
+    wasm_free(&wasm_mod);
     return aot_mod.offset - aot_mod.buf;
 }
 

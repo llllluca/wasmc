@@ -56,12 +56,12 @@ const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG] = {
 };
 
 const AOTTargetInfo target_info = {
-    .bin_type = BIN_TYPE_ELF32L,
+    .bin_type = AOT_BIN_TYPE_ELF32L,
     .abi_type = 0,
-    .e_type = E_TYPE_REL,
-    .e_machine = E_MACHINE_RISCV,
-    .e_version = E_VERSION_CURRENT,
-    .e_flags = 0,
+    .e_type = AOT_E_TYPE_REL,
+    .e_machine = AOT_E_MACHINE_RISCV,
+    .e_version = AOT_E_VERSION_CURRENT,
+    .e_flags = 4,
     .feature_flags = 0,
     .reserved = 0,
     .arch = "riscv32",

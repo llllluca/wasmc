@@ -1,4 +1,5 @@
 add_executable(readaot readaot.c)
+target_include_directories(readaot PRIVATE ${PROJECT_SOURCE_DIR}/src/)
 
 add_executable(wasmc_exe wasmc.c)
 set_property(TARGET wasmc_exe PROPERTY OUTPUT_NAME wasmc)
