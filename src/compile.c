@@ -3,7 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include "wasm.h"
-#include "libqbe.h"
+#include "ir.h"
 #include "aot.h"
 
 typedef enum CompileErr_t {
@@ -309,12 +309,11 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
         free(pop_opd(ctx));
     }
 
-    IRReference callee_name = IR_REF_NAME(callee->name);
     if (t->result_count == 0) {
         /* do a call instruction to a void function */
         err = ir_append_void_func_call(
             ctx->curr_block,
-            callee_name);
+            IR_REF_FUNC(callee));
         if (err) return COMPILE_ERR;
 
         return COMPILE_OK;
@@ -326,7 +325,7 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
         ctx->curr_block,
         ir_cast(t->result_type),
         ret_value,
-        callee_name);
+        IR_REF_FUNC(callee));
     if (err) return COMPILE_ERR;
 
     OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
@@ -1275,73 +1274,43 @@ ERROR:
     return NULL;
 }
 
+AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn);
+
 int compile(uint8_t *wasm_buf, unsigned int wasm_len,
             uint8_t *aot_buf, unsigned int aot_len) {
 
     WASMModule wasm_mod;
+    IRFunction *fn = NULL;
     WASMErr_t wasm_err;
     wasm_err = wasm_decode(&wasm_mod, wasm_buf, wasm_len);
     if (wasm_err) return -1;
 
     AOTModule aot_mod;
-    if (aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod)) return -1;
-    if (emit_target_info(&aot_mod)) return -1;
-    if (emit_init_data(&aot_mod)) return -1;
+    if (aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod)) goto ERROR;
+    if (emit_target_info(&aot_mod)) goto ERROR;
+    if (emit_init_data(&aot_mod)) goto ERROR;
+    for (uint32_t i = 0; i < wasm_mod.function_count; i++) {
+        fn = compile_fn(&wasm_mod, i);
+        if (fn == NULL) goto ERROR;
+        ir_print_fn(fn, stdout);
+        if (register_allocation(fn)) goto ERROR;
+        ir_print_fn(fn, stdout);
+        if (rv32_emit_text(&aot_mod, fn)) goto ERROR;
+        ir_free_function(fn);
+    }
     if (emit_function(&aot_mod)) return -1;
     if (emit_export(&aot_mod)) return -1;
     if (emit_relocation(&aot_mod)) return -1;
 
+    int len = aot_mod.offset - aot_mod.buf;
+    aot_module_cleanup(&aot_mod);
     wasm_free(&wasm_mod);
-    return aot_mod.offset - aot_mod.buf;
+    return len;
+
+ERROR:
+    wasm_free(&wasm_mod);
+    if (fn != NULL) ir_free_function(fn);
+    return -1;
+
 }
-
-
-/*
-CompileErr_t compile(WASMModule *wasm_mod, uint8_t *buf, unsigned int len) {
-
-
-    aot_module_init(&aot_mod, &buf, len, wasm_mod);
-    emit_target_info(&aot_mod);
-    emit_init_data(&aot_mod);
-    for (uint32_t i = 0; i < wasm_mod->function_count; i++) {
-        IRFunction *fn = compile_fn(wasm_mod, i);
-        if (fn == NULL) return COMPILE_ERR;
-        emit_text(&aot_mod, fn);
-        ir_free_function(fn);
-    }
-    emit_function(&aot_mod);
-    emit_export(&aot_mod);
-    emit_relocation(&aot_mod);
-    return COMPILE_OK;
-}
-*/
-
-/*
-CompileErr_t compile(WASMModule *wasm_mod, Target *T,
-             uint8_t **out_buf, uint32_t *out_len) {
-
-    (void)T;
-    (void)out_buf;
-    (void)out_len;
-
-    //AOTModule aot_mod;
-    //ERR_CHECK(aot_module_init(&aot_mod, wasm_mod, T));
-    for (uint32_t i = 0; i < wasm_mod->function_count; i++) {
-        IRFunction *fn = compile_fn(wasm_mod, i);
-        if (fn == NULL) return COMPILE_ERR;
-        ir_print_fn(fn, stdout);
-        register_allocation(fn);
-        ir_print_fn(fn, stdout);
-
-        //WASMFunction *wf = &wasm_mod->functions[i];
-        //ERR_CHECK(T->emitfn(&aot_mod, fn, wf->typeidx));
-        ir_free_function(fn);
-    }
-    //ERR_CHECK(aot_module_finalize(&aot_mod, out_buf, out_len));
-    return COMPILE_OK;
-}
-*/
-
-
-
 

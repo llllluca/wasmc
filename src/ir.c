@@ -1,4 +1,4 @@
-#include "libqbe.h"
+#include "ir.h"
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
@@ -96,14 +96,13 @@ void ir_print_ref(IRReference r, FILE *f) {
         fprintf(f, "%%t%u", r.as.tmp_id);
         break;
     case IR_REF_TYPE_PHI:
-        //assert(0);
         fprintf(f, "%%t%u", r.as.phi->id);
         break;
     case IR_REF_TYPE_I32:
         printf("%"PRIi32, r.as.i32);
         break;
-    case IR_REF_TYPE_NAME:
-        printf("%s", r.as.name);
+    case IR_REF_TYPE_FUNCTION:
+        printf("%s", r.as.wasm_func->name);
         break;
     case IR_REF_TYPE_LOCATION:
         ir_print_location(r.as.location, f);
@@ -121,15 +120,24 @@ static void ir_print_phi(IRPhi *phi, FILE *f) {
         fprintf(f, "@%u ", phi_arg->predecessor->id);
         ir_print_ref(phi_arg->value, f);
         if (phi_arg->next.next != &phi->phi_arg_list) {
-            fprintf(f, ",");
+            fprintf(f, ", ");
         }
     }
     printf("\n");
 }
 
 static void ir_print_instr(IRInstr *i, FILE *f) {
-    fprintf(f, "%u:\t", i->seqnum);
+    fprintf(f, "\t");
     switch (i->op) {
+    case IR_OPCODE_LOAD:
+    case IR_OPCODE_ULOAD8:
+        ir_print_ref(i->to, f);
+        fprintf(f, " =%s %s ", type2str(i->type), optab[i->op]);
+        ir_print_ref(i->arg[0], f);
+        fprintf(f, "(");
+        ir_print_ref(i->arg[1], f);
+        fprintf(f, ")");
+        break;
     case IR_OPCODE_STORE:
     case IR_OPCODE_STORE8:
         fprintf(f, "%s ", optab[i->op]);
@@ -140,8 +148,9 @@ static void ir_print_instr(IRInstr *i, FILE *f) {
         ir_print_ref(i->arg[1], f);
         fprintf(f, ")");
         break;
+    case IR_OPCODE_PUSH:
     case IR_OPCODE_ARG:
-        fprintf(f, "arg %s ", type2str(i->type));
+        fprintf(f, "%s %s ", optab[i->op], type2str(i->type));
         ir_print_ref(i->arg[0], f);
         break;
     case IR_OPCODE_CALL:
@@ -171,7 +180,7 @@ static void ir_print_instr(IRInstr *i, FILE *f) {
 }
 
 static void ir_print_jump(IRBlock *b, FILE *f) {
-    fprintf(f, "%u:\t", b->jump.seqnum);
+    fprintf(f, "\t");
     switch (b->jump.type) {
         case IR_JUMP_TYPE_RET0:
             fprintf(f, "ret\n");
@@ -206,7 +215,7 @@ void ir_print_fn(IRFunction *fn, FILE *f) {
 
     IRBlock *block;
     list_for_each_entry(block, &fn->block_list, next) {
-        fprintf(f, "%u:@%u\n", block->seqnum, block->id);
+        fprintf(f, "@%u\n", block->id);
         IRPhi *phi;
         list_for_each_entry(phi, &block->phi_list, next) {
             ir_print_phi(phi, f);
@@ -260,6 +269,7 @@ IRFunction *ir_create_function(WASMFunction *wasm_func) {
     INIT_LIST_HEAD(&ir_func->working_block_list);
     ir_func->stack_slot_count = 0;
     memset(ir_func->regs_to_preserve, 0, RV32_NUM_REG);
+    ir_func->live_intervals = NULL;
     uint32_t param_count = wasm_func->type->param_count;
     ir_func->ir_local_count = wasm_func->local_count + param_count;
     IRBlock *start = ir_create_sealed_block(ir_func);
@@ -538,8 +548,8 @@ bool ir_reference_equal(IRReference *ref1, IRReference *ref2) {
         return ref1->as.phi == ref2->as.phi;
     case IR_REF_TYPE_I32:
         return ref1->as.i32 == ref2->as.i32;
-    case IR_REF_TYPE_NAME:
-        return ref1->as.name == ref2->as.name;
+    case IR_REF_TYPE_FUNCTION:
+        return ref1->as.wasm_func == ref2->as.wasm_func;
     default:
         assert(0);
     }

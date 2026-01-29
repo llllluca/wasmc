@@ -752,11 +752,37 @@ This documentations don't documents the structure of a object data element.
 
 \section{Text Section}
 \section{Function Section}
+The export section has id 3.
+The content and the structure of the function subsection is very similar to the function section of a WASM module, see section 5.5.6 of the WASM specification \cite{WASM}.
+The start of the export section must be 4-byte aligned.
+
+The init data section decodes in an id and four vector of size equal to the number of functions (see "function count" in section \ref{section:init-data-auxiliary}) following the grammar \ref{listing:function-section-grammar}.
+The first vector is a vector of offsets in the text section, the i-th element of the vector is the beginning of the code of the i-th function.
+The second vector is a vector of type indexes, the i-th element of the vector means that the i-th function has the i-th type in the vector of types in the type subsection of init data.
+The elements of the third and fourth vectors are always zero.
+
+\begin{listing}[H]
+\begin{minted}{ebnf}
+    (* The start of the FunctionSection must be 4-byte aligned. *)
+    FunctionSection =
+        FunctionId,
+        { u32 }, (* offset in the text section *)
+        { u32 }, (* type index *)
+        { u32 }, (* Always zero *)
+        { u32 }, (* Always zero *)
+        ;
+    FunctionId = "0x03", "0x00", "0x00", "0x00" ;
+\end{minted}
+\caption{Function section grammar}
+\label{listing:function-section-grammar}
+\end{listing}
+
+
 \section{Export Section}
 The export section has id 4.
 The content and the structure of the export subsection is very similar to the export section of a WASM module, see section 5.5.10 of the WASM specification \cite{WASM}.
 The start of the export section must be 4-byte aligned.
-The init data section decodes in an id, a 32-bit unsigned int section length and a vector of WASM export element following the grammar \ref{listing:export-section-grammar}.
+The export section decodes in an id, a 32-bit unsigned int section length and a vector of WASM export element following the grammar \ref{listing:export-section-grammar}.
 A vector of WASM exports is encoded with the 32-bit unsigned int length followed
 by a sequence of WASM exports.
 The start of each WASM export in the vector must be 4-byte aligned.

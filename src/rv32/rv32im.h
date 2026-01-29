@@ -48,6 +48,8 @@ extern const rv32_reg rv32_gp_reg[RV32_GP_NUM_REG];
 #define RV32_ARG_NUM_REG 8
 extern const rv32_reg rv32_arg_reg[RV32_ARG_NUM_REG];
 
+#define RV32_PRIVATE_REG0 T5
+#define RV32_PRIVATE_REG1 T6
 #define RV32_RESERVED_NUM_REG 2
 extern const rv32_reg rv32_priv_reg[RV32_RESERVED_NUM_REG];
 

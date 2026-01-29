@@ -4,7 +4,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "rv32/rv32i.h"
+#include "rv32/rv32im.h"
 
 #include "listx.h"
 #include "wasm.h"
@@ -21,14 +21,14 @@ typedef struct IRReference {
         IR_REF_TYPE_TMP,
         IR_REF_TYPE_PHI,
         IR_REF_TYPE_I32,
-        IR_REF_TYPE_NAME,
+        IR_REF_TYPE_FUNCTION,
         IR_REF_TYPE_LOCATION,
     } type;
     union {
         uint32_t tmp_id;
         IRPhi *phi;
         int32_t i32;
-        char *name;
+        WASMFunction *wasm_func;
         Location *location;
     } as;
 } IRReference;
@@ -220,8 +220,12 @@ typedef struct IRUse {
 #define IR_REF_I32(value) \
     (IRReference) { .type = IR_REF_TYPE_I32, .as.i32 = value }
 
-#define IR_REF_NAME(str) \
-    (IRReference){ .type = IR_REF_TYPE_NAME, .as.name = str }
+#define IR_REF_FUNC(wf) \
+    (IRReference){ .type = IR_REF_TYPE_FUNCTION, .as.wasm_func = wf }
+
+#define IR_REF_LOC(loc_ptr) \
+    (IRReference){ .type = IR_REF_TYPE_LOCATION, .as.location = loc_ptr }
+
 
 
 #define ir_append_func_call_arg(block, arg_type, arg_value) \

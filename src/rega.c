@@ -2,10 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
-#include "libqbe.h"
+#include "ir.h"
 #define BITMAP_IMPLEMENTATION
 #include "bitmap.h"
-#include "rv32/rv32i.h"
 
 typedef enum MoveStatus {
     TO_MOVE,
@@ -38,7 +37,7 @@ typedef struct Move {
 
 static Location tmp = {
     .type = LOCATION_TYPE_REGISTER,
-    .as.reg = T5,
+    .as.reg = RV32_PRIVATE_REG0,
 };
 
 static Location args[RV32_ARG_NUM_REG] = {
@@ -224,8 +223,11 @@ LiveInterval **build_intervals(IRFunction *f) {
             if (successor == NULL) continue;
             list_for_each_entry(phi, &successor->phi_list, next) {
                 IRPhiArg *phi_arg = input_of(phi, block);
-                if (phi_arg->value.type == IR_REF_TYPE_TMP) {
-                    bitmap_set_bit(live, phi_arg->value.as.tmp_id);
+                IRReference v = phi_arg->value;
+                if (v.type == IR_REF_TYPE_TMP || v.type == IR_REF_TYPE_PHI) {
+                    unsigned int tmp_id = v.type == IR_REF_TYPE_TMP ?
+                        v.as.tmp_id : v.as.phi->id;
+                    bitmap_set_bit(live, tmp_id);
                 }
             }
         }
@@ -253,7 +255,8 @@ LiveInterval **build_intervals(IRFunction *f) {
         if (block->jump.type == IR_JUMP_TYPE_JNZ || block->jump.type == IR_JUMP_TYPE_RET1) {
             IRReference jump_arg = block->jump.arg;
             if (jump_arg.type == IR_REF_TYPE_TMP || jump_arg.type == IR_REF_TYPE_PHI) {
-                unsigned int tmp_id = jump_arg.type == IR_REF_TYPE_TMP ? jump_arg.as.tmp_id : jump_arg.as.phi->id;
+                unsigned int tmp_id = jump_arg.type == IR_REF_TYPE_TMP ?
+                    jump_arg.as.tmp_id : jump_arg.as.phi->id;
                 add_range(&live_intervals[tmp_id], block->seqnum, block->jump.seqnum);
                 bitmap_set_bit(live, tmp_id);
             }
@@ -366,7 +369,8 @@ static void register_hints(IRFunction *f) {
             if (ins->op == IR_OPCODE_ARG) {
                 IRReference arg = ins->arg[0];
                 if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
-                    tmp_id = arg.type == IR_REF_TYPE_TMP ? arg.as.tmp_id : arg.as.phi->id;
+                    tmp_id = arg.type == IR_REF_TYPE_TMP ?
+                        arg.as.tmp_id : arg.as.phi->id;
                     LiveInterval *live_int = &f->live_intervals[tmp_id];
                     if (live_int->register_hint == -1) {
                         live_int->register_hint = rv32_arg_reg[arg_index++];
@@ -608,7 +612,7 @@ static bool move_one(IRFunction *f, Move *m,
     m->status = BEING_MOVED;
     Move *x;
     list_for_each_entry(x, pmove, link) {
-        if (have_same_location(f, x->to, &x->from)) {
+        if (have_same_location(f, m->to, &x->from)) {
             switch (x->status) {
             case TO_MOVE: {
                 bool err = move_one(f, x, pmove, smove);
@@ -1000,11 +1004,17 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
 
                 if (call->to.type != IR_REF_TYPE_UNDEFINED) {
                     if (!have_same_location(f, &args[0], &call->to)) {
-                        IRInstr *ins = alloc_copy(&args[0], &call->to);
+                        IRInstr *ins = malloc(sizeof(struct IRInstr));
                         if (ins == NULL) {
                             err = true;
                             goto ERROR;
                         }
+                        ins->op = IR_OPCODE_COPY;
+                        ins->type = IR_TYPE_I32;
+                        ins->to = call->to;
+                        ins->arg[0] = IR_REF_LOC(&args[0]);
+                        ins->arg[1].type = IR_REF_TYPE_UNDEFINED;
+                        ins->seqnum = 0;
                         list_add(&ins->next, &call->next);
                     }
                 }
@@ -1042,6 +1052,7 @@ static bool ensure_function_return_value_constraints(IRFunction *f) {
                 if (ins == NULL) return true;
                 list_add_tail(&ins->next, &block->instr_list);
             }
+            block->jump.type = IR_JUMP_TYPE_RET0;
         }
     }
     return false;

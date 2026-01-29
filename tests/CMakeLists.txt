@@ -5,10 +5,15 @@ function(test name expected_result iwasm)
         NAME readaot_${name}
         COMMAND sh aottest.sh wasm/${name}.wasm
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
     add_test(
         NAME ${name}
-        COMMAND ${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm
+        COMMAND sh -c "${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm && ${iwasm}"
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+    set_property(
+        TEST ${name}
+        PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
+
     add_test(
         NAME memcheck_${name}
         COMMAND valgrind
@@ -19,23 +24,6 @@ function(test name expected_result iwasm)
         ${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 endfunction()
-
-# function(test name expected_result iwasm)
-#     add_test(NAME ${name}
-#         COMMAND sh -c "${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm && ${iwasm}"
-#         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-#     set_property(TEST ${name}
-#         PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
-#
-#     add_test(NAME memcheck_${name}
-#         COMMAND valgrind
-#         --error-exitcode=1
-#         --tool=memcheck
-#         --leak-check=full
-#         --track-origins=yes
-#         ${CMAKE_BINARY_DIR}/wasmc wasm/${name}.wasm
-#     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-# endfunction()
 
 # Function to test a WASM module generated from a handwritten WAT file
 function(test_wat name expected_result)

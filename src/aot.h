@@ -3,7 +3,7 @@
 
 #include <inttypes.h>
 #include "wasm.h"
-//#include "libqbe.h"
+#include "listx.h"
 
 typedef enum AOTErr_t {
     AOT_OK,
@@ -115,11 +115,6 @@ typedef struct AOTRelocation {
     char *symbol_name;
 } AOTRelocation;
 
-typedef struct AOTFuncSecEntry {
-    uint32_t text_offset;
-    uint32_t type_index;
-} AOTFuncSecEntry;
-
 typedef struct AOTModule {
     WASMModule *wasm_mod;
     uint8_t *buf;
@@ -129,19 +124,9 @@ typedef struct AOTModule {
     uint8_t *p_end;
     uint32_t *text_size;
     uint8_t *text_start;
-    uint32_t next_func;
-    AOTFuncSecEntry *funcs;
-    uint32_t reloc_count;
-    AOTRelocation *reloc_list;
+    struct list_head patch_list;
+    uint8_t **function_text_start;
 } AOTModule;
-
-/*
-typedef struct Target {
-    char *name;
-    AOTErr_t (*emit_target_info)(AOTModule *);
-    AOTErr_t (*emitfn)(AOTModule *, IRFunction *, uint32_t);
-} Target;
-*/
 
 AOTErr_t aot_module_init(AOTModule *aot_mod, uint8_t *aot_buf,
                          unsigned int aot_len, WASMModule *w);
@@ -150,9 +135,7 @@ AOTErr_t emit_init_data(AOTModule *m);
 AOTErr_t emit_function(AOTModule *m);
 AOTErr_t emit_export(AOTModule *m);
 AOTErr_t emit_relocation(AOTModule *m);
-
-//AOTErr_t aot_module_finalize(AOTModule *m, uint8_t **buf, uint32_t *len);
-//void aot_module_cleanup(AOTModule *m);
+void aot_module_cleanup(AOTModule *m);
 
 #endif
 

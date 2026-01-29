@@ -39,6 +39,7 @@ typedef struct WASMFuncType {
 typedef struct WASMFunction {
     char name[WASM_FUNC_NAME_LEN];
     WASMFuncType *type;
+    uint32_t id;
     uint32_t typeidx;
     uint32_t local_count;
     /* locals points into the WASM module */
@@ -49,8 +50,9 @@ typedef struct WASMFunction {
     uint8_t *code_end;
 } WASMFunction;
 
-#define WASM_MEMORY_FLAG_ONLY_MIN_LIMIT 0x00
-#define WASM_MEMORY_FLAG_MIN_AND_MAX_LIMIT 0x01
+#define WASM_LIMIT_ONLY_MIN    0x00
+#define WASM_LIMIT_MIN_AND_MAX 0x01
+
 #define WASM_MEMORY_LIMIT_RANGE 65536
 typedef struct WASMMemory {
     uint32_t flags;
@@ -58,6 +60,15 @@ typedef struct WASMMemory {
     uint32_t init_page_count;
     uint32_t max_page_count;
 } WASMMemory;
+
+#define TABLE_ELEMENT_TYPE_FUNCTION 0x70
+#define WASM_TABLE_MAX_ENTRY_COUNT 4294967295
+typedef struct WASMTable {
+    uint8_t flags;
+    uint8_t elemtype;
+    uint32_t init_entry_count;
+    uint32_t max_entry_count;
+} WASMTable;
 
 typedef struct WASMExport {
     uint32_t name_len;
@@ -107,6 +118,11 @@ typedef struct WASMModule {
     uint32_t memories_count;
     /* memory is valid if and only if memories_count is 1 */
     WASMMemory memory;
+
+    /* table_count can only be 0 or 1 */
+    uint32_t table_count;
+    /* table is valid if and only if table_count is 1 */
+    WASMTable table;
 
     /* Heap allocated array of length global_count. If a module has no globals
      * in the globals section, globals is NULL and globals_count is 0. */

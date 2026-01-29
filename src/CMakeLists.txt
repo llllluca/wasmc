@@ -3,7 +3,7 @@ add_library(
     STATIC
     wasm.c
     compile.c
-    libqbe.c
+    ir.c
     rega.c
     aot.c
     rv32/emit.c)

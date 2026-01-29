@@ -9,136 +9,12 @@
 #include "listx.h"
 #include "aot.h"
 
-#define MAX_LINEAR_MEMORY_SIZE ((uint64_t)4 * 1024 * 1024 * 1024)
-
-/* legal value for init_expr_type */
-#define INIT_EXPR_NONE 0x00
-#define INIT_EXPR_TYPE_I32_CONST 0x41
-#define INIT_EXPR_TYPE_I64_CONST 0x42
-#define INIT_EXPR_TYPE_F32_CONST 0x43
-#define INIT_EXPR_TYPE_F64_CONST 0x44
-#define INIT_EXPR_TYPE_V128_CONST 0xFD
-#define INIT_EXPR_TYPE_GET_GLOBAL 0x23
-#define INIT_EXPR_TYPE_I32_ADD 0x6A
-#define INIT_EXPR_TYPE_I32_SUB 0x6B
-#define INIT_EXPR_TYPE_I32_MUL 0x6C
-#define INIT_EXPR_TYPE_I64_ADD 0x7C
-#define INIT_EXPR_TYPE_I64_SUB 0x7D
-#define INIT_EXPR_TYPE_I64_MUL 0x7E
-#define INIT_EXPR_TYPE_REFNULL_CONST 0xD0
-#define INIT_EXPR_TYPE_FUNCREF_CONST 0xD2
-#define INIT_EXPR_TYPE_STRUCT_NEW 0xD3
-#define INIT_EXPR_TYPE_STRUCT_NEW_DEFAULT 0xD4
-#define INIT_EXPR_TYPE_ARRAY_NEW 0xD5
-#define INIT_EXPR_TYPE_ARRAY_NEW_DEFAULT 0xD6
-#define INIT_EXPR_TYPE_ARRAY_NEW_FIXED 0xD7
-#define INIT_EXPR_TYPE_I31_NEW 0xD8
-#define INIT_EXPR_TYPE_ANY_CONVERT_EXTERN 0xD9
-#define INIT_EXPR_TYPE_EXTERN_CONVERT_ANY 0xDA
-
 typedef struct AOTSection {
     struct list_head link;
     AOTSectionType type;
     uint8_t *start;
     uint8_t *end;
 } AOTSection;
-
-#if 0
-typedef struct WASMMemory {
-    uint32_t flags;
-    uint32_t num_bytes_per_page;
-    uint32_t init_page_count;
-    uint32_t max_page_count;
-} WASMMemory;
-
-/* Function type */
-typedef struct WASMFuncType {
-    uint16_t param_count;
-    uint16_t result_count;
-    uint8_t types[1];
-} WASMFuncType;
-
-typedef struct AOTObjectDataSection {
-    char *name;
-    uint8_t *data;
-    uint32_t size;
-} AOTObjectDataSection;
-
-typedef struct AOTInitData {
-    /* number of imported memory in the WASM module */
-    uint32_t import_memory_count;
-    /* number of memory in the WASM module */
-    uint32_t memory_count;
-    WASMMemory *memories;
-    uint32_t mem_init_data_count;
-
-    uint32_t import_table_count;
-    uint32_t table_count;
-    uint32_t table_init_data_count;
-
-    uint32_t type_count;
-    WASMFuncType **types;
-
-    uint32_t import_global_count;
-
-    uint32_t global_count;
-
-    uint32_t import_func_count;
-
-    uint32_t func_count;
-    uint32_t start_func_index;
-    uint32_t aux_data_end_global_index;
-    uint64_t aux_data_end;
-    uint32_t aux_heap_base_global_index;
-    uint64_t aux_heap_base;
-    uint32_t aux_stack_top_global_index;
-    uint64_t aux_stack_bottom;
-    uint32_t aux_stack_size;
-
-    uint32_t data_section_count;
-    AOTObjectDataSection  *data_sections;
-
-} AOTInitData;
-
-typedef struct AOTText {
-    /* ".literal" section in object file */
-    uint32_t literal_size;
-    uint8_t *literal;
-    /* ".text" section in object file */
-    uint32_t code_size;
-    uint8_t *code;
-} AOTText;
-
-typedef struct WASMExport {
-    char *name;
-    uint8_t kind;
-    uint32_t index;
-} WASMExport;
-
-/* Relocation info */
-typedef struct AOTRelocation {
-    uint32_t offset;
-    uint32_t addend;
-    uint32_t type;
-    char *symbol_name;
-    /* index in the symbol offset field */
-    uint32_t symbol_index;
-} AOTRelocation;
-
-/* Relocation Group */
-typedef struct AOTRelocationGroup {
-    char *section_name;
-    /* index in the symbol offset field */
-    uint32_t name_index;
-    uint32_t relocation_count;
-    AOTRelocation *relocations;
-} AOTRelocationGroup;
-
-//static AOTTargetInfo target_info;
-//static AOTInitData data;
-//static AOTText text;
-
-#endif
 
 char *AOTSectionType_to_string(AOTSectionType sec_type) {
     switch (sec_type) {
@@ -317,6 +193,7 @@ static void print_target_info(AOTSection *s) {
 
     if (offset != s->end) {
         fprintf(stderr, "Error: section %s has an invalid section size\n", section_name);
+        exit(EXIT_FAILURE);
     }
 
     printf("bin_type: %"PRIu16" (%s)\n", t.bin_type, bin_type_to_string(t.bin_type));
@@ -410,14 +287,15 @@ static void print_table(AOTSection *s, uint8_t **offset) {
     printf("TODO: print_table() is not implemented!\n");
 
     p = ALIGN_PTR(p, 4);
-    uint32_t import_table_count, table_count;
+    uint32_t import_table_count;
     READ_UINT32(p, s->end, &import_table_count);
-    READ_UINT32(p, s->end, &table_count);
-
     if (import_table_count != 0) {
         printf("Error: import table is not implemented\n");
         exit(EXIT_FAILURE);
     }
+
+    uint32_t table_count;
+    READ_UINT32(p, s->end, &table_count);
 
     uint8_t table_type;
     uint8_t table_flags;
@@ -528,7 +406,7 @@ static void print_global(AOTSection *s, uint8_t **offset) {
         printf("  Init expr type: 0x%x\n", init_expr_type);
 
         switch (init_expr_type) {
-        case INIT_EXPR_TYPE_I32_CONST: {
+        case 0x41: {
             uint32_t init_expr;
             READ_UINT32(p, s->end, &init_expr);
             printf("  Init expr: %"PRIu32"\n", init_expr);
@@ -626,7 +504,6 @@ static void print_object_data(AOTSection *s, uint8_t **offset) {
 static void print_init_data(AOTSection *s) {
     char *section_name = AOTSectionType_to_string(s->type);
     printf("\n*=== %s ===*\n", section_name);
-    //printf("Length: %ld\n", s->end - s->start);
 
     if (s->start == s->end) return;
     uint8_t *offset = s->start;
@@ -641,96 +518,78 @@ static void print_init_data(AOTSection *s) {
 
     if (offset != s->end) {
         fprintf(stderr, "Error: invalid init data section size\n");
+        exit(EXIT_FAILURE);
     }
 }
 
-#if 0
-void print_text_section(AOTSection *s) {
-    printf("section type: %s\n", AOTSectionType_to_string(s->type));
-    printf("section length: %"PRIu32"\n", s->body_size);
-    uint8_t *p = s->body;
-    uint8_t *p_end = s->body + s->body_size;
+void print_text(AOTSection *s) {
+    char *section_name = AOTSectionType_to_string(s->type);
+    printf("\n*=== %s ===*\n", section_name);
 
-    read_uint32(p, p_end, &text.literal_size);
-    if (text.literal_size > 0) {
-        text.literal = p;
-        p += text.literal_size;
-    } else {
-        text.literal = NULL;
+    uint8_t *offset = s->start;
+
+    uint32_t literal_size;
+    READ_UINT32(offset, s->end, &literal_size);
+    if (literal_size > 0) {
+        offset += literal_size;
     }
-    text.code = p;
-    text.code_size = p_end - text.code;
-    char *tmp_file_path = "readaot-text.bin";
-    FILE *tmp_file;
-    if ((tmp_file = fopen(tmp_file_path, "w")) == NULL) {
-        fprintf(stderr, "Error: cannot open %s\n", tmp_file_path);
-        exit(EXIT_FAILURE);
-    }
-    if (fwrite(p, 1, text.code_size, tmp_file) != text.code_size) {
-        fprintf(stderr, "Error: cannot write to %s\n", tmp_file_path);
-        exit(EXIT_FAILURE);
-    }
-    fclose(tmp_file);
-    tmp_file = NULL;
 
-    printf("literal size: %"PRIu32"\n", text.literal_size);
-    printf("code size: %"PRIu32"\n", text.code_size);
+    uint8_t *code = offset;
+    uint32_t code_size = s->end - code;
+    #define OUTPUT_PATH "/tmp/text.bin"
 
-
-    char *output_path = "text.bin";
     FILE *f;
-    if ((f = fopen(output_path, "w")) == NULL) {
-        fprintf(stderr, "Error: cannot open %s\n", output_path);
+    if ((f = fopen(OUTPUT_PATH, "w")) == NULL) {
+        fprintf(stderr, "Error: cannot open "OUTPUT_PATH"\n");
         exit(EXIT_FAILURE);
     }
-    fwrite(text.code, text.code_size, 1, f);
+
+    fwrite(code, code_size, 1, f);
     fclose(f);
+
+    char *cmd = "riscv32-unknown-linux-gnu-objdump"
+        " -b binary -m riscv:rv32 -D "OUTPUT_PATH;
+    system(cmd);
+
+    if (remove(OUTPUT_PATH) != 0) {
+        fprintf(stderr, "Error: unable to remove "OUTPUT_PATH"\n");
+    }
 }
 
-void print_function_section(AOTSection *s) {
-    printf("section type: %s\n", AOTSectionType_to_string(s->type));
-    printf("section length: %"PRIu32"\n", s->body_size);
-    uint8_t *p = s->body;
-    uint8_t *p_end = s->body + s->body_size;
+void print_function(AOTSection *s) {
 
-    for (uint32_t i = 0; i < data.func_count; i++) {
-        uint32_t text_offset;
-        assert((!(target_info.bin_type & 2)) &&
-               "The following code works only for 32-bit target machine");
-        read_uint32(p, p_end, &text_offset);
-        if (text_offset >= text.code_size) {
-            fprintf(stderr, "Error: invalid function code offset\n");
-            exit(EXIT_FAILURE);
-        }
-        printf("func[%"PRIu32"] offset: %x\n", i, text_offset);
+    char *section_name = AOTSectionType_to_string(s->type);
+    printf("\n*=== %s ===*\n", section_name);
+
+    uint8_t *offset = s->start;
+
+    uint32_t func_count = (s->end - s->start) / (4 * sizeof(uint32_t));
+
+    uint32_t text_offset;
+    for (uint32_t i = 0; i < func_count; i++) {
+        READ_UINT32(offset, s->end, &text_offset);
+        printf("Func[%"PRIu32"] offset: %x\n", i, text_offset);
     }
 
-    for (uint32_t i = 0; i < data.func_count; i++) {
-        uint32_t func_type_indexes;
-        read_uint32(p, p_end, &func_type_indexes);
-        if (func_type_indexes >= data.type_count) {
-            fprintf(stderr, "Error: unknown type\n");
-            exit(EXIT_FAILURE);
-        }
-        printf("func[%"PRIu32"] type index: %"PRIu32"\n", i, func_type_indexes);
+    uint32_t type_index;
+    for (uint32_t i = 0; i < func_count; i++) {
+        READ_UINT32(offset, s->end, &type_index);
+        printf("Func[%"PRIu32"] type index: %"PRIu32"\n", i, type_index);
     }
 
-    for (uint32_t i = 0; i < data.func_count; i++) {
+    for (uint32_t i = 0; i < func_count; i++) {
         // Ignore max_local_cell_num and max_stack_cell_num of each function
         uint32_t max_local_cell_num;
         uint32_t max_stack_cell_num;
-        read_uint32(p, p_end, &max_local_cell_num);
-        read_uint32(p, p_end, &max_stack_cell_num);
-        printf("func[%"PRIu32"] max local cell num: %"PRIu32"\n", i, max_local_cell_num);
-        printf("func[%"PRIu32"] max stack cell num: %"PRIu32"\n", i, max_stack_cell_num);
+        READ_UINT32(offset, s->end, &max_local_cell_num);
+        READ_UINT32(offset, s->end, &max_stack_cell_num);
     }
 
-    if (p != p_end) {
+    if (offset != s->end) {
         fprintf(stderr, "Error: invalid function section size\n");
         exit(EXIT_FAILURE);
     }
 }
-#endif
 
 void print_export(AOTSection *s) {
     char *section_name = AOTSectionType_to_string(s->type);
@@ -774,61 +633,46 @@ void print_export(AOTSection *s) {
 }
 
 #if 0
-void print_relocation_section(AOTSection *s) {
-    printf("section type: %s\n", AOTSectionType_to_string(s->type));
-    printf("section length: %"PRIu32"\n", s->body_size);
-    uint8_t *p = s->body;
-    uint8_t *p_end = s->body + s->body_size;
+void print_relocation(AOTSection *s) {
+    char *section_name = AOTSectionType_to_string(s->type);
+    printf("\n*=== %s ===*\n", section_name);
+
+    uint8_t *offset = s->start;
 
     uint32_t symbol_count;
-    read_uint32(p, p_end, &symbol_count);
-    printf("symbol count: %"PRIu32"\n", symbol_count);
+    READ_UINT32(offset, s->end, &symbol_count);
+    printf("Symbol count: %"PRIu32"\n", symbol_count);
 
-    uint32_t *symbol_offsets = (uint32_t *)p;
+    uint32_t *symbol_offset = (uint32_t *)offset;
     for (uint32_t i = 0; i < symbol_count; i++) {
-        printf("symbol %"PRIu32" offset: %"PRIu32"\n", i, symbol_offsets[i]);
+        printf("Symbol[%"PRIu32"] offset: %"PRIu32"\n", i, symbol_offset[i]);
     }
-    p += symbol_count * sizeof(uint32_t);
+    offset += symbol_count * sizeof(uint32_t);
 
     uint32_t total_string_len;
-    read_uint32(p, p_end, &total_string_len);
-    printf("total string len: %"PRIu32"\n", total_string_len);
-    uint8_t *symbol_buf = (uint8_t *)p;
+    READ_UINT32(offset, s->end, &total_string_len);
+    printf("Total string len: %"PRIu32"\n", total_string_len);
+    uint8_t *symbol_buf = (uint8_t *)offset;
     uint8_t *symbol_buf_end = symbol_buf + total_string_len;
-    p += total_string_len;
+    offset += total_string_len;
 
-    // symbol table validation
-    uint8_t *psym = symbol_buf;
-    uint32_t str_len_addr = 0;
     for (uint32_t i = 0; i < symbol_count; i++) {
-        assert(symbol_offsets[i] == str_len_addr);
-        uint16_t str_len;
-        read_uint16(psym, symbol_buf_end, &str_len);
-        str_len_addr += sizeof(uint16_t) + str_len;
-        str_len_addr = (str_len_addr + 1) & ~1;
-        psym += str_len;
-        psym = align_ptr(psym, 2);
-    }
-    assert(psym == symbol_buf_end);
-    // end symbol table validation
-    
-    for (uint32_t i = 0; i < symbol_count; i++) {
-        uint8_t *symbol_addr = symbol_buf + symbol_offsets[i];
-        uint16_t str_len;
-        read_uint16(symbol_addr, symbol_buf_end, &str_len);
-        printf("symbol %"PRIu32": %s\n", i, (char *)symbol_addr);
+        uint8_t *symbol = symbol_buf + symbol_offset[i];
+        uint16_t len = *(uint16_t *)symbol;
+        char *name = (char *)symbol + sizeof(uint16_t);
+        printf("symbol[%"PRIu32"]: %.*s\n", i, len, name);
     }
 
+    offset = ALIGN_PTR(offset, 4);
     uint32_t group_count;
-    read_uint32(p, p_end, &group_count);
-    printf("relocation group count: %"PRIu32"\n", group_count);
+    READ_UINT32(offset, s->end, &group_count);
+    printf("Relocation group count: %"PRIu32"\n", group_count);
 
+    AOTRelocationGroup group;
     for (uint32_t i = 0; i < group_count; i++) {
-        AOTRelocationGroup group;
 
-        /* section name address is 4 bytes aligned. */
-        p = align_ptr(p, sizeof(uint32_t));
-        read_uint32(p, p_end, &group.name_index);
+        offset = ALIGN_PTR(offset, 4);
+        READ_UINT32(p, p_end, &group.name_index);
         printf("name_index = %"PRIu32"\n", group.name_index);
 
         if (group.name_index >= symbol_count) {
@@ -837,7 +681,7 @@ void print_relocation_section(AOTSection *s) {
         }
         uint8_t *name_addr = symbol_buf + symbol_offsets[group.name_index] + sizeof(uint16_t);
         group.section_name = (char *)name_addr;
-        read_uint32(p, p_end, &group.relocation_count);
+        READ_UINT32(p, p_end, &group.relocation_count);
         printf("group[%"PRIu32"].section_name: %s\n", i, group.section_name);
         printf("group[%"PRIu32"].relocation_count: %"PRIu32"\n", i, group.relocation_count);
 
@@ -846,10 +690,10 @@ void print_relocation_section(AOTSection *s) {
                "The following code works only for 32-bit target machine");
 
             AOTRelocation relocation;
-            read_uint32(p, p_end, &relocation.offset);
-            read_uint32(p, p_end, &relocation.addend);
-            read_uint32(p, p_end, &relocation.type);
-            read_uint32(p, p_end, &relocation.symbol_index);
+            READ_UINT32(p, p_end, &relocation.offset);
+            READ_UINT32(p, p_end, &relocation.addend);
+            READ_UINT32(p, p_end, &relocation.type);
+            READ_UINT32(p, p_end, &relocation.symbol_index);
 
             if (relocation.symbol_index >= symbol_count) {
                 fprintf(stderr, "Error: symbol index out of range. The relocation symbol "
@@ -1074,10 +918,10 @@ static void execute_actions(struct list_head *action_list,
             print_init_data(s);
             break;
         case AOT_SECTION_TYPE_TEXT:
-            //print_text(s);
+            print_text(s);
             break;
         case AOT_SECTION_TYPE_FUNCTION:
-            //print_function(s);
+            print_function(s);
             break;
         case AOT_SECTION_TYPE_EXPORT:
             print_export(s);

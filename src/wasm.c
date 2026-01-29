@@ -225,7 +225,46 @@ static WASMErr_t parse_function_section(WASMModule *m, WASMSection *s) {
         }
         m->functions[i].type = &m->types[type_index];
         m->functions[i].typeidx = type_index;
+        m->functions[i].id = i;
     }
+
+    /* Check the section size */
+    if (offset != s->end) {
+        return WASM_ERR;
+    }
+
+    return WASM_OK;
+}
+
+static WASMErr_t parse_table_section(WASMModule *m, WASMSection *s) {
+
+    uint8_t *offset = s->start;
+    uint32_t table_count;
+    xreadULEB128_u32(&offset, s->end, &table_count);
+    if (table_count > 1) {
+        return WASM_ERR;
+    }
+    m->table_count = table_count;
+    uint8_t elemtype;
+    xread_u8(&offset, s->end, &elemtype);
+    if (elemtype != TABLE_ELEMENT_TYPE_FUNCTION) {
+        return WASM_ERR;
+    }
+    uint8_t flag;
+    xread_u8(&offset, s->end, &flag);
+    switch (flag) {
+    case WASM_LIMIT_ONLY_MIN:
+        xreadULEB128_u32(&offset, s->end, &m->table.init_entry_count);
+        m->table.max_entry_count = WASM_TABLE_MAX_ENTRY_COUNT;
+        break;
+    case WASM_LIMIT_MIN_AND_MAX:
+        xreadULEB128_u32(&offset, s->end, &m->table.init_entry_count);
+        xreadULEB128_u32(&offset, s->end, &m->table.max_entry_count);
+        break;
+    default:
+        return WASM_ERR;
+    }
+    if (m->table.init_entry_count > m->table.max_entry_count) return WASM_ERR;
 
     /* Check the section size */
     if (offset != s->end) {
@@ -247,11 +286,11 @@ static WASMErr_t parse_memory_section(WASMModule *m, WASMSection *s) {
     uint8_t flag;
     xread_u8(&offset, s->end, &flag);
     switch (flag) {
-    case WASM_MEMORY_FLAG_ONLY_MIN_LIMIT:
+    case WASM_LIMIT_ONLY_MIN:
         xreadULEB128_u32(&offset, s->end, &m->memory.init_page_count);
         m->memory.max_page_count = WASM_MEMORY_LIMIT_RANGE;
         break;
-    case WASM_MEMORY_FLAG_MIN_AND_MAX_LIMIT:
+    case WASM_LIMIT_MIN_AND_MAX:
         xreadULEB128_u32(&offset, s->end, &m->memory.init_page_count);
         xreadULEB128_u32(&offset, s->end, &m->memory.max_page_count);
         break;
@@ -1047,7 +1086,7 @@ WASMErr_t wasm_decode(WASMModule *m, uint8_t *start, uint32_t len) {
             err = parse_function_section(m, s);
             break;
         case WASM_SECTION_TABLE:
-            /* Table section is not implemented */
+            err = parse_table_section(m, s);
             break;
         case WASM_SECTION_MEMORY:
             err = parse_memory_section(m, s);

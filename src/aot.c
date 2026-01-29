@@ -45,6 +45,12 @@ AOTErr_t aot_module_init(AOTModule *m, uint8_t *buf,
     m->buf = buf;
     m->offset = m->buf;
     m->buf_end = m->buf + m->buf_len;
+    INIT_LIST_HEAD(&m->patch_list);
+    m->function_text_start = calloc(wasm_mod->function_count, sizeof(uint8_t *));
+    if (m->function_text_start == NULL) return AOT_ERR;
+    for (unsigned int i = 0; i < wasm_mod->function_count; i++) {
+        m->function_text_start[i] = NULL;
+    }
 
     WRITE_UINT8(m, AOT_MAGIC0);
     WRITE_UINT8(m, AOT_MAGIC1);
@@ -172,12 +178,22 @@ static AOTErr_t emit_memory(AOTModule *m) {
 
 static AOTErr_t emit_table(AOTModule *m) {
 
+    WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
     uint32_t import_table_count = 0;
-    uint32_t table_count = 0;
-    uint32_t table_init_data_count = 0;
     WRITE_UINT32(m, import_table_count);
-    WRITE_UINT32(m, table_count);
+
+    WRITE_UINT32(m, w->table_count);
+    if (w->table_count != 0) {
+        WRITE_UINT8(m, w->table.elemtype);
+        WRITE_UINT8(m, w->table.flags);
+        WRITE_UINT8(m, 0);
+        WRITE_UINT8(m, 0);
+        WRITE_UINT32(m, w->table.init_entry_count);
+        WRITE_UINT32(m, w->table.max_entry_count);
+    }
+
+    uint32_t table_init_data_count = 0;
     WRITE_UINT32(m, table_init_data_count);
     return AOT_OK;
 }
@@ -317,7 +333,6 @@ AOTErr_t emit_init_data(AOTModule *m) {
     if (emit_global(m)) return AOT_ERR;
     if (emit_import_function(m)) return AOT_ERR;
     if (emit_auxiliary(m)) return AOT_ERR;
-    if (emit_auxiliary(m)) return AOT_ERR;
     if (emit_object_data(m)) return AOT_ERR;
 
     /* Fix section size */
@@ -342,26 +357,19 @@ AOTErr_t emit_function(AOTModule *m) {
     /* finalize text */
     *m->text_size = (m->offset - m->text_start) + sizeof(uint32_t);
 
-    ALIGN(m, 4);
-    WRITE_UINT32(m, AOT_SECTION_TYPE_FUNCTION);
-    WRITE_UINT32(m, 0);
-    return AOT_OK;
-
-
-#if 0
     WASMModule *w = m->wasm_mod;
-
+    ALIGN(m, 4);
     WRITE_UINT32(m, AOT_SECTION_TYPE_FUNCTION);
     uint32_t *section_size = (uint32_t *)m->offset;
     m->offset += sizeof(uint32_t);
     uint8_t *section_start = m->offset;
 
     for (uint32_t i = 0; i < w->function_count; i++) {
-        WRITE_UINT32(m, m->funcs[i].text_offset);
+        WRITE_UINT32(m, m->function_text_start[i] - m->text_start);
     }
 
     for (uint32_t i = 0; i < w->function_count; i++) {
-        WRITE_UINT32(m, m->funcs[i].type_index);
+        WRITE_UINT32(m, w->functions[i].typeidx);
     }
 
     uint32_t max_local_cell_num = 0;
@@ -374,7 +382,6 @@ AOTErr_t emit_function(AOTModule *m) {
     /* Fix section size */
     *section_size = m->offset - section_start;
     return AOT_OK;
-#endif
 }
 
 AOTErr_t emit_export(AOTModule *m) {
@@ -413,118 +420,23 @@ AOTErr_t emit_relocation(AOTModule *m) {
 
     ALIGN(m, 4);
     WRITE_UINT32(m, AOT_SECTION_TYPE_RELOCATION);
-    WRITE_UINT32(m, 0);
-    return AOT_OK;
-
-#if 0
-
-    WRITE_UINT32(m, AOT_SECTION_TYPE_RELOCATION);
-    uint32_t *section_size = (uint32_t *)m->offset;
-    m->offset += sizeof(uint32_t);
-    uint8_t *section_start = m->offset;
-
+    /* We can't just put 0 as section length because the AOT WAMR runtime
+     * try to parse anyway the section even if the section length is 0 */
+    uint32_t section_length = 12;
     uint32_t symbol_count = 0;
-    for (AOTRelocation *i = m->reloc_list; i != NULL; i = i->next) {
-        i->representative = NULL;
-        for (AOTRelocation *j = m->reloc_list; j != i; j = j->next) {
-            if (i->symbol_name == j->symbol_name) {
-                i->representative = j;
-                break;
-            }
-        }
-        if (i->representative == NULL) {
-            symbol_count++;
-        }
-    }
-    if (m->reloc_list != NULL) {
-        symbol_count++;
-    }
+    uint32_t symbol_table_size = 0;
+    uint32_t relocation_group_count = 0;
+    WRITE_UINT32(m, section_length);
     WRITE_UINT32(m, symbol_count);
-    uint32_t *symbol_offset = (uint32_t *)m->offset;
-    uint32_t symbol_index = 0;
-    m->offset += symbol_count * sizeof(uint32_t);
-    uint32_t *symbol_buf_size = (uint32_t *)m->offset;
-    m->offset += sizeof(uint32_t);
-    uint8_t *symbol_buf_start = m->offset;
-
-    if (m->reloc_list != NULL) {
-        char *group_section_name = ".rela.text";
-        *symbol_offset = m->offset - symbol_buf_start;
-        symbol_offset++;
-        symbol_index++;
-        uint16_t len = strlen(group_section_name) + 1;
-        WRITE_UINT16(m, len);
-        WRITE_BYTE_ARRAY(m, group_section_name, len);
-        m->offset = ALIGN_PTR(m->offset, 2);
-    }
-
-    for (AOTRelocation *i = m->reloc_list; i != NULL; i = i->next) {
-        if (i->representative != NULL) continue;
-        *symbol_offset = m->offset - symbol_buf_start;
-        symbol_offset++;
-        i->symbol_index = symbol_index++;
-        uint16_t len = strlen(i->symbol_name) + 1;
-        WRITE_UINT16(m, len);
-        WRITE_BYTE_ARRAY(m, i->symbol_name, len);
-        m->offset = ALIGN_PTR(m->offset, 2);
-    }
-    *symbol_buf_size = m->offset - symbol_buf_start;
-
-    if (m->reloc_list != NULL) {
-        uint32_t group_count = 1;
-        WRITE_UINT32(m, group_count);
-        uint32_t group_name_index = 0;
-        WRITE_UINT32(m, group_name_index);
-        WRITE_UINT32(m, m->reloc_count);
-        for (AOTRelocation *i = m->reloc_list; i != NULL; i = i->next) {
-            WRITE_UINT32(m, i->offset);
-            WRITE_UINT32(m, i->addend);
-            WRITE_UINT32(m, i->type);
-            if (i->representative != NULL) {
-                WRITE_UINT32(m, i->representative->symbol_index);
-            } else {
-                WRITE_UINT32(m, i->symbol_index);
-            }
-        }
-    } else {
-        uint32_t group_count = 0;
-        WRITE_UINT32(m, group_count);
-    }
-
-    /* Fix section size */
-    *section_size = m->offset - section_start;
+    WRITE_UINT32(m, symbol_table_size);
+    ALIGN(m, 4);
+    WRITE_UINT32(m, relocation_group_count);
     return AOT_OK;
-#endif
 }
 
 void aot_module_cleanup(AOTModule *m) {
-    if (m->buf != NULL) free(m->buf);
-    if (m->funcs != NULL) free(m->funcs);
-    AOTRelocation *r = m->reloc_list;
-    while (r != NULL) {
-        AOTRelocation *next = r->next;
-        free(r);
-        r = next;
+    if (m->function_text_start != NULL) {
+        free(m->function_text_start);
     }
-}
-
-AOTErr_t aot_module_finalize(AOTModule *m, uint8_t **buf, uint32_t *len) {
-
-    /* finalize text */
-    *m->text_size = (m->offset - m->text_start) + sizeof(uint32_t);
-
-    if (emit_function(m)) goto ERROR;
-    if (emit_export(m)) goto ERROR;
-    if (emit_relocation(m)) goto ERROR;
-
-    *len = m->offset - m->buf;
-    *buf = realloc(m->buf, *len);
-    m->buf = NULL;
-    aot_module_cleanup(m);
-    return AOT_OK;
-
-ERROR:
-    aot_module_cleanup(m);
-    return AOT_ERR;
 }
 
