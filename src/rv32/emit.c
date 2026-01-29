@@ -320,6 +320,9 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
         case IR_OPCODE_ULOAD8:
             EMIT_MEMOP(m, i, RV32_LBU);
             break;
+        case IR_OPCODE_SLOAD8:
+            EMIT_MEMOP(m, i, RV32_LB);
+            break;
         case IR_OPCODE_LOAD:
             EMIT_MEMOP(m, i, RV32_LW);
             break;
@@ -406,8 +409,6 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
   |    ...      |
   | spill slots |
   |    ...      |
-  +-------------+
-  |   padding   |
   +-------------+
   | callee-save |
   |  registers  |

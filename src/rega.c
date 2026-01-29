@@ -1090,14 +1090,13 @@ bool register_allocation(IRFunction *f) {
     register_hints(f);
     /* create the registers pool */
     unsigned long reg_pool = 0;
-    unsigned int nreg = RV32_GP_NUM_REG + RV32_ARG_NUM_REG;
     for (unsigned int i = 0; i < RV32_GP_NUM_REG; i++) {
         bitmap_set_bit(&reg_pool, rv32_gp_reg[i]);
     }
     for (unsigned int i = 0; i < RV32_ARG_NUM_REG; i++) {
         bitmap_set_bit(&reg_pool, rv32_arg_reg[i]);
     }
-    linear_scan(f, sorted_intervals, &reg_pool, nreg);
+    linear_scan(f, sorted_intervals, &reg_pool, RV32_NUM_REG);
 
     bool err;
     err = ensure_abi_constraints(f, sorted_intervals);

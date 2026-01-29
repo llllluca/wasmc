@@ -585,6 +585,14 @@ typedef struct ins_fmt {
 #define LOAD_OPCODE 0x3
 #define STORE_OPCODE 0x23
 
+/* Instr: lb
+ * Description: load byte
+ * Use: lb rd, imm(rs1)
+ * Result: rd = mem[rs1+imm][0:7] */
+#define LB_FUNC3 0x0
+#define RV32_LB(RD, IMM, RS1) \
+    I_TYPE_INS_TEMPLATE(LOAD_OPCODE, LB_FUNC3, RD, RS1, IMM)
+
 /* Instr: lw
  * Description: load word
  * Use: lw rd, imm(rs1)

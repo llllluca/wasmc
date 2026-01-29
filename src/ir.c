@@ -50,6 +50,7 @@ static const char *optab[] = {
     [IR_OPCODE_LOAD]   = "load",
     [IR_OPCODE_STORE8] = "store8",
     [IR_OPCODE_ULOAD8] = "uload8",
+    [IR_OPCODE_SLOAD8] = "sload8",
 
 /* Function definitions and calls */
     [IR_OPCODE_CALL] = "call",

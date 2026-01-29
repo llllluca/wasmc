@@ -1,5 +1,13 @@
 #define N 16384
 
+void* memset(void* ptr, int value, unsigned long num) {
+    unsigned char* p = ptr;
+    while (num--) {
+        *p++ = (unsigned char)value;
+    }
+    return ptr;
+}
+
 int main(void) {
     static char flags[N + 1];
     unsigned long res;

@@ -1,38 +1,35 @@
 include_directories(../src/)
 
-function(test name expected_result iwasm)
+# ${CMAKE_SOURCE_DIR} is the project root directory
+set(TESTS_DIR ${CMAKE_SOURCE_DIR}/tests)
+
+# the working directory in which the tests
+# are executed is wasmc/build/tests/
+function(test name expected_result iwasm_args)
     add_test(
         NAME readaot_${name}
-        COMMAND sh aottest.sh wasm/${name}.wasm
-        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+        COMMAND sh ${TESTS_DIR}/readaot_test.sh ${TESTS_DIR}/wasm/${name}.wasm)
 
     add_test(
         NAME ${name}
-        COMMAND sh -c "${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm && ${iwasm}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+        COMMAND sh ${TESTS_DIR}/iwasm_test.sh ${TESTS_DIR}/wasm/${name}.wasm ${iwasm_args})
     set_property(
         TEST ${name}
         PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
 
     add_test(
         NAME memcheck_${name}
-        COMMAND valgrind
-        --error-exitcode=1
-        --tool=memcheck
-        --leak-check=full
-        --track-origins=yes
-        ${CMAKE_BINARY_DIR}/apps/wasmc wasm/${name}.wasm
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+        COMMAND sh ${TESTS_DIR}/valgrind_test.sh ${TESTS_DIR}/wasm/${name}.wasm)
 endfunction()
 
 # Function to test a WASM module generated from a handwritten WAT file
 function(test_wat name expected_result)
-    test(${name} ${expected_result} "iwasm-2.4.4 -f main a.aot")
+    test(${name} ${expected_result} "")
 endfunction()
 
 # Function to test a WASM module compiled from a C source file
 function(test_c name expected_result)
-    test(${name} ${expected_result} "iwasm-2.4.4 -f main a.aot 0 0")
+    test(${name} ${expected_result} "0 0")
 endfunction()
 
 
@@ -71,30 +68,67 @@ test_wat(select "0x2c:i32")
 test_wat(memory "0xfa:i32")
 test_c(sum-O0 "0x15:i32")
 test_c(sum-O1 "0x15:i32")
-# sum-O2, sum-O3 are equal to sum-01
+test_c(sum-Os "0x15:i32")
 test_c(mean-O0 "0x5:i32")
 test_c(mean-O1 "0x5:i32")
-# mean-O2, mean-O3 use i64 integers that are currently not implemented
+#test_c(mean-O2 "0x5:i32") #i64 are not implemented
+#test_c(mean-O3 "0x5:i32") #i64 are not implemented
+test_c(mean-Os "0x5:i32")
 test_wat(data1 "0xa:i32")
 test_wat(data2 "0xa:i32")
 test_c(mean-even-O0 "0x13:i32")
 test_c(mean-even-O1 "0x13:i32")
 test_c(mean-even-O2 "0x13:i32")
-# mean-even-O3 is equal to mean-even-O2
+test_c(mean-even-O3 "0x13:i32")
+test_c(mean-even-Os "0x13:i32")
 test_c(max-O0 "0xff:i32")
 test_c(max-O1 "0xff:i32")
 test_c(max-O2 "0xff:i32")
-# max-O3 is equal to max-O2
+test_c(max-O3 "0xff:i32")
+test_c(max-Os "0xff:i32")
 test_c(isort-O0 "0x0:i32")
 test_c(isort-O1 "0x0:i32")
 test_c(isort-O2 "0x0:i32")
-test_c(fib2 "0x59:i32")
-test_c(msort "0x15:i32")
-test_c(qsort "0x66:i32")
+test_c(isort-O3 "0x0:i32")
+test_c(isort-Os "0x0:i32")
+test_c(fib2-O0 "0x59:i32")
+test_c(fib2-O1 "0x59:i32")
+test_c(fib2-O2 "0x59:i32")
+test_c(fib2-O3 "0x59:i32")
+test_c(fib2-Os "0x59:i32")
+test_c(msort-O0 "0x15:i32")
+test_c(msort-O1 "0x15:i32")
+# test_c(msort-O2 "0x15:i32") # Segmentation fault
+# test_c(msort-O3 "0x15:i32") # Segmentation fault
+# test_c(msort-Os "0x15:i32") # Segmentation fault
+test_c(qsort-O0 "0x66:i32")
+test_c(qsort-O1 "0x66:i32")
+test_c(qsort-O2 "0x66:i32")
+test_c(qsort-O3 "0x66:i32")
+test_c(qsort-Os "0x66:i32")
 test_c(ackermann-O0 "0x3fd:i32")
+test_c(ackermann-O1 "0x3fd:i32")
+test_c(ackermann-O2 "0x3fd:i32")
 test_c(ackermann-O3 "0x3fd:i32")
-test_c(base64 "0x2b:i32")
-test_c(heapsort "0x22291:i32")
-test_c(matrix "0x2255727:i32")
-test_c(sieve "0x76c:i32")
+test_c(ackermann-Os "0x3fd:i32")
+test_c(base64-O0 "0x2b:i32")
+#test_c(base64-O1 "0x2b:i32") # Wrong return value
+#test_c(base64-O2 "0x2b:i32") # Wrong return value
+#test_c(base64-O3 "0x2b:i32") # Wrong return value
+#test_c(base64-Os "0x2b:i32") # Wrong return value
+test_c(heapsort-O0 "0x22291:i32")
+#test_c(heapsort-O1 "0x22291:i32") # Wrong return value
+#test_c(heapsort-O2 "0x22291:i32") # Infinite loop
+#test_c(heapsort-O3 "0x22291:i32") # Infinite loop
+#test_c(heapsort-Os "0x22291:i32") # Infinite loop
+test_c(matrix-O0 "0x2255727:i32")
+#test_c(matrix-O1 "0x2255727:i32") # Wrong return value
+#test_c(matrix-O2 "0x2255727:i32") # Wrong return value
+#test_c(matrix-O3 "0x2255727:i32") # Wrong return value
+#test_c(matrix-Os "0x2255727:i32") # Wrong return value
+test_c(sieve-O0 "0x76c:i32")
+#test_c(sieve-O1 "0x76c:i32") # Wrong return value
+#test_c(sieve-O2 "0x76c:i32") # Wrong return value
+#test_c(sieve-O3 "0x76c:i32") # Wrong return value
+#test_c(sieve-Os "0x76c:i32") # Wrong return value
 

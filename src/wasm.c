@@ -898,6 +898,8 @@ static WASMErr_t validate_instr(ValidateCtx *ctx, uint8_t opcode) {
         return validate_load(ctx, OPERAND_TYPE_I32, 2);
     case WASM_OPCODE_I32_STORE:
         return validate_store(ctx, OPERAND_TYPE_I32, 2);
+    case WASM_OPCODE_I32_LOAD8_S:
+        return validate_load(ctx, OPERAND_TYPE_I32, 1);
     case WASM_OPCODE_I32_LOAD8_U:
         return validate_load(ctx, OPERAND_TYPE_I32, 1);
     case WASM_OPCODE_I32_STORE8:

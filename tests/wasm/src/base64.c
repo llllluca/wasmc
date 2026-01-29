@@ -2,6 +2,15 @@
 #define NULL 0
 #define size_t unsigned int
 
+void* memset(void* ptr, int value, unsigned long num) {
+    unsigned char* p = ptr;
+    while (num--) {
+        *p++ = (unsigned char)value;
+    }
+    return ptr;
+}
+
+
 char *strchr(const char *s, int c) {
     char *p = (char *)s;
     while (*p != c || *p != '\0') p++;

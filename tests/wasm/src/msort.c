@@ -1,5 +1,16 @@
 #define LEN 10
 
+void *memcpy(void *dest, const void *src, unsigned long n) {
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+
+    for (unsigned int i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+
+    return dest;
+}
+
 int x[LEN] = {10, 34, 123, 2391, 23, 0, 21, 67, 32, 87};
 
 void merge(int arr[], int left, int mid, int right) {

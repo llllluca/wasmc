@@ -389,7 +389,7 @@ static __always_inline bool bitmap_test_bit(const unsigned long *map, unsigned i
  * @offset: The bitnumber to start searching at
  *
  * Returns the bit number for the next set bit
- * If no bits are set, returns @size.
+ * If no bits are set, returns @nbits.
  */
 static __always_inline
 unsigned long find_next_bit(const unsigned long *addr, unsigned long nbits,

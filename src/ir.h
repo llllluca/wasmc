@@ -152,10 +152,11 @@ typedef enum IROpcode {
 /* Memory Operations */
 /* store <type> <value>, <offset>, <ptr> */
     IR_OPCODE_STORE,
+    IR_OPCODE_STORE8,
 /* <result> = load <type> <offset>, <ptr> */
     IR_OPCODE_LOAD,
     IR_OPCODE_ULOAD8,
-    IR_OPCODE_STORE8,
+    IR_OPCODE_SLOAD8,
 
 /* Function definitions and calls */
     IR_OPCODE_CALL,

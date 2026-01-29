@@ -143,7 +143,9 @@ static ControlStackEntry *get_ctrl(CompileCtx *ctx, uint32_t index) {
 }
 
 static void free_ctrl(ControlStackEntry *ctrl) {
-    list_release(&ctrl->end_results, free, IRPhiArg, next);
+    if (ctrl->kind != CTRL_STACK_ENTRY_DUMMY) {
+        list_release(&ctrl->end_results, free, IRPhiArg, next);
+    }
     free(ctrl);
 }
 
@@ -1108,6 +1110,8 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
         return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_LOAD);
     case WASM_OPCODE_I32_STORE:
         return compile_store(ctx, WASM_VALTYPE_I32, IR_OPCODE_STORE);
+    case WASM_OPCODE_I32_LOAD8_S:
+        return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_SLOAD8);
     case WASM_OPCODE_I32_LOAD8_U:
         return compile_load(ctx, WASM_VALTYPE_I32, IR_OPCODE_ULOAD8);
     case WASM_OPCODE_I32_STORE8:
