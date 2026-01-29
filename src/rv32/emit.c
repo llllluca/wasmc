@@ -182,23 +182,30 @@ static inline bool imm(IRReference r, int imm_min, int imm_max) {
         }                                                                \
     } while (0)
 
-#define EMIT_MEMOP(aotm, ins, OP)                                   \
-    do {                                                            \
+#define EMIT_MEMOP(aotm, ins, OP)                                    \
+    do {                                                             \
         ERR_CHECK(fix_arg(aotm, &(ins)->to, &rv32_private_reg0));    \
         ERR_CHECK(fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1));\
-        assert((ins)->arg[0].type == IR_REF_TYPE_I32);         \
-        rv32_reg rs2 = (ins)->to.as.location->as.reg;                     \
-        int32_t imm  = (ins)->arg[0].as.i32;                \
-        rv32_reg rs1 = (ins)->arg[1].as.location->as.reg;                 \
-        while (imm > 2047) {                                        \
-            ERR_CHECK(emit(aotm, RV32_ADDI(rs1, rs1, 2047)));       \
-            imm -= 2047;                                            \
-        }                                                           \
-        while (imm < -2048) {                                       \
-            ERR_CHECK(emit(aotm, RV32_ADDI(rs1, rs1, -2048)));      \
-            imm += 2048;                                            \
-        }                                                           \
-        ERR_CHECK(emit(aotm, OP(rs2, imm, rs1)));                   \
+        assert((ins)->arg[0].type == IR_REF_TYPE_I32);               \
+        rv32_reg rs2 = (ins)->to.as.location->as.reg;                \
+        int32_t imm  = (ins)->arg[0].as.i32;                         \
+        rv32_reg rs1 = (ins)->arg[1].as.location->as.reg;            \
+        if (-2048 <= imm && imm <=  2047) {                          \
+            ERR_CHECK(emit(aotm, OP(rs2, imm, rs1)));                \
+            break;                                                   \
+        }                                                            \
+        rv32_reg tmp = rv32_private_reg0.as.reg;                     \
+        while (imm > 2047) {                                         \
+            ERR_CHECK(emit(aotm, RV32_ADDI(tmp, rs1, 2047)));        \
+            imm -= 2047;                                             \
+            rs1 = tmp;                                               \
+        }                                                            \
+        while (imm < -2048) {                                        \
+            ERR_CHECK(emit(aotm, RV32_ADDI(tmp, rs1, -2048)));       \
+            imm += 2048;                                             \
+            rs1 = tmp;                                               \
+        }                                                            \
+        ERR_CHECK(emit(aotm, OP(rs2, imm, rs1)));                    \
     } while (0)
 
 

@@ -122,10 +122,10 @@ test_c(heapsort-O0 "0x22291:i32")
 #test_c(heapsort-O3 "0x22291:i32") # Infinite loop
 #test_c(heapsort-Os "0x22291:i32") # Infinite loop
 test_c(matrix-O0 "0x2255727:i32")
-#test_c(matrix-O1 "0x2255727:i32") # Wrong return value
-#test_c(matrix-O2 "0x2255727:i32") # Wrong return value
-#test_c(matrix-O3 "0x2255727:i32") # Wrong return value
-#test_c(matrix-Os "0x2255727:i32") # Wrong return value
+test_c(matrix-O1 "0x2255727:i32")
+test_c(matrix-O2 "0x2255727:i32")
+test_c(matrix-O3 "0x2255727:i32")
+test_c(matrix-Os "0x2255727:i32")
 test_c(sieve-O0 "0x76c:i32")
 #test_c(sieve-O1 "0x76c:i32") # Wrong return value
 #test_c(sieve-O2 "0x76c:i32") # Wrong return value
