@@ -607,8 +607,7 @@ typedef struct ins_fmt {
  * Result: rd = mem[rs1+imm][0:7] */
 #define LBU_FUNC3 0x4
 #define RV32_LBU(RD, IMM, RS1) \
-    I_TYPE_INS_TEMPLATE(LOAD_OPCODE, LW_FUNC3, RD, RS1, IMM)
-
+    I_TYPE_INS_TEMPLATE(LOAD_OPCODE, LBU_FUNC3, RD, RS1, IMM)
 
 /* Instr: sw
  * Description: store word

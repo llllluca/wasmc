@@ -264,8 +264,8 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
             rv32_reg rd = i->to.as.location->as.reg;
             rv32_reg rs1 = i->arg[0].as.location->as.reg;
             rv32_reg rs2 = i->arg[1].as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XOR(rs1, rs1, rs2)));
-            ERR_CHECK(emit(m, RV32_SEQZ(rd, rs1)));
+            ERR_CHECK(emit(m, RV32_XOR(rd, rs1, rs2)));
+            ERR_CHECK(emit(m, RV32_SEQZ(rd, rd)));
         } break;
         case IR_OPCODE_NE: {
             ERR_CHECK(fix_arg(m, &i->arg[0], &rv32_private_reg0));
@@ -274,6 +274,7 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
             rv32_reg rs1 = i->arg[0].as.location->as.reg;
             rv32_reg rs2 = i->arg[1].as.location->as.reg;
             ERR_CHECK(emit(m, RV32_XOR(rd, rs1, rs2)));
+            ERR_CHECK(emit(m, RV32_SNEZ(rd, rd)));
         } break;
         case IR_OPCODE_SLT:
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
