@@ -98,9 +98,9 @@ test_c(fib2-O3 "0x59:i32")
 test_c(fib2-Os "0x59:i32")
 test_c(msort-O0 "0x15:i32")
 test_c(msort-O1 "0x15:i32")
-#test_c(msort-O2 "0x15:i32") # Segmentation fault
-#test_c(msort-O3 "0x15:i32") # Segmentation fault
-#test_c(msort-Os "0x15:i32") # Segmentation fault
+test_c(msort-O2 "0x15:i32")
+test_c(msort-O3 "0x15:i32")
+test_c(msort-Os "0x15:i32")
 test_c(qsort-O0 "0x66:i32")
 test_c(qsort-O1 "0x66:i32")
 test_c(qsort-O2 "0x66:i32")
@@ -112,15 +112,15 @@ test_c(ackermann-O2 "0x3fd:i32")
 test_c(ackermann-O3 "0x3fd:i32")
 test_c(ackermann-Os "0x3fd:i32")
 test_c(base64-O0 "0x2b:i32")
-#test_c(base64-O1 "0x2b:i32") # Wrong return value
-#test_c(base64-O2 "0x2b:i32") # Wrong return value
-#test_c(base64-O3 "0x2b:i32") # Wrong return value
-#test_c(base64-Os "0x2b:i32") # Wrong return value
+test_c(base64-O1 "0x2b:i32")
+test_c(base64-O2 "0x2b:i32")
+test_c(base64-O3 "0x2b:i32")
+test_c(base64-Os "0x2b:i32")
 test_c(heapsort-O0 "0x22291:i32")
 test_c(heapsort-O1 "0x22291:i32")
-#test_c(heapsort-O2 "0x22291:i32") # Infinite loop
-#test_c(heapsort-O3 "0x22291:i32") # Infinite loop
-#test_c(heapsort-Os "0x22291:i32") # Infinite loop
+test_c(heapsort-O2 "0x22291:i32")
+test_c(heapsort-O3 "0x22291:i32")
+test_c(heapsort-Os "0x22291:i32")
 test_c(matrix-O0 "0x2255727:i32")
 test_c(matrix-O1 "0x2255727:i32")
 test_c(matrix-O2 "0x2255727:i32")

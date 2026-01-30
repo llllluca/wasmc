@@ -661,7 +661,7 @@ static __always_inline void
 insert_move_at_start(IRBlock *b, struct list_head *smove) {
 
     IRInstr *ins, *iter;
-    list_for_each_entry_safe(ins, iter, smove, next) {
+    list_for_each_entry_safe_reverse(ins, iter, smove, next) {
         list_del(&ins->next);
         list_add(&ins->next, &b->instr_list);
     }
@@ -756,11 +756,11 @@ static bool resolve_edge(IRFunction *f, IRBlock *pred, IRBlock *succ) {
     if (!list_empty(&smove)) {
         printf("sequence move:\n");
     }
-    IRInstr *ins;
-    list_for_each_entry(ins, &smove, next) {
-        ir_print_ref(ins->to, stdout);
+    IRInstr *ins2;
+    list_for_each_entry(ins2, &smove, next) {
+        ir_print_ref(ins2->to, stdout);
         printf(" = ");
-        ir_print_ref(ins->arg[0], stdout);
+        ir_print_ref(ins2->arg[0], stdout);
         printf("\n");
     }
     */
