@@ -216,7 +216,6 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
     if (top->unreachable) return COMPILE_OK;
     assert(ctx->curr_block != NULL);
 
-    //TODO: this code needs to be changed to support other types besides i32
     WASMGlobal *g = &ctx->m->globals[globalidx];
     IRReference global;
     if (g->is_mutable) {
@@ -677,7 +676,14 @@ static CompileErr_t compile_end_loop(CompileCtx *ctx, ControlStackEntry *ctrl) {
     err = push_block_result_value(ctx, ctrl);
     if (err) return COMPILE_ERR;
 
-    //TODO: add a comment here
+    /* When a 'loop' statement is compiled a new block is created
+     * and marked as loop header, see compile_loop(). In WASM a 'loop'
+     * statement dont create always a loop in the control flow of the
+     * program. In order to create a loop in the control flow of the
+     * program you need an explict 'br' of 'br_if' that jump back at
+     * the 'loop' statement. So if the 'loop' statement does not
+     * really generate a loop in the control flow delete the loop
+     * header mark. */
     if (list_empty(&loop_header->loop_end_block_list)) {
         loop_header->is_loop_header = false;
     }
@@ -1271,6 +1277,27 @@ static IRFunction *compile_fn(WASMModule *m, uint32_t funcidx) {
      * no explicit return in the wasm code */
     compile_return(&ctx);
     free(pop_ctrl(&ctx));
+
+    /* Replace the phi references with tmp references */
+    IRBlock *block;
+    list_for_each_entry(block, &ir_func->block_list, link) {
+        IRPhi *phi;
+        list_for_each_entry(phi, &block->phi_list, link) {
+            IRUse *use, *iter;
+            list_for_each_entry_safe(use, iter, &phi->use_list, link) {
+                use->ref->type = IR_REF_TYPE_TMP;
+                use->ref->as.tmp_id = phi->id;
+                list_del(&use->link);
+                free(use);
+            }
+        }
+        /* Free block locals */
+        if (block->locals != NULL) {
+            free(block->locals);
+            block->locals = NULL;
+        }
+    }
+
     return ir_func;
 
 ERROR:
@@ -1296,9 +1323,9 @@ int compile(uint8_t *wasm_buf, unsigned int wasm_len,
     for (uint32_t i = 0; i < wasm_mod.function_count; i++) {
         fn = compile_fn(&wasm_mod, i);
         if (fn == NULL) goto ERROR;
-        ir_print_fn(fn, stdout);
+        //ir_print_fn(fn, stdout);
         if (register_allocation(fn)) goto ERROR;
-        ir_print_fn(fn, stdout);
+        //ir_print_fn(fn, stdout);
         if (rv32_emit_text(&aot_mod, fn)) goto ERROR;
         ir_free_function(fn);
     }

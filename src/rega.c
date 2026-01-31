@@ -148,7 +148,7 @@ static IRReference *find_next_input_operand(IRInstr *ins, IRReference *offset) {
     }
 
     for (IRReference *r = offset; r <= &ins->arg[1]; r++) {
-        if (r->type == IR_REF_TYPE_TMP || r->type == IR_REF_TYPE_PHI) {
+        if (r->type == IR_REF_TYPE_TMP) {
             return r;
         }
     }
@@ -224,10 +224,8 @@ LiveInterval **build_intervals(IRFunction *f) {
             list_for_each_entry(phi, &successor->phi_list, link) {
                 IRPhiArg *phi_arg = input_of(phi, block);
                 IRReference v = phi_arg->value;
-                if (v.type == IR_REF_TYPE_TMP || v.type == IR_REF_TYPE_PHI) {
-                    unsigned int tmp_id = v.type == IR_REF_TYPE_TMP ?
-                        v.as.tmp_id : v.as.phi->id;
-                    bitmap_set_bit(live, tmp_id);
+                if (v.type == IR_REF_TYPE_TMP) {
+                    bitmap_set_bit(live, v.as.tmp_id);
                 }
             }
         }
@@ -254,9 +252,8 @@ LiveInterval **build_intervals(IRFunction *f) {
         //The final jump can contain an input operand (i.e. a use of a temporary).
         if (block->jump.type == IR_JUMP_TYPE_JNZ || block->jump.type == IR_JUMP_TYPE_RET1) {
             IRReference jump_arg = block->jump.arg;
-            if (jump_arg.type == IR_REF_TYPE_TMP || jump_arg.type == IR_REF_TYPE_PHI) {
-                unsigned int tmp_id = jump_arg.type == IR_REF_TYPE_TMP ?
-                    jump_arg.as.tmp_id : jump_arg.as.phi->id;
+            if (jump_arg.type == IR_REF_TYPE_TMP) {
+                unsigned int tmp_id = jump_arg.as.tmp_id;
                 add_range(&live_intervals[tmp_id], block->seqnum, block->jump.seqnum);
                 bitmap_set_bit(live, tmp_id);
             }
@@ -368,9 +365,8 @@ static void register_hints(IRFunction *f) {
         list_for_each_entry(ins, &block->instr_list, link) {
             if (ins->op == IR_OPCODE_ARG) {
                 IRReference arg = ins->arg[0];
-                if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
-                    tmp_id = arg.type == IR_REF_TYPE_TMP ?
-                        arg.as.tmp_id : arg.as.phi->id;
+                if (arg.type == IR_REF_TYPE_TMP) {
+                    tmp_id = arg.as.tmp_id;
                     LiveInterval *live_int = &f->live_intervals[tmp_id];
                     if (live_int->register_hint == -1) {
                         live_int->register_hint = rv32_arg_reg[arg_index++];
@@ -392,8 +388,8 @@ static void register_hints(IRFunction *f) {
         /* Register hints for non-void reuturns */
         if (block->jump.type == IR_JUMP_TYPE_RET1) {
             IRReference arg = block->jump.arg;
-            if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
-                tmp_id = arg.type == IR_REF_TYPE_TMP ? arg.as.tmp_id : arg.as.phi->id;
+            if (arg.type == IR_REF_TYPE_TMP) {
+                tmp_id = arg.as.tmp_id;
                 LiveInterval *live_int = &f->live_intervals[tmp_id];
                 if (live_int->register_hint == -1) {
                     live_int->register_hint = A0;
@@ -410,8 +406,8 @@ static void register_hints(IRFunction *f) {
             IRPhiArg *phi_arg;
             list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
                 IRReference arg = phi_arg->value;
-                if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
-                    tmp_id = arg.type == IR_REF_TYPE_TMP ? arg.as.tmp_id : arg.as.phi->id;
+                if (arg.type == IR_REF_TYPE_TMP) {
+                    tmp_id = arg.as.tmp_id;
                     LiveInterval *live_int = &f->live_intervals[tmp_id];
                     if (live_int->register_hint == -1) {
                         live_int->register_hint = phi_live_int->register_hint;
@@ -573,12 +569,7 @@ static bool parallel_move_from_phis(IRFunction *f, IRBlock *pred,
             Move *move = malloc(sizeof(struct Move));
             if (move == NULL) return true;
             move->to = &f->live_intervals[phi->id].assign;
-            if (phi_arg->value.type == IR_REF_TYPE_PHI) {
-                move->from.type = IR_REF_TYPE_TMP;
-                move->from.as.tmp_id = phi_arg->value.as.phi->id;
-            } else {
-                move->from = phi_arg->value;
-            }
+            move->from = phi_arg->value;
             list_add_tail(&move->link, out);
         }
     }
@@ -592,12 +583,7 @@ static __always_inline IRInstr *alloc_copy(Location *dst, IRReference *src) {
     ins->type = IR_TYPE_I32;
     ins->to.type = IR_REF_TYPE_LOCATION;
     ins->to.as.location = dst;
-    if (src->type == IR_REF_TYPE_PHI) {
-        ins->arg[0].type = IR_REF_TYPE_TMP;
-        ins->arg[0].as.tmp_id = src->as.phi->id;
-    } else {
-        ins->arg[0] = *src;
-    }
+    ins->arg[0] = *src;
     ins->arg[1].type = IR_REF_TYPE_UNDEFINED;
     ins->seqnum = 0;
     return ins;
@@ -810,18 +796,6 @@ static bool ssa_deconstruction(IRFunction *f) {
     list_for_each_entry_safe(block, iter, &f->working_block_list, link) {
         list_del(&block->link);
         list_add_tail(&block->link, &block->succ[0]->link);
-    }
-
-    /* phis don't exists anymore, replace the phi references with tmp references */
-    list_for_each_entry(block, &f->block_list, link) {
-        IRPhi *phi;
-        list_for_each_entry(phi, &block->phi_list, link) {
-            IRUse *use;
-            list_for_each_entry(use, &phi->use_list, link) {
-                use->ref->type = IR_REF_TYPE_TMP;
-                use->ref->as.tmp_id = phi->id;
-            }
-        }
     }
 
     /* free phi_list for all block b */

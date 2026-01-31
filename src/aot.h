@@ -94,27 +94,6 @@ typedef struct AOTTargetInfo {
 #define AOT_ARCH_ARC_COMPACT  "arc"
 #define AOT_ARCH_ARC_COMPACT2 "arc"
 
-
-/* Legal values for relocation type */
-#define R_RISCV_CALL 18
-
-/* Relocation info */
-typedef struct AOTRelocation {
-    struct AOTRelocation *next;
-    /* offset gives the location at which to apply the relocation action.
-     * The value is the byte offset from the beginning of the section to
-     * the storage unit affected by the relocation */
-    uint32_t offset;
-    /* addend specifies a constant addend used to compute the value to be
-     * stored into the relocatable field */
-    uint32_t addend;
-    /* relocation type */
-    uint32_t type;
-    struct AOTRelocation *representative;
-    uint32_t symbol_index;
-    char *symbol_name;
-} AOTRelocation;
-
 typedef struct AOTModule {
     WASMModule *wasm_mod;
     uint8_t *buf;
