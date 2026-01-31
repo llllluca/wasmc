@@ -114,7 +114,7 @@ static ControlStackEntry *pop_ctrl(CompileCtx *ctx) {
         OperandStackEntry *opd = pop_opd(ctx);
         pa->value = opd->ref;
         pa->predecessor = ctx->curr_block;
-        list_add_tail(&pa->next, &top->end_results);
+        list_add_tail(&pa->link, &top->end_results);
         top->end_results_count++;
         free(opd);
     }
@@ -144,7 +144,7 @@ static ControlStackEntry *get_ctrl(CompileCtx *ctx, uint32_t index) {
 
 static void free_ctrl(ControlStackEntry *ctrl) {
     if (ctrl->kind != CTRL_STACK_ENTRY_DUMMY) {
-        list_release(&ctrl->end_results, free, IRPhiArg, next);
+        list_release(&ctrl->end_results, free, IRPhiArg, link);
     }
     free(ctrl);
 }
@@ -357,7 +357,7 @@ static CompileErr_t compile_br(CompileCtx *ctx) {
         OperandStackEntry *opd = pop_opd(ctx);
         phi_arg->value = opd->ref;
         phi_arg->predecessor = ctx->curr_block;
-        list_add_tail(&phi_arg->next, &ctrl->end_results);
+        list_add_tail(&phi_arg->link, &ctrl->end_results);
         ctrl->end_results_count++;
         free(opd);
     }
@@ -395,7 +395,7 @@ static CompileErr_t compile_br_if(CompileCtx *ctx) {
         OperandStackEntry *opd = top_opd(ctx);
         phi_arg->value = opd->ref;
         phi_arg->predecessor = ctx->curr_block;
-        list_add_tail(&phi_arg->next, &ctrl->end_results);
+        list_add_tail(&phi_arg->link, &ctrl->end_results);
         ctrl->end_results_count++;
     }
 
@@ -553,7 +553,7 @@ static bool get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
     if (n == 1) {
         struct list_head *head = list_next(&ctrl->end_results);
         list_del(head);
-        IRPhiArg *phi_arg = container_of(head, IRPhiArg, next);
+        IRPhiArg *phi_arg = container_of(head, IRPhiArg, link);
         *out = phi_arg->value;
         free(phi_arg);
     } else if (n > 1) {
@@ -565,7 +565,7 @@ static bool get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
             struct list_head *head = list_next(&ctrl->end_results);
             list_del(head);
             list_add_tail(head, &phi->phi_arg_list);
-            IRPhiArg *phi_arg = container_of(head, IRPhiArg, next);
+            IRPhiArg *phi_arg = container_of(head, IRPhiArg, link);
             bool err = ir_add_usage(&phi_arg->value);
             if (err) return true;
         }

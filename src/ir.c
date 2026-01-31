@@ -117,10 +117,10 @@ static void ir_print_phi(IRPhi *phi, FILE *f) {
     fprintf(f, "\t%%t%"PRIu32, phi->id);
     fprintf(f, " =%s phi ", type2str(phi->type));
     IRPhiArg *phi_arg;
-    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
         fprintf(f, "@%u ", phi_arg->predecessor->id);
         ir_print_ref(phi_arg->value, f);
-        if (phi_arg->next.next != &phi->phi_arg_list) {
+        if (phi_arg->link.next != &phi->phi_arg_list) {
             fprintf(f, ", ");
         }
     }
@@ -215,14 +215,14 @@ void ir_print_fn(IRFunction *fn, FILE *f) {
     fprintf(f, "function %s %s() {\n", type2str(return_type), wf->name);
 
     IRBlock *block;
-    list_for_each_entry(block, &fn->block_list, next) {
+    list_for_each_entry(block, &fn->block_list, link) {
         fprintf(f, "@%u\n", block->id);
         IRPhi *phi;
-        list_for_each_entry(phi, &block->phi_list, next) {
+        list_for_each_entry(phi, &block->phi_list, link) {
             ir_print_phi(phi, f);
         }
         IRInstr *instr;
-        list_for_each_entry(instr, &block->instr_list, next) {
+        list_for_each_entry(instr, &block->instr_list, link) {
             ir_print_instr(instr, f);
         }
         ir_print_jump(block, f);
@@ -239,7 +239,7 @@ bool ir_add_usage(IRReference *ref) {
         IRUse *use = malloc(sizeof(struct IRUse));
         if (use == NULL) return true;
         use->ref = ref;
-        list_add(&use->next, &ref->as.phi->use_list);
+        list_add(&use->link, &ref->as.phi->use_list);
     }
     return false;
 }
@@ -247,9 +247,9 @@ bool ir_add_usage(IRReference *ref) {
 void ir_rm_usage(IRReference *ref) {
     if (ref->type != IR_REF_TYPE_PHI) return;
     IRUse *use;
-    list_for_each_entry(use, &ref->as.phi->use_list, next) {
+    list_for_each_entry(use, &ref->as.phi->use_list, link) {
         if (use->ref == ref) {
-            list_del(&use->next);
+            list_del(&use->link);
             free(use);
             break;
         }
@@ -321,7 +321,7 @@ static IRBlock *__ir_create_block(IRFunction *f) {
     INIT_LIST_HEAD(&block->pred_list);
     INIT_LIST_HEAD(&block->loop_end_block_list);
     block->id = f->next_block_id++;
-    list_add_tail(&block->next, &f->working_block_list);
+    list_add_tail(&block->link, &f->working_block_list);
     return block;
 }
 
@@ -408,7 +408,7 @@ bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type,
     ins->arg[0] = arg0;
     ins->arg[1] = arg1;
     ins->seqnum = 0;
-    list_add_tail(&ins->next, &b->instr_list);
+    list_add_tail(&ins->link, &b->instr_list);
     //TODO: add a comment here
     bool err;
     if (ins->op == IR_OPCODE_STORE || ins->op == IR_OPCODE_STORE8) {
@@ -428,7 +428,7 @@ bool ir_add_predecessor(IRBlock *block, IRBlock *pred) {
     IRPredecessor *node = malloc(sizeof(struct IRPredecessor));
     if (node == NULL) return true;
     node->ptr = pred;
-    list_add_tail(&node->next, &block->pred_list);
+    list_add_tail(&node->link, &block->pred_list);
     block->pred_count++;
     return false;
 }
@@ -437,7 +437,7 @@ bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end) {
     IRLoopEnd *node = malloc(sizeof(struct IRLoopEnd));
     if (node == NULL) return true;
     node->ptr = loop_end;
-    list_add_tail(&node->next, &block->loop_end_block_list);
+    list_add_tail(&node->link, &block->loop_end_block_list);
     return false;
 }
 
@@ -447,8 +447,8 @@ bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival) {
     departure->succ[0] = arrival;
 
     /* remove the 'departure' block from the working block list */
-    list_del(&departure->next);
-    list_add_tail(&departure->next, &f->block_list);
+    list_del(&departure->link);
+    list_add_tail(&departure->link, &f->block_list);
 
     bool err = ir_add_predecessor(arrival, departure);
     if (err) return true;
@@ -465,8 +465,8 @@ bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
     departure->succ[1] = arg_is_zero_arrival;
 
     /* remove the 'departure' block from the working block list */
-    list_del(&departure->next);
-    list_add_tail(&departure->next, &f->block_list);
+    list_del(&departure->link);
+    list_add_tail(&departure->link, &f->block_list);
 
     bool err = ir_add_usage(&departure->jump.arg);
     if (err) return true;
@@ -484,8 +484,8 @@ void ir_ret0(IRFunction *f, IRBlock *block) {
 
     block->jump.type = IR_JUMP_TYPE_RET0;
     /* remove the block from the working block list */
-    list_del(&block->next);
-    list_add_tail(&block->next, &f->block_list);
+    list_del(&block->link);
+    list_add_tail(&block->link, &f->block_list);
 }
 
 bool ir_ret1(IRFunction *f, IRBlock *block, IRReference return_value) {
@@ -493,8 +493,8 @@ bool ir_ret1(IRFunction *f, IRBlock *block, IRReference return_value) {
     block->jump.type = IR_JUMP_TYPE_RET1;
     block->jump.arg = return_value;
     /* remove the block from the working block list */
-    list_del(&block->next);
-    list_add_tail(&block->next, &f->block_list);
+    list_del(&block->link);
+    list_add_tail(&block->link, &f->block_list);
     bool err = ir_add_usage(&block->jump.arg);
     if (err) return true;
 
@@ -505,8 +505,8 @@ void ir_halt(IRFunction *f, IRBlock *block) {
 
     block->jump.type = IR_JUMP_TYPE_HALT;
     /* remove the block from the working block list */
-    list_del(&block->next);
-    list_add_tail(&block->next, &f->block_list);
+    list_del(&block->link);
+    list_add_tail(&block->link, &f->block_list);
 }
 
 IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type) {
@@ -519,7 +519,7 @@ IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type) {
     phi->block = block;
     INIT_LIST_HEAD(&phi->phi_arg_list);
     INIT_LIST_HEAD(&phi->use_list);
-    list_add_tail(&phi->next, &block->phi_list);
+    list_add_tail(&phi->link, &block->phi_list);
     return phi;
 }
 
@@ -530,7 +530,7 @@ bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor) {
     if (phi_arg == NULL) return true;
     phi_arg->value = value;
     phi_arg->predecessor = predecessor;
-    list_add_tail(&phi_arg->next, &phi->phi_arg_list);
+    list_add_tail(&phi_arg->link, &phi->phi_arg_list);
 
     if (ir_add_usage(&phi_arg->value)) return true;
 
@@ -591,17 +591,17 @@ IRType ir_cast(WASMValtype t) {
 
 void ir_free_function(IRFunction *f) {
 
-    list_release(&f->block_list, ir_free_block, IRBlock, next);
+    list_release(&f->block_list, ir_free_block, IRBlock, link);
     if (f->live_intervals != NULL) free(f->live_intervals);
     free(f);
 }
 
 void ir_free_block(IRBlock *b) {
 
-    list_release(&b->phi_list, ir_free_phi, IRPhi, next);
-    list_release(&b->instr_list, free, IRInstr, next);
-    list_release(&b->pred_list, free, IRPredecessor, next);
-    list_release(&b->loop_end_block_list, free, IRLoopEnd, next);
+    list_release(&b->phi_list, ir_free_phi, IRPhi, link);
+    list_release(&b->instr_list, free, IRInstr, link);
+    list_release(&b->pred_list, free, IRPredecessor, link);
+    list_release(&b->loop_end_block_list, free, IRLoopEnd, link);
     if (b->locals != NULL) free(b->locals);
     if (b->incomplete_phi != NULL) free(b->incomplete_phi);
     free(b);
@@ -609,8 +609,8 @@ void ir_free_block(IRBlock *b) {
 
 void ir_free_phi(IRPhi *phi) {
 
-    list_release(&phi->phi_arg_list, free, IRPhiArg, next);
-    list_release(&phi->use_list, free, IRUse, next);
+    list_release(&phi->phi_arg_list, free, IRPhiArg, link);
+    list_release(&phi->use_list, free, IRUse, link);
     free(phi);
 }
 
@@ -664,7 +664,7 @@ static bool read_local_recursive(IRFunction *f, IRBlock *block,
         /* If the block has a single predecessor, just query
          * it recursively for a definition. No phi needed */
         struct list_head *head = list_next(&block->pred_list);
-        IRPredecessor *pred = container_of(head, IRPredecessor, next);
+        IRPredecessor *pred = container_of(head, IRPredecessor, link);
         bool err = ir_read_local(f, pred->ptr, localidx, &value);
         if (err) return true;
     } else {
@@ -705,7 +705,7 @@ static bool add_phi_operands(IRFunction *f, IRPhi *phi,
     bool err;
 
     IRPredecessor *pred;
-    list_for_each_entry(pred, &phi->block->pred_list, next) {
+    list_for_each_entry(pred, &phi->block->pred_list, link) {
         err = ir_read_local(f, pred->ptr, localidx, &local);
         if (err) return true;
         err = ir_append_phi_arg(phi, local, pred->ptr);
@@ -743,7 +743,7 @@ static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) 
 
     IRReference same =  IR_REF_UNDEFINED;
     IRPhiArg *phi_arg;
-    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
         if (ir_reference_equal(&same, &phi_arg->value) ||
             (phi_arg->value.type == IR_REF_TYPE_PHI && phi_arg->value.as.phi == phi)) {
             /* Unique value or self-reference */
@@ -768,15 +768,15 @@ static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) 
 
     /* Reroute all uses of phi to same */
     IRUse *use;
-    list_for_each_entry(use, &phi->use_list, next) {
+    list_for_each_entry(use, &phi->use_list, link) {
         *use->ref = same;
         ir_add_usage(use->ref);
     }
 
     /* remove 'phi' */
-    list_del(&phi->next);
+    list_del(&phi->link);
     f->tmp_count--;
-    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
        ir_rm_usage(&phi_arg->value);
     }
     ir_free_phi(phi);

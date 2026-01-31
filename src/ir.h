@@ -49,18 +49,18 @@ struct IRFunction {
 };
 
 typedef struct IRPredecessor {
-    struct list_head next;
+    struct list_head link;
     IRBlock *ptr;
 } IRPredecessor;
 
 typedef struct IRLoopEnd {
-    struct list_head next;
+    struct list_head link;
     IRBlock *ptr;
 } IRLoopEnd;
 
 struct IRBlock {
     unsigned int id;
-    struct list_head next;
+    struct list_head link;
     struct list_head phi_list;
     struct list_head instr_list;
     struct {
@@ -103,13 +103,13 @@ typedef enum __attribute__ ((__packed__)) IRType {
 } IRType;
 
 typedef struct IRPhiArg {
-    struct list_head next;
+    struct list_head link;
     IRReference value;
     IRBlock *predecessor;
 } IRPhiArg;
 
 struct IRPhi {
-    struct list_head next;
+    struct list_head link;
     IRBlock *block;
     uint32_t id;
     IRType type;
@@ -172,7 +172,7 @@ typedef enum IROpcode {
 } IROpcode;
 
 typedef struct IRInstr {
-    struct list_head next;
+    struct list_head link;
     IROpcode op;
     IRType type;
     IRReference to;
@@ -201,7 +201,7 @@ struct LiveInterval {
 };
 
 typedef struct IRUse {
-    struct list_head next;
+    struct list_head link;
     IRReference *ref;
 } IRUse;
 

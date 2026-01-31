@@ -92,10 +92,10 @@ static bool location_equal(Location *loc1, Location *loc2) {
 static void number_instructions(IRFunction *f) {
     unsigned int next_seqnum = 0;
     IRBlock *block;
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         block->seqnum = next_seqnum++;
         IRInstr *ins;
-        list_for_each_entry(ins, &block->instr_list, next) {
+        list_for_each_entry(ins, &block->instr_list, link) {
             ins->seqnum = next_seqnum++;
         }
         block->jump.seqnum = next_seqnum++;
@@ -158,7 +158,7 @@ static IRReference *find_next_input_operand(IRInstr *ins, IRReference *offset) {
 static IRPhiArg *input_of(IRPhi *phi, IRBlock *block) {
 
     IRPhiArg *phi_arg;
-    list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+    list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
         if (block == phi_arg->predecessor) {
             return phi_arg;
         }
@@ -197,7 +197,7 @@ LiveInterval **build_intervals(IRFunction *f) {
      * processed before this block. Only for loop, the loop header cannot be
      * processed before the loop end, so loops are handled as a special case. */
     IRBlock *block;
-    list_for_each_entry_reverse(block, &f->block_list, next) {
+    list_for_each_entry_reverse(block, &f->block_list, link) {
 
         /* Initialize the set of temporaries that are live at the end of block b.
          * The initial set of tempraries that are live at the end of block b is
@@ -221,7 +221,7 @@ LiveInterval **build_intervals(IRFunction *f) {
         for (unsigned int i = 0; i < 2; i++) {
             IRBlock *successor = block->succ[i];
             if (successor == NULL) continue;
-            list_for_each_entry(phi, &successor->phi_list, next) {
+            list_for_each_entry(phi, &successor->phi_list, link) {
                 IRPhiArg *phi_arg = input_of(phi, block);
                 IRReference v = phi_arg->value;
                 if (v.type == IR_REF_TYPE_TMP || v.type == IR_REF_TYPE_PHI) {
@@ -263,7 +263,7 @@ LiveInterval **build_intervals(IRFunction *f) {
         }
 
         IRInstr *ins;
-        list_for_each_entry_reverse(ins, &block->instr_list, next) {
+        list_for_each_entry_reverse(ins, &block->instr_list, link) {
 
             /* All the IRInstr contain a single a output operand (i.e. a definition
              * of a temporary) in the 'to' field. The store opcodes family are special
@@ -299,7 +299,7 @@ LiveInterval **build_intervals(IRFunction *f) {
          * predecessors are processed. Thus, neither an input operand nor the
          * output operand of a phi function is live at the beginning of the
          * phi function’s block. */
-        list_for_each_entry(phi, &block->phi_list, next) {
+        list_for_each_entry(phi, &block->phi_list, link) {
             bitmap_clear_bit(live, phi->id);
             sorted_intervals[--front] = &live_intervals[phi->id];
         }
@@ -308,12 +308,12 @@ LiveInterval **build_intervals(IRFunction *f) {
             unsigned int max = 0;
             IRLoopEnd *loop_end;
             assert(!list_empty(&block->loop_end_block_list));
-            list_for_each_entry(loop_end, &block->loop_end_block_list, next) {
+            list_for_each_entry(loop_end, &block->loop_end_block_list, link) {
                 if (loop_end->ptr->jump.seqnum > max) {
                     max = loop_end->ptr->jump.seqnum;
                 }
             }
-            list_release(&block->loop_end_block_list, free, IRLoopEnd, next);
+            list_release(&block->loop_end_block_list, free, IRLoopEnd, link);
             INIT_LIST_HEAD(&block->loop_end_block_list);
 
             unsigned int tmp_id;
@@ -326,7 +326,7 @@ LiveInterval **build_intervals(IRFunction *f) {
 
     f->live_intervals = live_intervals;
 
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         bitmap_free(block->live_in);
         block->live_in = NULL;
     }
@@ -351,7 +351,7 @@ static void register_hints(IRFunction *f) {
     /* Register hints for function parameters */
     unsigned int par_index = 0;
     IRInstr *ins;
-    list_for_each_entry(ins, &f->start->instr_list, next) {
+    list_for_each_entry(ins, &f->start->instr_list, link) {
         if (ins->op != IR_OPCODE_PAR) break;
         tmp_id = ins->to.as.tmp_id;
         LiveInterval *live_int = &f->live_intervals[tmp_id];
@@ -362,10 +362,10 @@ static void register_hints(IRFunction *f) {
 
     unsigned int arg_index = 0;
     IRBlock *block;
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         IRInstr *ins;
         /* Register hints for function calls */
-        list_for_each_entry(ins, &block->instr_list, next) {
+        list_for_each_entry(ins, &block->instr_list, link) {
             if (ins->op == IR_OPCODE_ARG) {
                 IRReference arg = ins->arg[0];
                 if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
@@ -402,13 +402,13 @@ static void register_hints(IRFunction *f) {
         }
     }
 
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         IRPhi *phi;
-        list_for_each_entry(phi, &block->phi_list, next) {
+        list_for_each_entry(phi, &block->phi_list, link) {
             LiveInterval *phi_live_int = &f->live_intervals[phi->id];
             if (phi_live_int->register_hint == -1) continue;
             IRPhiArg *phi_arg;
-            list_for_each_entry(phi_arg, &phi->phi_arg_list, next) {
+            list_for_each_entry(phi_arg, &phi->phi_arg_list, link) {
                 IRReference arg = phi_arg->value;
                 if (arg.type == IR_REF_TYPE_TMP || arg.type == IR_REF_TYPE_PHI) {
                     tmp_id = arg.type == IR_REF_TYPE_TMP ? arg.as.tmp_id : arg.as.phi->id;
@@ -525,9 +525,9 @@ replace_tmp_with_location(IRFunction *f, IRReference *r) {
 static void replace_references_with_locations(IRFunction *f) {
 
     IRBlock *block;
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         IRInstr *ins;
-        list_for_each_entry(ins, &block->instr_list, next) {
+        list_for_each_entry(ins, &block->instr_list, link) {
             replace_tmp_with_location(f, &ins->to);
             replace_tmp_with_location(f, &ins->arg[0]);
             replace_tmp_with_location(f, &ins->arg[1]);
@@ -566,7 +566,7 @@ static bool have_same_location(IRFunction *f, Location *to_loc, IRReference *fro
 static bool parallel_move_from_phis(IRFunction *f, IRBlock *pred,
                                     IRBlock *succ, struct list_head *out) {
     IRPhi *phi;
-    list_for_each_entry(phi, &succ->phi_list, next) {
+    list_for_each_entry(phi, &succ->phi_list, link) {
         IRPhiArg *phi_arg = input_of(phi, pred);
         Location *to_loc = &f->live_intervals[phi->id].assign;
         if (!have_same_location(f, to_loc, &phi_arg->value)) {
@@ -621,7 +621,7 @@ static bool move_one(IRFunction *f, Move *m,
             case BEING_MOVED: {
                 IRInstr *ins = alloc_copy(&tmp, &x->from);
                 if (ins == NULL) return true;
-                list_add_tail(&ins->next, smove);
+                list_add_tail(&ins->link, smove);
                 x->from.type = IR_REF_TYPE_LOCATION;
                 x->from.as.location = &tmp;
             } break;
@@ -634,7 +634,7 @@ static bool move_one(IRFunction *f, Move *m,
     }
     IRInstr *ins = alloc_copy(m->to, &m->from);
     if (ins == NULL) return true;
-    list_add_tail(&ins->next, smove);
+    list_add_tail(&ins->link, smove);
     m->status = MOVED;
     return false;
 }
@@ -661,9 +661,9 @@ static __always_inline void
 insert_move_at_start(IRBlock *b, struct list_head *smove) {
 
     IRInstr *ins, *iter;
-    list_for_each_entry_safe_reverse(ins, iter, smove, next) {
-        list_del(&ins->next);
-        list_add(&ins->next, &b->instr_list);
+    list_for_each_entry_safe_reverse(ins, iter, smove, link) {
+        list_del(&ins->link);
+        list_add(&ins->link, &b->instr_list);
     }
 }
 
@@ -671,9 +671,9 @@ static __always_inline void
 insert_move_at_end(IRBlock *b, struct list_head *smove) {
 
     IRInstr *ins, *iter;
-    list_for_each_entry_safe(ins, iter, smove, next) {
-        list_del(&ins->next);
-        list_add_tail(&ins->next, &b->instr_list);
+    list_for_each_entry_safe(ins, iter, smove, link) {
+        list_del(&ins->link);
+        list_add_tail(&ins->link, &b->instr_list);
     }
 }
 
@@ -775,8 +775,8 @@ ERROR:
         free(move);
     }
     /* free smove */
-    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
-        list_del(&ins->next);
+    list_for_each_entry_safe(ins, ins_iter, &smove, link) {
+        list_del(&ins->link);
         free(move);
     }
     return err;
@@ -791,7 +791,7 @@ static bool ssa_deconstruction(IRFunction *f) {
     IRBlock *successor;
     bool err;
 
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         successor = block->succ[0];
         if (successor != NULL) {
             err = resolve_edge(f, block, successor);
@@ -807,17 +807,17 @@ static bool ssa_deconstruction(IRFunction *f) {
     /* All the blocks created from critical edge splitting was placed in the
      * 'f->working_block_list' (we cannont modify the 'f->block_list' while
      * iterate on it), move them in the 'f->block_list' */
-    list_for_each_entry_safe(block, iter, &f->working_block_list, next) {
-        list_del(&block->next);
-        list_add_tail(&block->next, &block->succ[0]->next);
+    list_for_each_entry_safe(block, iter, &f->working_block_list, link) {
+        list_del(&block->link);
+        list_add_tail(&block->link, &block->succ[0]->link);
     }
 
     /* phis don't exists anymore, replace the phi references with tmp references */
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         IRPhi *phi;
-        list_for_each_entry(phi, &block->phi_list, next) {
+        list_for_each_entry(phi, &block->phi_list, link) {
             IRUse *use;
-            list_for_each_entry(use, &phi->use_list, next) {
+            list_for_each_entry(use, &phi->use_list, link) {
                 use->ref->type = IR_REF_TYPE_TMP;
                 use->ref->as.tmp_id = phi->id;
             }
@@ -825,10 +825,10 @@ static bool ssa_deconstruction(IRFunction *f) {
     }
 
     /* free phi_list for all block b */
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         IRPhi *phi, *iter;
-        list_for_each_entry_safe(phi, iter, &block->phi_list, next) {
-            list_del(&phi->next);
+        list_for_each_entry_safe(phi, iter, &block->phi_list, link) {
+            list_del(&phi->link);
             ir_free_phi(phi);
         }
     }
@@ -848,7 +848,7 @@ static bool ensure_function_parameters_constraints(IRFunction *f) {
     Move *move, *move_iter;
 
     /* Ensure functions receive parameters from their caller */
-        list_for_each_entry_safe(ins, ins_iter, &f->start->instr_list, next) {
+        list_for_each_entry_safe(ins, ins_iter, &f->start->instr_list, link) {
         if (ins->op != IR_OPCODE_PAR) break;
         if (par_index > RV32_ARG_NUM_REG) {
         /* Passing function parameters through the stack is not implemented */
@@ -870,7 +870,7 @@ static bool ensure_function_parameters_constraints(IRFunction *f) {
             move->from = from;
             list_add_tail(&move->link, &pmove);
         }
-        list_del(&ins->next);
+        list_del(&ins->link);
         free(ins);
     }
     err = sequentialize_parallel_move(f, &pmove, &smove);
@@ -884,8 +884,8 @@ ERROR:
         free(move);
     }
     /* free smove */
-    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
-        list_del(&ins->next);
+    list_for_each_entry_safe(ins, ins_iter, &smove, link) {
+        list_del(&ins->link);
         free(move);
     }
     return err;
@@ -904,9 +904,9 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
     Move *move, *move_iter;
 
     IRBlock *block;
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
 
-        list_for_each_entry_safe(ins, ins_iter, &block->instr_list, next) {
+        list_for_each_entry_safe(ins, ins_iter, &block->instr_list, link) {
             switch (ins->op) {
             case IR_OPCODE_ARG: {
                 if (arg_index > RV32_ARG_NUM_REG) {
@@ -926,7 +926,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                     list_add_tail(&move->link, &pmove);
                 }
                 ir_rm_usage(&ins->arg[0]);
-                list_del(&ins->next);
+                list_del(&ins->link);
                 free(ins);
             } break;
             case IR_OPCODE_CALL: {
@@ -959,7 +959,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                     push->arg[1].type = IR_REF_TYPE_UNDEFINED;
                     push->seqnum = 0;
                     /* Insert 'push' before 'call' */
-                    list_add_tail(&push->next, &call->next);
+                    list_add_tail(&push->link, &call->link);
                 }
 
                 list_for_each_entry(live_int, &survivors, link) {
@@ -976,7 +976,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                     pop->arg[1].type = IR_REF_TYPE_UNDEFINED;
                     pop->seqnum = 0;
                     /* Insert 'pop' after 'call' */
-                    list_add(&pop->next, &call->next);
+                    list_add(&pop->link, &call->link);
                 }
 
                 /* Clean the survivors list */
@@ -989,9 +989,9 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
 
                 /* Insert the copies before 'call' */
                 IRInstr *ins2, *ins2_iter;
-                list_for_each_entry_safe(ins2, ins2_iter, &smove, next) {
-                    list_del(&ins2->next);
-                    list_add_tail(&ins2->next, &call->next);
+                list_for_each_entry_safe(ins2, ins2_iter, &smove, link) {
+                    list_del(&ins2->link);
+                    list_add_tail(&ins2->link, &call->link);
                 }
 
                 /* Reset arg_index */
@@ -1015,7 +1015,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                         ins->arg[0] = IR_REF_LOC(&args[0]);
                         ins->arg[1].type = IR_REF_TYPE_UNDEFINED;
                         ins->seqnum = 0;
-                        list_add(&ins->next, &call->next);
+                        list_add(&ins->link, &call->link);
                     }
                 }
                 call->to.type = IR_REF_TYPE_UNDEFINED;
@@ -1034,8 +1034,8 @@ ERROR:
         free(move);
     }
     /* free smove */
-    list_for_each_entry_safe(ins, ins_iter, &smove, next) {
-        list_del(&ins->next);
+    list_for_each_entry_safe(ins, ins_iter, &smove, link) {
+        list_del(&ins->link);
         free(move);
     }
     return err;
@@ -1045,12 +1045,12 @@ ERROR:
 static bool ensure_function_return_value_constraints(IRFunction *f) {
 
     IRBlock *block;
-    list_for_each_entry(block, &f->block_list, next) {
+    list_for_each_entry(block, &f->block_list, link) {
         if (block->jump.type == IR_JUMP_TYPE_RET1) {
             if (!have_same_location(f, &args[0], &block->jump.arg)) {
                 IRInstr *ins = alloc_copy(&args[0], &block->jump.arg);
                 if (ins == NULL) return true;
-                list_add_tail(&ins->next, &block->instr_list);
+                list_add_tail(&ins->link, &block->instr_list);
             }
             block->jump.type = IR_JUMP_TYPE_RET0;
         }

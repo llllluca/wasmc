@@ -507,9 +507,9 @@ static AOTErr_t emit_ret0(AOTModule *m, IRFunction *fn, unsigned int frame) {
 static AOTErr_t emit_jmp(AOTModule *m, IRBlock *block) {
 
     IRBlock *block_next = NULL;
-    struct list_head *next = list_next(&block->next);
+    struct list_head *next = list_next(&block->link);
     if (next != NULL) {
-        block_next = container_of(next, IRBlock, next);
+        block_next = container_of(next, IRBlock, link);
     }
     IRBlock *jump_target = block->succ[0];
     /* If the jump target is the next block to be processed,
@@ -539,9 +539,9 @@ static AOTErr_t emit_jmp(AOTModule *m, IRBlock *block) {
 static AOTErr_t emit_jnz(AOTModule *m, IRBlock *block) {
     if (fix_arg(m, &block->jump.arg, &rv32_private_reg0)) return AOT_ERR;
     IRBlock *block_next = NULL;
-    struct list_head *next = list_next(&block->next);
+    struct list_head *next = list_next(&block->link);
     if (next != NULL) {
-        block_next = container_of(next, IRBlock, next);
+        block_next = container_of(next, IRBlock, link);
     }
     if (block_next == block->succ[0]) {
         /* The next block to be processed is the 'then' block, so jump
@@ -625,11 +625,11 @@ AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn) {
     }
 
     IRBlock *block;
-    list_for_each_entry(block, &fn->block_list, next) {
+    list_for_each_entry(block, &fn->block_list, link) {
         block->text_start = m->offset;
         backpatch(&m->patch_list, JUMP_TO_BLOCK, block->id, block->text_start);
         IRInstr *ins;
-        list_for_each_entry(ins, &block->instr_list, next) {
+        list_for_each_entry(ins, &block->instr_list, link) {
             if (emitins(m, ins)) goto ERROR;
         }
         switch (block->jump.type) {
