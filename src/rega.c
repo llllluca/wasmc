@@ -963,16 +963,6 @@ static int ensure_function_calls_constraints(IRFunction *f, LiveInterval **inter
                     list_del(&live_int->link);
                 }
 
-                if (!list_empty(&pmove)) {
-                    printf("parallel move:\n");
-                }
-                list_for_each_entry(move, &pmove, link) {
-                    ir_print_location(move->to, stdout);
-                    printf(" = ");
-                    ir_print_ref(move->from, stdout);
-                    printf("\n");
-                }
-
                 err = sequentialize_parallel_move(f, &pmove, &smove);
                 if (err) goto ERROR;
 

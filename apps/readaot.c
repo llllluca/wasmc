@@ -632,7 +632,6 @@ void print_export(AOTSection *s) {
     }
 }
 
-#if 0
 void print_relocation(AOTSection *s) {
     char *section_name = AOTSectionType_to_string(s->type);
     printf("\n*=== %s ===*\n", section_name);
@@ -651,9 +650,9 @@ void print_relocation(AOTSection *s) {
 
     uint32_t total_string_len;
     READ_UINT32(offset, s->end, &total_string_len);
-    printf("Total string len: %"PRIu32"\n", total_string_len);
+    printf("Total string length: %"PRIu32"\n", total_string_len);
+
     uint8_t *symbol_buf = (uint8_t *)offset;
-    uint8_t *symbol_buf_end = symbol_buf + total_string_len;
     offset += total_string_len;
 
     for (uint32_t i = 0; i < symbol_count; i++) {
@@ -668,62 +667,49 @@ void print_relocation(AOTSection *s) {
     READ_UINT32(offset, s->end, &group_count);
     printf("Relocation group count: %"PRIu32"\n", group_count);
 
-    AOTRelocationGroup group;
+    uint32_t symbol_index, relocation_count;
     for (uint32_t i = 0; i < group_count; i++) {
 
+        printf("RelocationGroup[%"PRIu32"]:\n", i);
         offset = ALIGN_PTR(offset, 4);
-        READ_UINT32(p, p_end, &group.name_index);
-        printf("name_index = %"PRIu32"\n", group.name_index);
+        READ_UINT32(offset, s->end, &symbol_index);
+        printf("  Symbol index: %"PRIu32"\n", symbol_index);
+        READ_UINT32(offset, s->end, &relocation_count);
+        printf("  Relocation count: %"PRIu32"\n", relocation_count);
 
-        if (group.name_index >= symbol_count) {
-            fprintf(stderr, "Error: symbol index out of range\n");
-            exit(EXIT_FAILURE);
-        }
-        uint8_t *name_addr = symbol_buf + symbol_offsets[group.name_index] + sizeof(uint16_t);
-        group.section_name = (char *)name_addr;
-        READ_UINT32(p, p_end, &group.relocation_count);
-        printf("group[%"PRIu32"].section_name: %s\n", i, group.section_name);
-        printf("group[%"PRIu32"].relocation_count: %"PRIu32"\n", i, group.relocation_count);
+        uint32_t rel_offset, rel_addend, rel_type, rel_symbol_index;
+        for (uint32_t j = 0; j < relocation_count; j++) {
 
-        for (uint32_t j = 0; j < group.relocation_count; j++) {
-            assert((!(target_info.bin_type & 2)) &&
-               "The following code works only for 32-bit target machine");
+            printf("  Relocation[%"PRIu32"]:\n", j);
+            READ_UINT32(offset, s->end, &rel_offset);
+            READ_UINT32(offset, s->end, &rel_addend);
+            READ_UINT32(offset, s->end, &rel_type);
+            READ_UINT32(offset, s->end, &rel_symbol_index);
 
-            AOTRelocation relocation;
-            READ_UINT32(p, p_end, &relocation.offset);
-            READ_UINT32(p, p_end, &relocation.addend);
-            READ_UINT32(p, p_end, &relocation.type);
-            READ_UINT32(p, p_end, &relocation.symbol_index);
-
-            if (relocation.symbol_index >= symbol_count) {
-                fprintf(stderr, "Error: symbol index out of range. The relocation symbol "
-                    "index is %"PRIu32" but the symbol count is %"PRIu32"\n", relocation.symbol_index, symbol_count);
-                exit(EXIT_FAILURE);
-            }
-
-            uint8_t * name_addr = symbol_buf + symbol_offsets[relocation.symbol_index] + sizeof(uint16_t);
-            relocation.symbol_name = (char *)name_addr;
-
-            printf("  relocation[%"PRIu32"].offset: 0x%x\n", j, relocation.offset);
-            printf("  relocation[%"PRIu32"].addend: %"PRIu32"\n", j, relocation.addend);
-            printf("  relocation[%"PRIu32"].type: %"PRIu32"\n", j, relocation.type);
-            printf("  relocation[%"PRIu32"].symbol_index: %"PRIu32"\n", j, relocation.symbol_index);
-            printf("  relocation[%"PRIu32"].symbol_name: %s\n\n", j, relocation.symbol_name);
+            printf("    Offset: 0x%x\n", rel_offset);
+            printf("    Addend: %"PRIu32"\n", rel_addend);
+            printf("    Type: %"PRIu32"\n", rel_type);
+            printf("    Symbol index: %"PRIu32"\n", rel_symbol_index);
         }
     }
 
-    if (p != p_end) {
+    if (offset != s->end) {
         fprintf(stderr, "Error: invalid relocation section size\n");
         exit(EXIT_FAILURE);
     }
 }
-#endif
+
+void hexdump(AOTSection *s) {
+    size_t length = s->end - s->start;
+    if (length == 0) return;
+    fwrite(s->start, 1, length, stdout);
+}
 
 void print_usage(FILE *f) {
     char *usage = 
     "Usage: readaot <option(s)> path/to/file.aot\n"
-    " Display information about the contents of AOT format file\n"
-    " Options are:\n\n"
+    "Display information about the contents of AOT format file\n"
+    "Options are:\n\n"
     "  -H --help         Display this message\n\n"
     "  -a --all          Equivalent to: -h -i -f -e -r\n\n"
     "  -x --hexdump      Set the current display format to hexdump\n\n"
@@ -906,7 +892,7 @@ static void execute_actions(struct list_head *action_list,
     DisplayAction *action;
     list_for_each_entry(action, action_list, link) {
         if (action->format == DISPLAY_FORMAT_HEXDUMP) {
-            //hexdump(required_sections[action->section]);
+            hexdump(required_sections[action->section]);
             continue;
         }
         AOTSection *s = required_sections[action->section];
@@ -927,7 +913,7 @@ static void execute_actions(struct list_head *action_list,
             print_export(s);
             break;
         case AOT_SECTION_TYPE_RELOCATION:
-            //print_relocation(s);
+            print_relocation(s);
             break;
         default:
             assert(0);

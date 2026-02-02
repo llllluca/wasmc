@@ -1358,7 +1358,6 @@ int wasmc_compile(uint8_t *wasm_buf, unsigned int wasm_len,
     for (uint32_t i = 0; i < wasm_mod.function_count; i++) {
         err = compile_fn(&wasm_mod, i, &fn);
         if (err) goto ERROR;
-        ir_print_fn(fn, stdout);
         err = register_allocation(fn);
         if (err) return err;
         err = rv32_emit_text(&aot_mod, fn);
