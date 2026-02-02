@@ -1046,5 +1046,17 @@ int main(int argc, char **argv) {
     decode_aot_sections(&section_list, offset, end);
     check_sections_order(&section_list);
     execute_actions(&action_list, &section_list);
+
+    DisplayAction *action, *da_iter;
+    list_for_each_entry_safe(action, da_iter, &action_list, link) {
+        list_del(&action->link);
+        free(action);
+    }
+    AOTSection *s, *s_iter;
+    list_for_each_entry_safe(s, s_iter, &section_list, link) {
+        list_del(&s->link);
+        free(s);
+    }
+    free(buf);
     return EXIT_SUCCESS;
 }

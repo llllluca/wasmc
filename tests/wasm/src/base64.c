@@ -205,9 +205,12 @@ _base642bin_skip_padding(const char* const b64, const size_t b64_len, size_t* co
 
 static int
 base642bin(unsigned char* const bin, const size_t bin_maxlen, const char* const b64,
-    const size_t b64_len, const char* const ignore, size_t* const bin_len,
-    const char** const b64_end, const int variant)
-{
+    const size_t b64_len) {
+
+    const char* const ignore = NULL;
+    size_t* const bin_len = NULL;
+    const char** const b64_end = NULL;
+    const int variant = 1;
     size_t acc_len = (size_t)0;
     size_t b64_pos = (size_t)0;
     size_t bin_pos = (size_t)0;
@@ -384,6 +387,6 @@ int main(void)
     size_t len = 1000;
     size_t b64_len = base64_encoded_len(len, 1);
     bin2base64(b64, b64_len, bin, len, 1);
-    base642bin(bin, len, b64, b64_len, NULL, NULL, NULL, 1);
+    base642bin(bin, len, b64, b64_len);
     return b64[42];
 }

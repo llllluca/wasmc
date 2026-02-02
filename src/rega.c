@@ -38,12 +38,12 @@ typedef struct Move {
         .as.stack_slot = (ir_func)->stack_slot_count++ \
     }
 
-static Location tmp = {
+Location tmp = {
     .type = LOCATION_TYPE_REGISTER,
     .as.reg = RV32_PRIVATE_REG0,
 };
 
-static Location args[RV32_ARG_NUM_REG] = {
+Location args[RV32_ARG_NUM_REG] = {
     [0] = {
         .type = LOCATION_TYPE_REGISTER,
         .as.reg = A0,
@@ -89,6 +89,7 @@ static bool location_equal(Location *loc1, Location *loc2) {
         return loc1->as.stack_slot == loc2->as.stack_slot;
     default:
         assert(0);
+        return false;
     }
 }
 
@@ -549,6 +550,7 @@ static bool have_same_location(IRFunction *f, Location *to_loc, IRReference *fro
         from_loc = &f->live_intervals[from_id].assign;
         break;
     case IR_REF_TYPE_PHI:
+        assert(0);
         from_id = from->as.phi->id;
         from_loc = &f->live_intervals[from_id].assign;
         break;
@@ -849,6 +851,7 @@ static int ensure_function_parameters_constraints(IRFunction *f) {
         list_del(&ins->link);
         free(ins);
     }
+
     err = sequentialize_parallel_move(f, &pmove, &smove);
     if (err) goto ERROR;
     insert_move_at_start(f->start, &smove);
@@ -885,7 +888,7 @@ static int ensure_function_calls_constraints(IRFunction *f, LiveInterval **inter
         list_for_each_entry_safe(ins, ins_iter, &block->instr_list, link) {
             switch (ins->op) {
             case IR_OPCODE_ARG: {
-                if (arg_index > RV32_ARG_NUM_REG) {
+                if (arg_index >= RV32_ARG_NUM_REG) {
                 /* Passing function call arguments through the stack is not implemented */
                     assert(0);
                 }
@@ -958,6 +961,16 @@ static int ensure_function_calls_constraints(IRFunction *f, LiveInterval **inter
                 /* Clean the survivors list */
                 list_for_each_entry_safe(live_int, live_int_iter, &survivors, link) {
                     list_del(&live_int->link);
+                }
+
+                if (!list_empty(&pmove)) {
+                    printf("parallel move:\n");
+                }
+                list_for_each_entry(move, &pmove, link) {
+                    ir_print_location(move->to, stdout);
+                    printf(" = ");
+                    ir_print_ref(move->from, stdout);
+                    printf("\n");
                 }
 
                 err = sequentialize_parallel_move(f, &pmove, &smove);

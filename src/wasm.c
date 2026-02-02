@@ -1114,14 +1114,11 @@ static int validate_instr(ValidateCtx *ctx, uint8_t opcode) {
 }
 
 static void validate_cleanup(ValidateCtx *ctx) {
-    int err;
     while (ctx->opd_size > 0) {
-        err = pop_opd(ctx, NULL);
-        assert(!err);
+        pop_opd(ctx, NULL);
     }
     while (ctx->ctrl_size > 0) {
-        err = pop_ctrl(ctx, NULL);
-        assert(!err);
+        pop_ctrl(ctx, NULL);
     }
 }
 
@@ -1336,7 +1333,7 @@ WASMValtype wasm_valtype_of(WASMFunction *f, uint32_t localidx) {
         uint32_t sum = t->param_count;
         WASMValtype t;
         do {
-            uint32_t n;
+            uint32_t n = 0;
             /* this call to readULEB128_u32 can't fail because in the function
              * parse_code_section had already checked that the local declaration part
              * of this function in the WASM module is well formed */

@@ -10,14 +10,25 @@ extern AOTTargetInfo target_info;
 
 #define ALIGN(m, align) (m)->offset = (void *)((((uintptr_t)(m)->offset) + (align-1)) & ~(align-1))
 
-#define TEMPLATE_WRITE(val, offset, end, type) \
-    do { \
+#define TEMPLATE_WRITE(val, offset, end, type)                  \
+    do {                                                        \
         if ((long unsigned int)(end - offset) < sizeof(type)) { \
-            return WASMC_ERR_AOT_BUFFER_TOO_SMALL; \
-        } \
-        *((type *)offset) = (val); \
-        offset += sizeof(type); \
+            return WASMC_ERR_AOT_BUFFER_TOO_SMALL;              \
+        }                                                       \
+        if (sizeof(type) == sizeof(uint64_t)) {                 \
+            union {                                             \
+                uint64_t v;                                     \
+                uint32_t parts[2];                              \
+            } u;                                                \
+            u.v = (val);                                        \
+            ((uint32_t *)(offset))[0] = u.parts[0];             \
+            ((uint32_t *)(offset))[1] = u.parts[1];             \
+        } else {                                                \
+            *((type *)offset) = (val);                          \
+        }                                                       \
+        offset += sizeof(type);                                 \
     } while (0)
+
 
 #define WRITE_UINT64(m, val) \
     TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint64_t)
@@ -31,13 +42,13 @@ extern AOTTargetInfo target_info;
 #define WRITE_UINT8(m, val) \
     TEMPLATE_WRITE(val, (m)->offset, (m)->buf_end, uint8_t)
 
-#define WRITE_BYTE_ARRAY(m, addr, len) \
-    do { \
+#define WRITE_BYTE_ARRAY(m, addr, len)                               \
+    do {                                                             \
         if ((long unsigned int)((m)->buf_end - (m)->offset) < len) { \
-            return WASMC_ERR_AOT_BUFFER_TOO_SMALL; \
-        } \
-        memcpy((m)->offset, addr, len); \
-        (m)->offset += len; \
+            return WASMC_ERR_AOT_BUFFER_TOO_SMALL;                   \
+        }                                                            \
+        memcpy((m)->offset, addr, len);                              \
+        (m)->offset += len;                                          \
     } while (0)
 
 int aot_module_init(AOTModule *m, uint8_t *buf,

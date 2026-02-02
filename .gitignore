@@ -13,3 +13,5 @@ Debug/
 .aspell.en.pws
 aotfmt.tex.bak
 aspell.sh
+coverage.info
+coverage/

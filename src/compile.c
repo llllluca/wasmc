@@ -74,10 +74,9 @@ static void push_opd(CompileCtx *ctx, OperandStackEntry *opd) {
 }
 
 static OperandStackEntry *pop_opd(CompileCtx *ctx) {
-    ControlStackEntry *ctrl = ctx->ctrl_stack;
-    assert(ctrl != NULL);
-    assert(!ctrl->unreachable);
-    assert(ctx->opd_size > ctrl->height);
+    assert(ctx->ctrl_stack != NULL);
+    assert(!ctx->ctrl_stack->unreachable);
+    assert(ctx->opd_size > ctx->ctrl_stack->height);
     OperandStackEntry *opd = ctx->opd_stack;
     assert(opd != NULL);
     ctx->opd_stack = opd->next;
@@ -1359,6 +1358,7 @@ int wasmc_compile(uint8_t *wasm_buf, unsigned int wasm_len,
     for (uint32_t i = 0; i < wasm_mod.function_count; i++) {
         err = compile_fn(&wasm_mod, i, &fn);
         if (err) goto ERROR;
+        ir_print_fn(fn, stdout);
         err = register_allocation(fn);
         if (err) return err;
         err = rv32_emit_text(&aot_mod, fn);

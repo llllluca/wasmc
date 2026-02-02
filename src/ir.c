@@ -549,8 +549,8 @@ bool ir_reference_equal(IRReference *ref1, IRReference *ref2) {
         return ref1->as.wasm_func == ref2->as.wasm_func;
     default:
         assert(0);
+        return false;
     }
-
 }
 
 IRReference ir_get_default(WASMValtype type) {
@@ -582,6 +582,7 @@ IRType ir_cast(WASMValtype t) {
             return IR_TYPE_F64;
         default:
             assert(0);
+            return IR_TYPE_I32;
     }
 }
 
