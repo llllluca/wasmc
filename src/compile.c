@@ -2,14 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include "wasmc.h"
 #include "wasm.h"
 #include "ir.h"
 #include "aot.h"
-
-typedef enum CompileErr_t {
-    COMPILE_OK = 0,
-    COMPILE_ERR,
-} CompileErr_t;
 
 typedef struct OperandStackEntry {
     struct OperandStackEntry *next;
@@ -62,10 +58,13 @@ typedef struct CompileCtx {
     IRReference globals_start;
 } CompileCtx;
 
-#define ERR_CHECK(x) if (x) return COMPILE_ERR
+#define WASMC_OK 0
 
 /* rega.c */
-extern bool register_allocation(IRFunction *f);
+extern int register_allocation(IRFunction *f);
+
+/* rv32/emit.c */
+extern int rv32_emit_text(AOTModule *m, IRFunction *fn);
 
 
 static void push_opd(CompileCtx *ctx, OperandStackEntry *opd) {
@@ -149,71 +148,72 @@ static void free_ctrl(ControlStackEntry *ctrl) {
     free(ctrl);
 }
 
-static CompileErr_t compile_local_get(CompileCtx *ctx) {
+static int compile_local_get(CompileCtx *ctx) {
     WASMFunction *f = ctx->wasm_func;
     IRBlock *b = ctx->curr_block;
     uint32_t localidx;
     readULEB128_u32(&ctx->offset, f->code_end, &localidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     WASMValtype valtype = wasm_valtype_of(f, localidx);
     IRReference local;
-    bool err =ir_read_local(ctx->ir_func, b, localidx, &local);
-    if (err) return COMPILE_ERR;
+    int err = ir_read_local(ctx->ir_func, b, localidx, &local);
+    if (err) return err;
 
     OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
-    if (opd == NULL) return COMPILE_ERR;
+    if (opd == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     opd->ref = local;
     opd->type = valtype;
     push_opd(ctx, opd);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_local_set(CompileCtx *ctx) {
+static int compile_local_set(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     uint32_t localidx;
     readULEB128_u32(&ctx->offset, f->code_end, &localidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = pop_opd(ctx);
     ir_write_local(ctx->curr_block, localidx, opd->ref);
     free(opd);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_local_tee(CompileCtx *ctx) {
+static int compile_local_tee(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     uint32_t localidx;
     readULEB128_u32(&ctx->offset, f->code_end, &localidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = top_opd(ctx);
     ir_write_local(ctx->curr_block, localidx, opd->ref);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_global_get(CompileCtx *ctx) {
+static int compile_global_get(CompileCtx *ctx) {
 
+    int err;
     uint32_t globalidx;
     WASMFunction *f = ctx->wasm_func;
     readULEB128_u32(&ctx->offset, f->code_end, &globalidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     WASMGlobal *g = &ctx->m->globals[globalidx];
@@ -221,63 +221,63 @@ static CompileErr_t compile_global_get(CompileCtx *ctx) {
     if (g->is_mutable) {
         global = IR_REF_TMP(ctx->ir_func);
         IRReference offset = IR_REF_I32(sizeof(uint32_t) * globalidx);
-        bool err = ir_append_load(
+        err = ir_append_load(
             ctx->curr_block,
             ir_cast(g->type),
             global,
             offset,
             ctx->globals_start);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     } else {
         global = IR_REF_I32(g->as.i32);
     }
 
     OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
-    if (opd == NULL) return COMPILE_ERR;
+    if (opd == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     opd->type = g->type;
     opd->ref = global;
     push_opd(ctx, opd);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_global_set(CompileCtx *ctx) {
+static int compile_global_set(CompileCtx *ctx) {
 
+    int err;
     WASMFunction *f = ctx->wasm_func;
     uint32_t globalidx;
     readULEB128_u32(&ctx->offset, f->code_end, &globalidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     WASMGlobal *g = &ctx->m->globals[globalidx];
-    if (!g->is_mutable) return COMPILE_ERR;
-
     OperandStackEntry *opd = pop_opd(ctx);
     IRReference value = opd->ref;
     free(opd);
     IRReference offset = IR_REF_I32(sizeof(uint32_t) * globalidx);
-    bool err = ir_append_store(
+    err = ir_append_store(
         ctx->curr_block,
         ir_cast(g->type),
         value,
         offset,
         ctx->globals_start);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
 
-static CompileErr_t compile_call(CompileCtx *ctx) {
+static int compile_call(CompileCtx *ctx) {
 
+    int err;
     WASMFunction *f = ctx->wasm_func;
     uint32_t funcidx;
     readULEB128_u32(&ctx->offset, f->code_end, &funcidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     WASMFunction *callee = &ctx->m->functions[funcidx];
@@ -285,12 +285,11 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
 
     /* Initialize the function call arguments, the first argument (a0)
      * is always a pointer to a WASMExecEnv struct of the WAMR runtime */
-    bool err;
     err = ir_append_func_call_arg(
         ctx->curr_block,
         IR_TYPE_I32,
         ctx->ir_func->WASMExecEnv);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     /* Initialize the other function call arguments */
     uint32_t n = t->param_count;
@@ -304,7 +303,7 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
             ctx->curr_block,
             ir_cast(t->param_types[argidx]),
             iter->ref);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     }
     for (uint32_t i = 0; i < n; i++) {
         free(pop_opd(ctx));
@@ -315,9 +314,9 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
         err = ir_append_void_func_call(
             ctx->curr_block,
             IR_REF_FUNC(callee));
-        if (err) return COMPILE_ERR;
+        if (err) return err;
 
-        return COMPILE_OK;
+        return WASMC_OK;
     }
 
     /* do a call instruction to a non void function */
@@ -327,32 +326,32 @@ static CompileErr_t compile_call(CompileCtx *ctx) {
         ir_cast(t->result_type),
         ret_value,
         IR_REF_FUNC(callee));
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
-    if (opd == NULL) return COMPILE_ERR;
+    if (opd == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     opd->ref = ret_value;
     opd->type = t->result_type;
     push_opd(ctx, opd);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_br(CompileCtx *ctx) {
+static int compile_br(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     uint32_t labelidx;
     readULEB128_u32(&ctx->offset, f->code_end, &labelidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     ControlStackEntry *ctrl = get_ctrl(ctx, labelidx);
 
     if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
         IRPhiArg *phi_arg = malloc(sizeof(struct IRPhiArg));
-        if (phi_arg == NULL) return COMPILE_ERR;
+        if (phi_arg == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         OperandStackEntry *opd = pop_opd(ctx);
         phi_arg->value = opd->ref;
         phi_arg->predecessor = ctx->curr_block;
@@ -361,26 +360,26 @@ static CompileErr_t compile_br(CompileCtx *ctx) {
         free(opd);
     }
 
-    bool err;
+    int err;
     if (ctrl->label_blk->is_loop_header) {
         err = ir_add_loop_end(ctrl->label_blk, ctx->curr_block);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     }
     err = ir_jmp(ctx->ir_func, ctx->curr_block, ctrl->label_blk);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
     unreachable(ctx);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_br_if(CompileCtx *ctx) {
+static int compile_br_if(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     uint32_t labelidx;
     readULEB128_u32(&ctx->offset, f->code_end, &labelidx);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = pop_opd(ctx);
@@ -390,7 +389,7 @@ static CompileErr_t compile_br_if(CompileCtx *ctx) {
 
     if (ctrl->label_type != WASM_BLOCKTYPE_NONE) {
         IRPhiArg *phi_arg = malloc(sizeof(struct IRPhiArg));
-        if (phi_arg == NULL) return COMPILE_ERR;
+        if (phi_arg == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         OperandStackEntry *opd = top_opd(ctx);
         phi_arg->value = opd->ref;
         phi_arg->predecessor = ctx->curr_block;
@@ -398,30 +397,30 @@ static CompileErr_t compile_br_if(CompileCtx *ctx) {
         ctrl->end_results_count++;
     }
 
-    bool err;
+    int err;
     if (ctrl->label_blk->is_loop_header) {
         err = ir_add_loop_end(ctrl->label_blk, ctx->curr_block);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     }
 
     IRBlock *continue_blk = ir_create_sealed_block(ctx->ir_func);
-    if (continue_blk == NULL) return COMPILE_ERR;
+    if (continue_blk == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     err = ir_jnz(
         ctx->ir_func,
         ctx->curr_block,
         ifcond,
         ctrl->label_blk,
         continue_blk);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     ctx->curr_block = continue_blk;
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_return(CompileCtx *ctx) {
+static int compile_return(CompileCtx *ctx) {
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     WASMFuncType *t = ctx->wasm_func->type;
@@ -429,22 +428,23 @@ static CompileErr_t compile_return(CompileCtx *ctx) {
         OperandStackEntry *opd = pop_opd(ctx);
         IRReference return_value = opd->ref;
         free(opd);
-        bool err = ir_ret1(ctx->ir_func, ctx->curr_block, return_value);
-        if (err) return COMPILE_ERR;
+        int err = ir_ret1(ctx->ir_func, ctx->curr_block, return_value);
+        if (err) return err;
     } else {
         ir_ret0(ctx->ir_func, ctx->curr_block);
     }
     unreachable(ctx);
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_if(CompileCtx *ctx) {
+static int compile_if(CompileCtx *ctx) {
 
+    int err;
     WASMBlocktype end_type;
     read_u8(&ctx->offset, ctx->wasm_func->code_end, &end_type);
 
     ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
-    if (ctrl == NULL) return COMPILE_ERR;
+    if (ctrl == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
 
     /* if the top of the control stack is in a unreachable state
      * (e.g. if after a br) we want to skip the compilation of the if */
@@ -455,7 +455,7 @@ static CompileErr_t compile_if(CompileCtx *ctx) {
         INIT_LIST_HEAD(&ctrl->end_results);
         ctrl->unreachable = true;
         push_ctrl(ctx, ctrl);
-        return COMPILE_OK;
+        return WASMC_OK;
     }
     /* if top->unreachable is false, ctx->curr_block must be not NULL */
     assert(ctx->curr_block != NULL);
@@ -465,18 +465,26 @@ static CompileErr_t compile_if(CompileCtx *ctx) {
     free(opd);
 
     IRBlock *then_block = ir_create_sealed_block(ctx->ir_func);
-    if (then_block == NULL) goto ERROR;
+    if (then_block == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
     IRBlock *end_block  = ir_create_sealed_block(ctx->ir_func);
-    if (end_block == NULL) goto ERROR;
+    if (end_block == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
     /* at the moment we don't know if there a matching else branch,
      * hence we put NULL as a else branch block. We will fix the NULL
      * later with the else branch block if there is a matching else,
      * otherwise we will fix the NULL with the if end block */
-    bool err;
     err = ir_jnz(ctx->ir_func, ctx->curr_block, ifcond, then_block, NULL);
-    if (err) goto ERROR;
+    if (err) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
     ctrl->kind = CTRL_STACK_ENTRY_IF;
     INIT_LIST_HEAD(&ctrl->end_results);
@@ -489,19 +497,18 @@ static CompileErr_t compile_if(CompileCtx *ctx) {
     push_ctrl(ctx, ctrl);
     ctx->curr_block = then_block;
 
-    return COMPILE_OK;
+    return WASMC_OK;
 
 ERROR:
     free_ctrl(ctrl);
-    return COMPILE_ERR;
+    return err;
 }
 
-static CompileErr_t compile_else(CompileCtx *ctx) {
+static int compile_else(CompileCtx *ctx) {
 
-    bool err;
+    int err;
     /* top is the ControlStackEntry pushed by the matching compile_if */
     ControlStackEntry *top = pop_ctrl(ctx);
-    if (top == NULL) return COMPILE_ERR;
 
     /* if we had skipped the compilation of a then branch because
      * the top of the control stack was in a unreachable state at
@@ -509,7 +516,7 @@ static CompileErr_t compile_else(CompileCtx *ctx) {
      * of the else branch */
     if (top->kind == CTRL_STACK_ENTRY_DUMMY) {
         push_ctrl(ctx, top);
-        return COMPILE_OK;
+        return WASMC_OK;
     }
 
     if (!top->unreachable) {
@@ -521,12 +528,15 @@ static CompileErr_t compile_else(CompileCtx *ctx) {
 
     /* fix the NULL in the jnz */
     IRBlock *else_block = ir_create_sealed_block(ctx->ir_func);
-    if (else_block == NULL) goto ERROR;
+    if (else_block == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
     IRBlock *if_start_block = top->start_blk;
     if_start_block->succ[1] = else_block;
 
     err = ir_add_predecessor(else_block, if_start_block);
-    if (err) return COMPILE_ERR;
+    if (err) goto ERROR;
 
     /* update top with else branch data */
     top->kind = CTRL_STACK_ENTRY_ELSE;
@@ -536,16 +546,16 @@ static CompileErr_t compile_else(CompileCtx *ctx) {
     /* update the current block */
     ctx->curr_block = else_block;
 
-    return COMPILE_OK;
+    return WASMC_OK;
 
 ERROR:
     free_ctrl(top);
-    return COMPILE_ERR;
+    return err;
 
 }
 
 
-static bool get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
+static int get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
                                    IRReference *out) {
 
     uint32_t n = ctrl->end_results_count;
@@ -559,14 +569,14 @@ static bool get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
         IRBlock *b = ctx->curr_block;
         IRType t = ir_cast((WASMValtype)ctrl->end_type);
         IRPhi *phi = ir_create_phi(ctx->ir_func, b, t);
-        if (phi == NULL) return true;
+        if (phi == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         while (!list_empty(&ctrl->end_results)) {
             struct list_head *head = list_next(&ctrl->end_results);
             list_del(head);
             list_add_tail(head, &phi->phi_arg_list);
             IRPhiArg *phi_arg = container_of(head, IRPhiArg, link);
-            bool err = ir_add_usage(&phi_arg->value);
-            if (err) return true;
+            int err = ir_add_usage(&phi_arg->value);
+            if (err) return err;
         }
         *out = IR_REF_PHI(phi);
     } else {
@@ -600,36 +610,38 @@ static bool get_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl,
         *out = ir_get_default((WASMValtype)ctrl->end_type);
     }
 
-    return false;
+    return WASMC_OK;
 }
 
-static bool push_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl) {
+static int push_block_result_value(CompileCtx *ctx, ControlStackEntry *ctrl) {
 
     WASMBlocktype result_type = ctrl->end_type;
-    if (result_type == WASM_BLOCKTYPE_NONE) return false;
+    if (result_type == WASM_BLOCKTYPE_NONE) {
+        return WASMC_OK;
+    }
     OperandStackEntry *block_result = malloc(sizeof(struct OperandStackEntry));
-    if (block_result == NULL) return true;
+    if (block_result == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     block_result->type = (WASMValtype)result_type;
-    bool err = get_block_result_value(ctx, ctrl, &block_result->ref);
+    int err = get_block_result_value(ctx, ctrl, &block_result->ref);
     if (err) {
         free(block_result);
-        return true;
+        return err;
     }
     push_opd(ctx, block_result);
 
-    return false;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_end_if(CompileCtx *ctx, ControlStackEntry *ctrl) {
+static int compile_end_if(CompileCtx *ctx, ControlStackEntry *ctrl) {
 
     /* This is the end of a if without a matching else */
-    bool err;
+    int err;
     IRBlock *end_block = ctrl->label_blk;
     IRBlock *start_block = ctrl->start_blk;
 
     if (ctx->curr_block != NULL) {
         err = ir_jmp(ctx->ir_func, ctx->curr_block, end_block);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     }
     ctx->curr_block = end_block;
 
@@ -637,44 +649,44 @@ static CompileErr_t compile_end_if(CompileCtx *ctx, ControlStackEntry *ctrl) {
     start_block->succ[1] = end_block;
     /* Add 'start_block' between 'end_block' predecessors */
     err = ir_add_predecessor(end_block, start_block);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     err = push_block_result_value(ctx, ctrl);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_end_block(CompileCtx *ctx, ControlStackEntry *ctrl) {
+static int compile_end_block(CompileCtx *ctx, ControlStackEntry *ctrl) {
 
     /* This is the end of a else branch of a if-else statement
      * or this is the end of block statement */
-    bool err;
+    int err;
     IRBlock *end_block = ctrl->label_blk;
 
     if (ctx->curr_block != NULL) {
         err = ir_jmp(ctx->ir_func, ctx->curr_block, end_block);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
     }
     ctx->curr_block = end_block;
 
     err = push_block_result_value(ctx, ctrl);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_end_loop(CompileCtx *ctx, ControlStackEntry *ctrl) {
+static int compile_end_loop(CompileCtx *ctx, ControlStackEntry *ctrl) {
 
     /* This is the end of a loop statement */
-    bool err;
+    int err;
     IRBlock *loop_header = ctrl->label_blk;
 
     err = ir_seal_block(ctx->ir_func, loop_header);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     err = push_block_result_value(ctx, ctrl);
-    if (err) return COMPILE_ERR;
+    if (err) return err;
 
     /* When a 'loop' statement is compiled a new block is created
      * and marked as loop header, see compile_loop(). In WASM a 'loop'
@@ -700,21 +712,19 @@ static CompileErr_t compile_end_loop(CompileCtx *ctx, ControlStackEntry *ctrl) {
         }
     }
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_end(CompileCtx *ctx) {
+static int compile_end(CompileCtx *ctx) {
 
+    int err;
     ControlStackEntry *top = pop_ctrl(ctx);
-    if (top == NULL) return COMPILE_ERR;
-
-    CompileErr_t err;
     switch (top->kind) {
     /* if we had skipped the compilation of a if/block/loop because
      * the top of the control stack was in a unreachable state at
      * the start of the if/block/loop compilation, just return */
     case CTRL_STACK_ENTRY_DUMMY:
-        err = COMPILE_OK;
+        err = WASMC_OK;
         break;
     case CTRL_STACK_ENTRY_IF:
         err = compile_end_if(ctx, top);
@@ -735,14 +745,14 @@ static CompileErr_t compile_end(CompileCtx *ctx) {
     return err;
 }
 
-static CompileErr_t compile_block(CompileCtx *ctx) {
+static int compile_block(CompileCtx *ctx) {
 
     WASMFunction *f = ctx->wasm_func;
     WASMBlocktype end_type;
     read_u8(&ctx->offset, f->code_end, &end_type);
 
     ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
-    if (ctrl == NULL) return COMPILE_ERR;
+    if (ctrl == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
 
     /* if the top of the control stack is in a unreachable state
      * (e.g. block after a br) we want to skip the compilation of the block */
@@ -753,7 +763,7 @@ static CompileErr_t compile_block(CompileCtx *ctx) {
         INIT_LIST_HEAD(&ctrl->end_results);
         ctrl->unreachable = true;
         push_ctrl(ctx, ctrl);
-        return COMPILE_OK;
+        return WASMC_OK;
     }
     /* if top->unreachable is false, ctx->curr_block must be not NULL */
     assert(ctx->curr_block != NULL);
@@ -761,7 +771,7 @@ static CompileErr_t compile_block(CompileCtx *ctx) {
     IRBlock *end_blk = ir_create_sealed_block(ctx->ir_func);
     if (end_blk == NULL) {
         free(ctrl);
-        return COMPILE_ERR;
+        return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     }
 
     ctrl->kind = CTRL_STACK_ENTRY_BLOCK;
@@ -774,17 +784,18 @@ static CompileErr_t compile_block(CompileCtx *ctx) {
     ctrl->unreachable = false;
     push_ctrl(ctx, ctrl);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_loop(CompileCtx *ctx) {
+static int compile_loop(CompileCtx *ctx) {
 
+    int err;
     WASMFunction *f = ctx->wasm_func;
     WASMBlocktype end_type;
     read_u8(&ctx->offset, f->code_end, &end_type);
 
     ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
-    if (ctrl == NULL) return COMPILE_ERR;
+    if (ctrl == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
 
     /* if the top of the control stack is in a unreachable state
      * (e.g. loop after a br) we want to skip the compilation of the loop */
@@ -795,16 +806,19 @@ static CompileErr_t compile_loop(CompileCtx *ctx) {
         INIT_LIST_HEAD(&ctrl->end_results);
         ctrl->unreachable = true;
         push_ctrl(ctx, ctrl);
-        return COMPILE_OK;
+        return WASMC_OK;
     }
     /* if top->unreachable is false, ctx->curr_block must be not NULL */
     assert(ctx->curr_block != NULL);
 
     IRBlock *loop_header = ir_create_block(ctx->ir_func);
-    if (loop_header == NULL) goto ERROR;
+    if (loop_header == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
     loop_header->is_loop_header = true;
-    bool err = ir_jmp(ctx->ir_func, ctx->curr_block, loop_header);
+    err = ir_jmp(ctx->ir_func, ctx->curr_block, loop_header);
     if (err) goto ERROR;
     ctx->curr_block = loop_header;
 
@@ -818,27 +832,28 @@ static CompileErr_t compile_loop(CompileCtx *ctx) {
     ctrl->unreachable = false;
     push_ctrl(ctx, ctrl);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 
 ERROR:
     free_ctrl(ctrl);
-    return COMPILE_ERR;
+    return err;
 }
 
-static CompileErr_t compile_drop(CompileCtx *ctx) {
+static int compile_drop(CompileCtx *ctx) {
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     free(pop_opd(ctx));
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_select(CompileCtx *ctx) {
+static int compile_select(CompileCtx *ctx) {
 
+    int err;
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *cond = pop_opd(ctx);
@@ -846,13 +861,18 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
     OperandStackEntry *arg1 = pop_opd(ctx);
 
     IRBlock *select_arg1 = ir_create_sealed_block(ctx->ir_func);
-    if (select_arg1 == NULL) goto ERROR;
+    if (select_arg1 == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
     IRBlock *select_arg2 = ctx->curr_block;
     IRBlock *end = ir_create_sealed_block(ctx->ir_func);
-    if (end == NULL) goto ERROR;
+    if (end == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
     assert(ctx->curr_block != NULL);
-    bool err;
     err = ir_jnz(ctx->ir_func, ctx->curr_block, cond->ref, select_arg1, end);
     if (err) goto ERROR;
 
@@ -861,14 +881,20 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
     ctx->curr_block = end;
 
     IRPhi *phi = ir_create_phi(ctx->ir_func, end, ir_cast(arg1->type));
-    if (phi == NULL) goto ERROR;
+    if (phi == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
     err = ir_append_phi_arg(phi, arg1->ref, select_arg1);
     if (err) goto ERROR;
     err = ir_append_phi_arg(phi, arg2->ref, select_arg2);
     if (err) goto ERROR;
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
-    if (result == NULL) goto ERROR;
+    if (result == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
     result->type = arg1->type;
     result->ref = IR_REF_PHI(phi);
     push_opd(ctx, result);
@@ -876,16 +902,16 @@ static CompileErr_t compile_select(CompileCtx *ctx) {
     free(cond);
     free(arg1);
     free(arg2);
-    return COMPILE_OK;
+    return WASMC_OK;
 
 ERROR:
     free(cond);
     free(arg1);
     free(arg2);
-    return COMPILE_ERR;
+    return err;
 }
 
-static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype t, IROpcode op) {
+static int compile_load(CompileCtx *ctx, WASMValtype t, IROpcode op) {
 
     WASMFunction *f = ctx->wasm_func;
     IRBlock *b = ctx->curr_block;
@@ -895,38 +921,38 @@ static CompileErr_t compile_load(CompileCtx *ctx, WASMValtype t, IROpcode op) {
     readULEB128_u32(&ctx->offset, f->code_end, &offset);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = pop_opd(ctx);
     IRReference memidx = opd->ref;
     free(opd);
 
-    bool err;
+    int err;
     IRReference destination = IR_REF_TMP(ctx->ir_func);
     if (memidx.type == IR_REF_TYPE_I32) {
         uint32_t c = memidx.as.i32 + offset;
-        err = ir_append_instr3(b, op, ir_cast(t), destination, IR_REF_I32(c), ctx->mem0);
-        if (err) return COMPILE_ERR;
+        err = ir_append_instr(b, op, ir_cast(t), destination, IR_REF_I32(c), ctx->mem0);
+        if (err) return err;
     } else {
         IRReference ptr = IR_REF_TMP(ctx->ir_func);
         err = ir_append_add(b, IR_TYPE_I32, ptr, ctx->mem0, memidx);
-        if (err) return COMPILE_ERR;
-        err = ir_append_instr3(b, op, ir_cast(t), destination, IR_REF_I32(offset), ptr);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
+        err = ir_append_instr(b, op, ir_cast(t), destination, IR_REF_I32(offset), ptr);
+        if (err) return err;
     }
     //TODO: out of bound memory check
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
-    if (result == NULL) return COMPILE_ERR;
+    if (result == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     result->type = t;
     result->ref = destination;
     push_opd(ctx, result);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
+static int compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
 
     WASMFunction *f = ctx->wasm_func;
     IRBlock *b = ctx->curr_block;
@@ -936,7 +962,7 @@ static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
     readULEB128_u32(&ctx->offset, f->code_end, &offset);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = pop_opd(ctx);
@@ -947,26 +973,26 @@ static CompileErr_t compile_store(CompileCtx *ctx, WASMValtype t, IROpcode op) {
     IRReference memidx = opd->ref;
     free(opd);
 
-    bool err;
+    int err;
     if (memidx.type == IR_REF_TYPE_I32) {
         uint32_t c = memidx.as.i32 + offset;
-        err = ir_append_instr3(b, op, ir_cast(t), value, IR_REF_I32(c), ctx->mem0);
-        if (err) return COMPILE_ERR;
+        err = ir_append_instr(b, op, ir_cast(t), value, IR_REF_I32(c), ctx->mem0);
+        if (err) return err;
     } else {
         IRReference ptr = IR_REF_TMP(ctx->ir_func);
         err = ir_append_add(b, IR_TYPE_I32, ptr, ctx->mem0, memidx);
-        if (err) return COMPILE_ERR;
-        err = ir_append_instr3(b, op, ir_cast(t), value, IR_REF_I32(offset), ptr);
-        if (err) return COMPILE_ERR;
+        if (err) return err;
+        err = ir_append_instr(b, op, ir_cast(t), value, IR_REF_I32(offset), ptr);
+        if (err) return err;
     }
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_binop(CompileCtx *ctx, IROpcode op) {
+static int compile_binop(CompileCtx *ctx, IROpcode op) {
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
 
@@ -981,22 +1007,22 @@ static CompileErr_t compile_binop(CompileCtx *ctx, IROpcode op) {
 
     IRBlock *b = ctx->curr_block;
     IRReference sum = IR_REF_TMP(ctx->ir_func);
-    bool err = ir_append_instr3(b, op, ir_cast(type), sum, arg1, arg2);
-    if (err) return COMPILE_ERR;
+    int err = ir_append_instr(b, op, ir_cast(type), sum, arg1, arg2);
+    if (err) return err;
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
-    if (result == NULL) return COMPILE_ERR;
+    if (result == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     result->ref = sum;
     result->type = type;
     push_opd(ctx, result);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_testop(CompileCtx *ctx, IROpcode op) {
+static int compile_testop(CompileCtx *ctx, IROpcode op) {
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     IRBlock *b = ctx->curr_block;
@@ -1005,23 +1031,23 @@ static CompileErr_t compile_testop(CompileCtx *ctx, IROpcode op) {
     free(opd);
     IRReference test = IR_REF_TMP(ctx->ir_func);
 
-    bool err;
-    err = ir_append_instr3(b, op, IR_TYPE_I32, test, value, IR_REF_UNDEFINED);
-    if (err) return COMPILE_ERR;
+    int err;
+    err = ir_append_instr(b, op, IR_TYPE_I32, test, value, IR_REF_UNDEFINED);
+    if (err) return err;
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
-    if (result == NULL) return COMPILE_ERR;
+    if (result == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     result->ref = test;
     result->type = WASM_VALTYPE_I32;
     push_opd(ctx, result);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_relop(CompileCtx *ctx, IROpcode op) {
+static int compile_relop(CompileCtx *ctx, IROpcode op) {
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     IRBlock *b = ctx->curr_block;
@@ -1033,47 +1059,47 @@ static CompileErr_t compile_relop(CompileCtx *ctx, IROpcode op) {
     IRReference arg1 = opd->ref;
     free(opd);
 
-    bool err;
+    int err;
     IRReference rel = IR_REF_TMP(ctx->ir_func);
-    err = ir_append_instr3(b, op, IR_TYPE_I32, rel, arg1, arg2);
-    if (err) return COMPILE_ERR;
+    err = ir_append_instr(b, op, IR_TYPE_I32, rel, arg1, arg2);
+    if (err) return err;
 
     OperandStackEntry *result = malloc(sizeof(struct OperandStackEntry));
-    if (result == NULL) return COMPILE_ERR;
+    if (result == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     result->type = WASM_VALTYPE_I32;
     result->ref = rel;
     push_opd(ctx, result);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_i32const(CompileCtx *ctx) {
+static int compile_i32const(CompileCtx *ctx) {
 
     int32_t n;
     readILEB128_i32(&ctx->offset, ctx->wasm_func->code_end, &n);
 
     ControlStackEntry *top = top_ctrl(ctx);
-    if (top->unreachable) return COMPILE_OK;
+    if (top->unreachable) return WASMC_OK;
     assert(ctx->curr_block != NULL);
 
     OperandStackEntry *opd = malloc(sizeof(struct OperandStackEntry));
-    if (opd == NULL) return COMPILE_ERR;
+    if (opd == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     opd->type = WASM_VALTYPE_I32;
     opd->ref = IR_REF_I32(n);
     push_opd(ctx, opd);
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
-static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
+static int compile_instr(CompileCtx *ctx, uint8_t opcode) {
 
     switch (opcode) {
     /* Control instructions */
     case WASM_OPCODE_UNREACHABLE:
         ir_halt(ctx->ir_func, ctx->curr_block);
-        return COMPILE_OK;
+        return WASMC_OK;
     case WASM_OPCODE_NOP:
-        return COMPILE_OK;
+        return WASMC_OK;
     case WASM_OPCODE_LOOP:
         return compile_loop(ctx);
     case WASM_OPCODE_BLOCK:
@@ -1177,10 +1203,10 @@ static CompileErr_t compile_instr(CompileCtx *ctx, uint8_t opcode) {
 
     /* unknown opcode */
     default:
-        return COMPILE_ERR;
+        return WASMC_ERR_MALFORMED_WASM_MODULE;
     }
 
-    return COMPILE_OK;
+    return WASMC_OK;
 }
 
 static void cleanup(CompileCtx *ctx) {
@@ -1204,15 +1230,17 @@ static void cleanup(CompileCtx *ctx) {
     ir_free_function(ctx->ir_func);
 }
 
-static IRFunction *compile_fn(WASMModule *m, uint32_t funcidx) {
+static int compile_fn(WASMModule *m, uint32_t funcidx, IRFunction **fn_out) {
 
+    int err;
     assert(funcidx < m->function_count);
     WASMFunction *wasm_func = &m->functions[funcidx];
-
     IRFunction *ir_func = ir_create_function(wasm_func);
-    if (ir_func == NULL) return NULL;
+    if (ir_func == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
 
-    bool err;
     IRReference WASMModuleInstance = IR_REF_UNDEFINED;
     if (m->memories_count > 0 || m->global_count > 0) {
         WASMModuleInstance = IR_REF_TMP(ir_func);
@@ -1261,7 +1289,10 @@ static IRFunction *compile_fn(WASMModule *m, uint32_t funcidx) {
     ctx.globals_start = globals_start;
 
     ControlStackEntry *ctrl = malloc(sizeof(struct ControlStackEntry));
-    if (ctrl == NULL) goto ERROR;
+    if (ctrl == NULL) {
+        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
+        goto ERROR;
+    }
     memset(ctrl, 0, sizeof(struct ControlStackEntry));
     ctrl->end_type = WASM_BLOCKTYPE_NONE;
     push_ctrl(&ctx, ctrl);
@@ -1269,13 +1300,15 @@ static IRFunction *compile_fn(WASMModule *m, uint32_t funcidx) {
     /* compile the body of the function */
     uint8_t opcode;
     while (ctx.offset < wasm_func->code_end) {
-        if (read_u8(&ctx.offset, wasm_func->code_end, &opcode)) goto ERROR;
-        if (compile_instr(&ctx, opcode)) goto ERROR;
+        read_u8(&ctx.offset, wasm_func->code_end, &opcode);
+        err = compile_instr(&ctx, opcode);
+        if (err) goto ERROR;
     }
 
     /* Add an implicit return if there is
      * no explicit return in the wasm code */
-    compile_return(&ctx);
+    err = compile_return(&ctx);
+    if (err) goto ERROR;
     free(pop_ctrl(&ctx));
 
     /* Replace the phi references with tmp references */
@@ -1298,40 +1331,46 @@ static IRFunction *compile_fn(WASMModule *m, uint32_t funcidx) {
         }
     }
 
-    return ir_func;
+    *fn_out = ir_func;
+    return WASMC_OK;
 
 ERROR:
     cleanup(&ctx);
-    return NULL;
+    *fn_out = NULL;
+    return err;
 }
 
-AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn);
-
-int compile(uint8_t *wasm_buf, unsigned int wasm_len,
+int wasmc_compile(uint8_t *wasm_buf, unsigned int wasm_len,
             uint8_t *aot_buf, unsigned int aot_len) {
 
-    WASMModule wasm_mod;
+    int err;
     IRFunction *fn = NULL;
-    WASMErr_t wasm_err;
-    wasm_err = wasm_decode(&wasm_mod, wasm_buf, wasm_len);
-    if (wasm_err) return -1;
+    WASMModule wasm_mod;
+    err = wasm_decode(&wasm_mod, wasm_buf, wasm_len);
+    if (err) goto ERROR;
 
     AOTModule aot_mod;
-    if (aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod)) goto ERROR;
-    if (emit_target_info(&aot_mod)) goto ERROR;
-    if (emit_init_data(&aot_mod)) goto ERROR;
+    err = aot_module_init(&aot_mod, aot_buf, aot_len, &wasm_mod);
+    if (err) goto ERROR;
+    err = emit_target_info(&aot_mod);
+    if (err) goto ERROR;
+    err = emit_init_data(&aot_mod);
+    if (err) goto ERROR;
     for (uint32_t i = 0; i < wasm_mod.function_count; i++) {
-        fn = compile_fn(&wasm_mod, i);
-        if (fn == NULL) goto ERROR;
-        //ir_print_fn(fn, stdout);
-        if (register_allocation(fn)) goto ERROR;
-        //ir_print_fn(fn, stdout);
-        if (rv32_emit_text(&aot_mod, fn)) goto ERROR;
+        err = compile_fn(&wasm_mod, i, &fn);
+        if (err) goto ERROR;
+        err = register_allocation(fn);
+        if (err) return err;
+        err = rv32_emit_text(&aot_mod, fn);
+        if (err) goto ERROR;
         ir_free_function(fn);
     }
-    if (emit_function(&aot_mod)) return -1;
-    if (emit_export(&aot_mod)) return -1;
-    if (emit_relocation(&aot_mod)) return -1;
+    err = emit_function(&aot_mod);
+    if (err) return err;
+    err = emit_export(&aot_mod);
+    if (err) return err;
+    err = emit_relocation(&aot_mod);
+    if (err) return err;
 
     int len = aot_mod.offset - aot_mod.buf;
     aot_module_cleanup(&aot_mod);
@@ -1341,7 +1380,7 @@ int compile(uint8_t *wasm_buf, unsigned int wasm_len,
 ERROR:
     wasm_free(&wasm_mod);
     if (fn != NULL) ir_free_function(fn);
-    return -1;
+    return err;
 
 }
 

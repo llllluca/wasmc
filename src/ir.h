@@ -230,44 +230,42 @@ typedef struct IRUse {
 
 
 #define ir_append_func_call_arg(block, arg_type, arg_value) \
-    ir_append_instr3(block, IR_OPCODE_ARG, arg_type, \
+    ir_append_instr(block, IR_OPCODE_ARG, arg_type, \
                      IR_REF_UNDEFINED, arg_value, IR_REF_UNDEFINED)
 
 #define ir_append_void_func_call(block, func_name) \
-    ir_append_instr3(block, IR_OPCODE_CALL, IR_TYPE_VOID, \
+    ir_append_instr(block, IR_OPCODE_CALL, IR_TYPE_VOID, \
                      IR_REF_UNDEFINED, func_name, IR_REF_UNDEFINED)
 
 #define ir_append_func_call(block, return_type, return_value, func_name) \
-    ir_append_instr3(block, IR_OPCODE_CALL, return_type, \
+    ir_append_instr(block, IR_OPCODE_CALL, return_type, \
                      return_value, func_name, IR_REF_UNDEFINED)
 
 #define ir_append_load(block, type, destination, offset, pointer) \
-    ir_append_instr3(block, IR_OPCODE_LOAD, type, destination, offset, pointer)
+    ir_append_instr(block, IR_OPCODE_LOAD, type, destination, offset, pointer)
 
 #define ir_append_store(block, type, source, offset, pointer) \
-    ir_append_instr3(block, IR_OPCODE_STORE, type, source, offset, pointer)
+    ir_append_instr(block, IR_OPCODE_STORE, type, source, offset, pointer)
 
 #define ir_append_add(block, type, result, left_operand, right_opendard) \
-    ir_append_instr3(block, IR_OPCODE_ADD, type, result, left_operand, right_opendard)
+    ir_append_instr(block, IR_OPCODE_ADD, type, result, left_operand, right_opendard)
 
 IRFunction *ir_create_function(WASMFunction *wasm_func);
 IRBlock *ir_create_block(IRFunction *f);
 IRBlock *ir_create_sealed_block(IRFunction *f);
 IRBlock *ir_create_sealed_block_without_locals(IRFunction *f);
-bool ir_append_instr1(IRBlock *b, IROpcode op, IRType type, IRReference to);
-bool ir_append_instr2(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0);
-bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0, IRReference arg1);
-bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival);
-bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
+int ir_append_instr(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0, IRReference arg1);
+int ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival);
+int ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
             IRBlock *arg_not_zero_arrival, IRBlock *arg_is_zero_arrival);
 void ir_ret0(IRFunction *f, IRBlock *b);
-bool ir_ret1(IRFunction *f, IRBlock *b, IRReference return_value);
+int ir_ret1(IRFunction *f, IRBlock *b, IRReference return_value);
 void ir_halt(IRFunction *f, IRBlock *b);
 IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type);
-bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor);
-bool ir_add_predecessor(IRBlock *block, IRBlock *pred);
-bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end);
-bool ir_add_usage(IRReference *ref);
+int ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor);
+int ir_add_predecessor(IRBlock *block, IRBlock *pred);
+int ir_add_loop_end(IRBlock *block, IRBlock *loop_end);
+int ir_add_usage(IRReference *ref);
 void ir_rm_usage(IRReference *ref);
 
 IRReference ir_get_default(WASMValtype t);
@@ -281,8 +279,8 @@ void ir_free_function(IRFunction *f);
 void ir_free_block(IRBlock *b);
 void ir_free_phi(IRPhi *phi);
 
-bool ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out);
-bool ir_seal_block(IRFunction *f, IRBlock *block);
+int ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out);
+int ir_seal_block(IRFunction *f, IRBlock *block);
 void ir_write_local(IRBlock *block, uint32_t localidx, IRReference value);
 
 #endif 

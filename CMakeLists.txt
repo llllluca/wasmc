@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(wasmc LANGUAGES C)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS YES)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_options(-ggdb -std=gnu17 -Wall -Wextra)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/)

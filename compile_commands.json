@@ -1,48 +1,48 @@
 [
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/wasm.c.o -c /home/luca/desktop/wasmc/src/wasm.c",
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/wasm.c.o -c /home/luca/desktop/wasmc/src/wasm.c",
   "file": "/home/luca/desktop/wasmc/src/wasm.c",
   "output": "src/CMakeFiles/wasmc_lib.dir/wasm.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/compile.c.o -c /home/luca/desktop/wasmc/src/compile.c",
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/compile.c.o -c /home/luca/desktop/wasmc/src/compile.c",
   "file": "/home/luca/desktop/wasmc/src/compile.c",
   "output": "src/CMakeFiles/wasmc_lib.dir/compile.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/libqbe.c.o -c /home/luca/desktop/wasmc/src/libqbe.c",
-  "file": "/home/luca/desktop/wasmc/src/libqbe.c",
-  "output": "src/CMakeFiles/wasmc_lib.dir/libqbe.c.o"
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/ir.c.o -c /home/luca/desktop/wasmc/src/ir.c",
+  "file": "/home/luca/desktop/wasmc/src/ir.c",
+  "output": "src/CMakeFiles/wasmc_lib.dir/ir.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/rega.c.o -c /home/luca/desktop/wasmc/src/rega.c",
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/rega.c.o -c /home/luca/desktop/wasmc/src/rega.c",
   "file": "/home/luca/desktop/wasmc/src/rega.c",
   "output": "src/CMakeFiles/wasmc_lib.dir/rega.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/aot.c.o -c /home/luca/desktop/wasmc/src/aot.c",
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/aot.c.o -c /home/luca/desktop/wasmc/src/aot.c",
   "file": "/home/luca/desktop/wasmc/src/aot.c",
   "output": "src/CMakeFiles/wasmc_lib.dir/aot.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/src",
-  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/rv32/emit.c.o -c /home/luca/desktop/wasmc/src/rv32/emit.c",
+  "directory": "/home/luca/desktop/wasmc/src",
+  "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_lib.dir/rv32/emit.c.o -c /home/luca/desktop/wasmc/src/rv32/emit.c",
   "file": "/home/luca/desktop/wasmc/src/rv32/emit.c",
   "output": "src/CMakeFiles/wasmc_lib.dir/rv32/emit.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/apps",
+  "directory": "/home/luca/desktop/wasmc/apps",
   "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/src -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/readaot.dir/readaot.c.o -c /home/luca/desktop/wasmc/apps/readaot.c",
   "file": "/home/luca/desktop/wasmc/apps/readaot.c",
   "output": "apps/CMakeFiles/readaot.dir/readaot.c.o"
 },
 {
-  "directory": "/home/luca/desktop/wasmc/build/apps",
+  "directory": "/home/luca/desktop/wasmc/apps",
   "command": "/usr/bin/cc  -I/home/luca/desktop/wasmc/include/wasmc -ggdb -std=gnu17 -Wall -Wextra -o CMakeFiles/wasmc_exe.dir/wasmc.c.o -c /home/luca/desktop/wasmc/apps/wasmc.c",
   "file": "/home/luca/desktop/wasmc/apps/wasmc.c",
   "output": "apps/CMakeFiles/wasmc_exe.dir/wasmc.c.o"

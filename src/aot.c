@@ -1,6 +1,10 @@
-#include "aot.h"
 #include <string.h>
+#include <assert.h>
 #include <stdlib.h>
+#include "aot.h"
+#include "wasmc.h"
+
+#define WASMC_OK 0
 
 extern AOTTargetInfo target_info;
 
@@ -9,7 +13,7 @@ extern AOTTargetInfo target_info;
 #define TEMPLATE_WRITE(val, offset, end, type) \
     do { \
         if ((long unsigned int)(end - offset) < sizeof(type)) { \
-            return AOT_ERR; \
+            return WASMC_ERR_AOT_BUFFER_TOO_SMALL; \
         } \
         *((type *)offset) = (val); \
         offset += sizeof(type); \
@@ -30,14 +34,14 @@ extern AOTTargetInfo target_info;
 #define WRITE_BYTE_ARRAY(m, addr, len) \
     do { \
         if ((long unsigned int)((m)->buf_end - (m)->offset) < len) { \
-            return AOT_ERR; \
+            return WASMC_ERR_AOT_BUFFER_TOO_SMALL; \
         } \
         memcpy((m)->offset, addr, len); \
         (m)->offset += len; \
     } while (0)
 
-AOTErr_t aot_module_init(AOTModule *m, uint8_t *buf,
-                         unsigned int buf_len, WASMModule *wasm_mod) {
+int aot_module_init(AOTModule *m, uint8_t *buf,
+                    unsigned int buf_len, WASMModule *wasm_mod) {
 
     memset(m, 0, sizeof(struct AOTModule));
     m->wasm_mod = wasm_mod;
@@ -47,7 +51,9 @@ AOTErr_t aot_module_init(AOTModule *m, uint8_t *buf,
     m->buf_end = m->buf + m->buf_len;
     INIT_LIST_HEAD(&m->patch_list);
     m->function_text_start = calloc(wasm_mod->function_count, sizeof(uint8_t *));
-    if (m->function_text_start == NULL) return AOT_ERR;
+    if (m->function_text_start == NULL) {
+        return WASMC_ERR_OUT_OF_HEAP_MEMORY;
+    }
     for (unsigned int i = 0; i < wasm_mod->function_count; i++) {
         m->function_text_start[i] = NULL;
     }
@@ -57,11 +63,11 @@ AOTErr_t aot_module_init(AOTModule *m, uint8_t *buf,
     WRITE_UINT8(m, AOT_MAGIC2);
     WRITE_UINT8(m, AOT_MAGIC3);
     WRITE_UINT32(m, AOT_CURRENT_VERSION);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 
-AOTErr_t emit_target_info(AOTModule *m) {
+int emit_target_info(AOTModule *m) {
 
     ALIGN(m, 4);
     WRITE_UINT32(m, AOT_SECTION_TYPE_TARGET_INFO);
@@ -75,7 +81,7 @@ AOTErr_t emit_target_info(AOTModule *m) {
     WRITE_UINT64(m, target_info.reserved);
     WRITE_UINT64(m, target_info.feature_flags);
     WRITE_BYTE_ARRAY(m, target_info.arch, sizeof(target_info.arch));
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 
@@ -119,7 +125,7 @@ static uint32_t get_stack_ptr_global_index(WASMModule *w, uint32_t heap_base) {
     return -1;
 }
 
-static AOTErr_t emit_memory(AOTModule *m) {
+static int emit_memory(AOTModule *m) {
 
     ALIGN(m, 4);
     WASMModule *w = m->wasm_mod;
@@ -173,10 +179,10 @@ static AOTErr_t emit_memory(AOTModule *m) {
         WRITE_BYTE_ARRAY(m, d->bytes, d->len);
     }
 
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_table(AOTModule *m) {
+static int emit_table(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
@@ -195,10 +201,10 @@ static AOTErr_t emit_table(AOTModule *m) {
 
     uint32_t table_init_data_count = 0;
     WRITE_UINT32(m, table_init_data_count);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_type(AOTModule *m) {
+static int emit_type(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
@@ -218,18 +224,18 @@ static AOTErr_t emit_type(AOTModule *m) {
         }
     }
 
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_import_global(AOTModule *m) {
+static int emit_import_global(AOTModule *m) {
 
     ALIGN(m, 4);
     uint32_t import_global_count = 0;
     WRITE_UINT32(m, import_global_count);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_global(AOTModule *m) {
+static int emit_global(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
@@ -245,21 +251,21 @@ static AOTErr_t emit_global(AOTModule *m) {
             WRITE_UINT32(m, g->as.i32);
             break;
         default:
-            return AOT_ERR;
+            assert(0);
         }
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_import_function(AOTModule *m) {
+static int emit_import_function(AOTModule *m) {
 
     ALIGN(m, 4);
     uint32_t import_function_count = 0;
     WRITE_UINT32(m, import_function_count);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_auxiliary(AOTModule *m) {
+static int emit_auxiliary(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
@@ -304,18 +310,18 @@ static AOTErr_t emit_auxiliary(AOTModule *m) {
     WRITE_UINT32(m, stack_ptr_global_index);
     WRITE_UINT64(m, stack_ptr);
     WRITE_UINT32(m, stack_size);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_object_data(AOTModule *m) {
+static int emit_object_data(AOTModule *m) {
 
     ALIGN(m, 4);
     uint32_t object_data_count = 0;
     WRITE_UINT32(m, object_data_count);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-AOTErr_t emit_init_data(AOTModule *m) {
+int emit_init_data(AOTModule *m) {
 
     ALIGN(m, 4);
     WRITE_UINT32(m, AOT_SECTION_TYPE_INIT_DATA);
@@ -326,14 +332,23 @@ AOTErr_t emit_init_data(AOTModule *m) {
     m->offset += sizeof(uint32_t);
     uint8_t *section_start = m->offset;
 
-    if (emit_memory(m)) return AOT_ERR;
-    if (emit_table(m)) return AOT_ERR;
-    if (emit_type(m)) return AOT_ERR;
-    if (emit_import_global(m)) return AOT_ERR;
-    if (emit_global(m)) return AOT_ERR;
-    if (emit_import_function(m)) return AOT_ERR;
-    if (emit_auxiliary(m)) return AOT_ERR;
-    if (emit_object_data(m)) return AOT_ERR;
+    int err;
+    err = emit_memory(m);
+    if (err) return err;
+    err = emit_table(m);
+    if (err) return err;
+    err = emit_type(m);
+    if (err) return err;
+    err = emit_import_global(m);
+    if (err) return err;
+    err = emit_global(m);
+    if (err) return err;
+    err = emit_import_function(m);
+    if (err) return err;
+    err = emit_auxiliary(m);
+    if (err) return err;
+    err = emit_object_data(m);
+    if (err) return err;
 
     /* Fix section size */
     *section_size = m->offset - section_start;
@@ -349,10 +364,10 @@ AOTErr_t emit_init_data(AOTModule *m) {
     WRITE_UINT32(m, literal_size);
     m->text_start = m->offset;
 
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-AOTErr_t emit_function(AOTModule *m) {
+int emit_function(AOTModule *m) {
 
     /* finalize text */
     *m->text_size = (m->offset - m->text_start) + sizeof(uint32_t);
@@ -381,10 +396,10 @@ AOTErr_t emit_function(AOTModule *m) {
 
     /* Fix section size */
     *section_size = m->offset - section_start;
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-AOTErr_t emit_export(AOTModule *m) {
+int emit_export(AOTModule *m) {
 
     WASMModule *w = m->wasm_mod;
     ALIGN(m, 4);
@@ -413,10 +428,10 @@ AOTErr_t emit_export(AOTModule *m) {
 
     /* Fix section size */
     *section_size = m->offset - section_start;
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-AOTErr_t emit_relocation(AOTModule *m) {
+int emit_relocation(AOTModule *m) {
 
     ALIGN(m, 4);
     WRITE_UINT32(m, AOT_SECTION_TYPE_RELOCATION);
@@ -431,7 +446,7 @@ AOTErr_t emit_relocation(AOTModule *m) {
     WRITE_UINT32(m, symbol_table_size);
     ALIGN(m, 4);
     WRITE_UINT32(m, relocation_group_count);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 void aot_module_cleanup(AOTModule *m) {

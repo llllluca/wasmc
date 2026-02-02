@@ -10,6 +10,6 @@ add_library(
 set_property(TARGET wasmc_lib PROPERTY OUTPUT_NAME wasmc)
 target_include_directories(
     wasmc_lib
-    INTERFACE ${PROJECT_SOURCE_DIR}/include/wasmc/
+    PUBLIC ${PROJECT_SOURCE_DIR}/include/wasmc/
     PRIVATE ${PROJECT_SOURCE_DIR}/src/)
 

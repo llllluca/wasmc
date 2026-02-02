@@ -5,6 +5,9 @@
 #include "ir.h"
 #define BITMAP_IMPLEMENTATION
 #include "bitmap.h"
+#include "wasmc.h"
+
+#define WASMC_OK 0
 
 typedef enum MoveStatus {
     TO_MOVE,
@@ -559,21 +562,21 @@ static bool have_same_location(IRFunction *f, Location *to_loc, IRReference *fro
     return location_equal(to_loc, from_loc);
 }
 
-static bool parallel_move_from_phis(IRFunction *f, IRBlock *pred,
-                                    IRBlock *succ, struct list_head *out) {
+static int parallel_move_from_phis(IRFunction *f, IRBlock *pred,
+                                   IRBlock *succ, struct list_head *out) {
     IRPhi *phi;
     list_for_each_entry(phi, &succ->phi_list, link) {
         IRPhiArg *phi_arg = input_of(phi, pred);
         Location *to_loc = &f->live_intervals[phi->id].assign;
         if (!have_same_location(f, to_loc, &phi_arg->value)) {
             Move *move = malloc(sizeof(struct Move));
-            if (move == NULL) return true;
+            if (move == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
             move->to = &f->live_intervals[phi->id].assign;
             move->from = phi_arg->value;
             list_add_tail(&move->link, out);
         }
     }
-    return false;
+    return WASMC_OK;
 }
 
 static __always_inline IRInstr *alloc_copy(Location *dst, IRReference *src) {
@@ -589,8 +592,8 @@ static __always_inline IRInstr *alloc_copy(Location *dst, IRReference *src) {
     return ins;
 }
 
-static bool move_one(IRFunction *f, Move *m,
-                     struct list_head *pmove, struct list_head *smove) {
+static int move_one(IRFunction *f, Move *m,
+                    struct list_head *pmove, struct list_head *smove) {
 
     if (have_same_location(f, m->to, &m->from)) {
         return false;
@@ -601,12 +604,12 @@ static bool move_one(IRFunction *f, Move *m,
         if (have_same_location(f, m->to, &x->from)) {
             switch (x->status) {
             case TO_MOVE: {
-                bool err = move_one(f, x, pmove, smove);
-                if (err) return true;
+                int err = move_one(f, x, pmove, smove);
+                if (err) return err;
             } break;
             case BEING_MOVED: {
                 IRInstr *ins = alloc_copy(&tmp, &x->from);
-                if (ins == NULL) return true;
+                if (ins == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
                 list_add_tail(&ins->link, smove);
                 x->from.type = IR_REF_TYPE_LOCATION;
                 x->from.as.location = &tmp;
@@ -619,27 +622,27 @@ static bool move_one(IRFunction *f, Move *m,
         }
     }
     IRInstr *ins = alloc_copy(m->to, &m->from);
-    if (ins == NULL) return true;
+    if (ins == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     list_add_tail(&ins->link, smove);
     m->status = MOVED;
-    return false;
+    return WASMC_OK;
 }
 
-static bool sequentialize_parallel_move(IRFunction *f, struct list_head *pmove,
+static int sequentialize_parallel_move(IRFunction *f, struct list_head *pmove,
                                         struct list_head *smove) {
     Move *move;
     list_for_each_entry(move, pmove, link) {
         move->status = TO_MOVE;
     }
 
-    bool err;
+    int err;
     list_for_each_entry(move, pmove, link) {
         if (move->status == TO_MOVE) {
             err = move_one(f, move, pmove, smove);
-            if (err) return true;
+            if (err) return err;
         }
     }
-    return false;
+    return WASMC_OK;
 }
 
 
@@ -663,13 +666,12 @@ insert_move_at_end(IRBlock *b, struct list_head *smove) {
     }
 }
 
-static bool insert_sequence_of_moves(IRFunction *f, struct list_head *smove,
-                                     IRBlock *pred, IRBlock *succ) {
+static int insert_sequence_of_moves(IRFunction *f, struct list_head *smove,
+                                    IRBlock *pred, IRBlock *succ) {
     if (list_empty(smove)) {
-        return false;
+        return WASMC_OK;
     }
 
-    bool err;
     if (succ->pred_count > 1 &&
         pred->succ[0] != NULL && pred->succ[1] != NULL) {
         /* 'succ' has 'pred' and other block as predecessors
@@ -691,8 +693,8 @@ static bool insert_sequence_of_moves(IRFunction *f, struct list_head *smove,
         /* add a jmp from 'block' to 'succ' */
         block->jump.type = IR_JUMP_TYPE_JMP;
         block->succ[0] = succ;
-        err = ir_add_predecessor(succ, block);
-        if (err) return true;
+        int err = ir_add_predecessor(succ, block);
+        if (err) return err;
 
     } else if (pred->succ[0] != NULL && pred->succ[1] != NULL) {
         /* 'succ' has only 'pred' as predecessor
@@ -705,14 +707,14 @@ static bool insert_sequence_of_moves(IRFunction *f, struct list_head *smove,
          * => insert the sequence of moves at the end of 'pred' */
         insert_move_at_end(pred, smove);
     }
-    return false;
+    return WASMC_OK;
 }
 
-static bool resolve_edge(IRFunction *f, IRBlock *pred, IRBlock *succ) {
+static int resolve_edge(IRFunction *f, IRBlock *pred, IRBlock *succ) {
 
     Move *move, *move_iter;
     IRInstr *ins, *ins_iter;
-    bool err = false;
+    int err = WASMC_OK;
 
     struct list_head pmove;
     INIT_LIST_HEAD(&pmove);
@@ -771,11 +773,11 @@ ERROR:
 /* Before code generation, it is necessary to eliminate phi-functions since
  * these are not executable machine instructions. This elimination phase is
  * called SSA destruction. */
-static bool ssa_deconstruction(IRFunction *f) {
+static int ssa_deconstruction(IRFunction *f) {
 
     IRBlock *block, *iter;
     IRBlock *successor;
-    bool err;
+    int err;
 
     list_for_each_entry(block, &f->block_list, link) {
         successor = block->succ[0];
@@ -807,12 +809,12 @@ static bool ssa_deconstruction(IRFunction *f) {
         }
     }
 
-    return false;
+    return WASMC_OK;
 }
 
-static bool ensure_function_parameters_constraints(IRFunction *f) {
+static int ensure_function_parameters_constraints(IRFunction *f) {
 
-    bool err = false;
+    int err = WASMC_OK;
     struct list_head pmove;
     struct list_head smove;
     INIT_LIST_HEAD(&pmove);
@@ -837,7 +839,7 @@ static bool ensure_function_parameters_constraints(IRFunction *f) {
         if (!have_same_location(f, to, &from)) {
             Move *move = malloc(sizeof(struct Move));
             if (move == NULL) {
-                err = true;
+                err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
                 goto ERROR;
             }
             move->to = to;
@@ -865,9 +867,9 @@ ERROR:
     return err;
 }
 
-static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **intervals) {
+static int ensure_function_calls_constraints(IRFunction *f, LiveInterval **intervals) {
 
-    bool err = false;
+    int err = WASMC_OK;
     struct list_head pmove;
     struct list_head smove;
     INIT_LIST_HEAD(&pmove);
@@ -892,7 +894,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                 if (!have_same_location(f, to, &from)) {
                     Move *move = malloc(sizeof(struct Move));
                     if (move == NULL) {
-                        err = true;
+                        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
                         goto ERROR;
                     }
                     move->to = to;
@@ -922,7 +924,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                 list_for_each_entry(live_int, &survivors, link) {
                     IRInstr *push = malloc(sizeof(struct IRInstr));
                     if (push == NULL) {
-                        err = true;
+                        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
                         goto ERROR;
                     }
                     push->op = IR_OPCODE_PUSH;
@@ -939,7 +941,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                 list_for_each_entry(live_int, &survivors, link) {
                     IRInstr *pop = malloc(sizeof(struct IRInstr));
                     if (pop == NULL) {
-                        err = true;
+                        err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
                         goto ERROR;
                     }
                     pop->op = IR_OPCODE_POP;
@@ -980,7 +982,7 @@ static bool ensure_function_calls_constraints(IRFunction *f, LiveInterval **inte
                     if (!have_same_location(f, &args[0], &call->to)) {
                         IRInstr *ins = malloc(sizeof(struct IRInstr));
                         if (ins == NULL) {
-                            err = true;
+                            err = WASMC_ERR_OUT_OF_HEAP_MEMORY;
                             goto ERROR;
                         }
                         ins->op = IR_OPCODE_COPY;
@@ -1016,42 +1018,42 @@ ERROR:
 
 }
 
-static bool ensure_function_return_value_constraints(IRFunction *f) {
+static int ensure_function_return_value_constraints(IRFunction *f) {
 
     IRBlock *block;
     list_for_each_entry(block, &f->block_list, link) {
         if (block->jump.type == IR_JUMP_TYPE_RET1) {
             if (!have_same_location(f, &args[0], &block->jump.arg)) {
                 IRInstr *ins = alloc_copy(&args[0], &block->jump.arg);
-                if (ins == NULL) return true;
+                if (ins == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
                 list_add_tail(&ins->link, &block->instr_list);
             }
             block->jump.type = IR_JUMP_TYPE_RET0;
         }
     }
-    return false;
+    return WASMC_OK;
 }
 
-static bool ensure_abi_constraints(IRFunction *f, LiveInterval **intervals) {
+static int ensure_abi_constraints(IRFunction *f, LiveInterval **intervals) {
 
-    bool err;
+    int err;
     err = ensure_function_parameters_constraints(f);
-    if (err) return true;
+    if (err) return err;
 
     err = ensure_function_calls_constraints(f, intervals);
-    if (err) return true;
+    if (err) return err;
 
     err = ensure_function_return_value_constraints(f);
-    if (err) return true;
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
-bool register_allocation(IRFunction *f) {
+int register_allocation(IRFunction *f) {
 
     number_instructions(f);
     LiveInterval **sorted_intervals = build_intervals(f);
-    if (sorted_intervals == NULL) return true;
+    if (sorted_intervals == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
 
     /*
     for (unsigned int tmp_id = 0; tmp_id < f->next_tmp_id; tmp_id++) {
@@ -1072,13 +1074,13 @@ bool register_allocation(IRFunction *f) {
     }
     linear_scan(f, sorted_intervals, &reg_pool, RV32_NUM_REG);
 
-    bool err;
+    int err;
     err = ensure_abi_constraints(f, sorted_intervals);
-    if (err) return true;
+    if (err) return err;
     free(sorted_intervals);
 
     err = ssa_deconstruction(f);
-    if (err) return true;
+    if (err) return err;
     replace_references_with_locations(f);
-    return false;
+    return WASMC_OK;
 }

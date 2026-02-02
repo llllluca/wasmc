@@ -1,8 +1,11 @@
-#include "ir.h"
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include "ir.h"
+#include "wasmc.h"
+
+#define WASMC_OK 0
 
 char *rname[] = {
     [ZERO] = "zero", [RA] = "ra",   [SP] = "sp",   [GP] = "gp", [TP] = "tp",
@@ -230,18 +233,18 @@ void ir_print_fn(IRFunction *fn, FILE *f) {
     fprintf(f, "}\n");
 }
 
-bool ir_add_usage(IRReference *ref) {
+int ir_add_usage(IRReference *ref) {
     /* The list of uses of ref is only needed in the try_remove_trivial_phi() function.
      * In the try_remove_trivial_phi() function you need to know the uses of ref
      * defined in the left hand side of a phi statement. Hence we only record the uses
      * of ref defined in the left hand size of a phi statement. */
     if (ref->type == IR_REF_TYPE_PHI) {
         IRUse *use = malloc(sizeof(struct IRUse));
-        if (use == NULL) return true;
+        if (use == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         use->ref = ref;
         list_add(&use->link, &ref->as.phi->use_list);
     }
-    return false;
+    return WASMC_OK;
 }
 
 void ir_rm_usage(IRReference *ref) {
@@ -284,7 +287,8 @@ IRFunction *ir_create_function(WASMFunction *wasm_func) {
      * always hold a pointer to the struct WASMExecEnv (See WAMR code) */
     ir_func->WASMExecEnv = IR_REF_TMP(ir_func);
     bool err;
-    err = ir_append_instr1(start, IR_OPCODE_PAR, IR_TYPE_I32, ir_func->WASMExecEnv);
+    err = ir_append_instr(start, IR_OPCODE_PAR, IR_TYPE_I32,
+            ir_func->WASMExecEnv, IR_REF_UNDEFINED, IR_REF_UNDEFINED);
     if (err) {
         ir_free_function(ir_func);
         return NULL;
@@ -293,7 +297,8 @@ IRFunction *ir_create_function(WASMFunction *wasm_func) {
     for (uint32_t i = 0; i < param_count; i++) {
         IRType type = (IRType)t->param_types[i];
         IRReference param = IR_REF_TMP(ir_func);
-        err = ir_append_instr1(start, IR_OPCODE_PAR, type, param);
+        err = ir_append_instr(start, IR_OPCODE_PAR, type,
+                param, IR_REF_UNDEFINED, IR_REF_UNDEFINED);
         if (err) {
             ir_free_function(ir_func);
             return NULL;
@@ -387,21 +392,12 @@ IRBlock *ir_create_block(IRFunction *f) {
     return block;
 }
 
-bool ir_append_instr1(IRBlock *b, IROpcode op, IRType type, IRReference to) {
 
-    return ir_append_instr3(b, op, type, to, IR_REF_UNDEFINED, IR_REF_UNDEFINED);
-}
-
-bool ir_append_instr2(IRBlock *b, IROpcode op, IRType type, IRReference to, IRReference arg0) {
-
-    return ir_append_instr3(b, op, type, to, arg0, IR_REF_UNDEFINED);
-}
-
-bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type,
-                          IRReference to, IRReference arg0, IRReference arg1) {
+int ir_append_instr(IRBlock *b, IROpcode op, IRType type,
+                    IRReference to, IRReference arg0, IRReference arg1) {
 
     IRInstr *ins = malloc(sizeof(struct IRInstr));
-    if (ins == NULL) return true;
+    if (ins == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     ins->op = op;
     ins->type = type;
     ins->to = to;
@@ -410,38 +406,38 @@ bool ir_append_instr3(IRBlock *b, IROpcode op, IRType type,
     ins->seqnum = 0;
     list_add_tail(&ins->link, &b->instr_list);
     //TODO: add a comment here
-    bool err;
+    int err;
     if (ins->op == IR_OPCODE_STORE || ins->op == IR_OPCODE_STORE8) {
         err = ir_add_usage(&ins->to);
-        if (err) return NULL;
+        if (err) return err;
     }
     err = ir_add_usage(&ins->arg[0]);
-    if (err) return true;
+    if (err) return err;
     err = ir_add_usage(&ins->arg[1]);
-    if (err) return true;
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
-bool ir_add_predecessor(IRBlock *block, IRBlock *pred) {
+int ir_add_predecessor(IRBlock *block, IRBlock *pred) {
     if (block == NULL) return false;
     IRPredecessor *node = malloc(sizeof(struct IRPredecessor));
-    if (node == NULL) return true;
+    if (node == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     node->ptr = pred;
     list_add_tail(&node->link, &block->pred_list);
     block->pred_count++;
-    return false;
+    return WASMC_OK;
 }
 
-bool ir_add_loop_end(IRBlock *block, IRBlock *loop_end) {
+int ir_add_loop_end(IRBlock *block, IRBlock *loop_end) {
     IRLoopEnd *node = malloc(sizeof(struct IRLoopEnd));
-    if (node == NULL) return true;
+    if (node == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     node->ptr = loop_end;
     list_add_tail(&node->link, &block->loop_end_block_list);
     return false;
 }
 
-bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival) {
+int ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival) {
 
     departure->jump.type = IR_JUMP_TYPE_JMP;
     departure->succ[0] = arrival;
@@ -450,13 +446,13 @@ bool ir_jmp(IRFunction *f, IRBlock *departure, IRBlock *arrival) {
     list_del(&departure->link);
     list_add_tail(&departure->link, &f->block_list);
 
-    bool err = ir_add_predecessor(arrival, departure);
-    if (err) return true;
+    int err = ir_add_predecessor(arrival, departure);
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
-bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
+int ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
             IRBlock *arg_not_zero_arrival, IRBlock *arg_is_zero_arrival) {
 
     departure->jump.type = IR_JUMP_TYPE_JNZ;
@@ -468,16 +464,16 @@ bool ir_jnz(IRFunction *f, IRBlock *departure, IRReference arg,
     list_del(&departure->link);
     list_add_tail(&departure->link, &f->block_list);
 
-    bool err = ir_add_usage(&departure->jump.arg);
-    if (err) return true;
+    int err = ir_add_usage(&departure->jump.arg);
+    if (err) return err;
 
     err = ir_add_predecessor(arg_not_zero_arrival, departure);
-    if (err) return true;
+    if (err) return err;
 
     err = ir_add_predecessor(arg_is_zero_arrival, departure);
-    if (err) return true;
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
 void ir_ret0(IRFunction *f, IRBlock *block) {
@@ -488,17 +484,17 @@ void ir_ret0(IRFunction *f, IRBlock *block) {
     list_add_tail(&block->link, &f->block_list);
 }
 
-bool ir_ret1(IRFunction *f, IRBlock *block, IRReference return_value) {
+int ir_ret1(IRFunction *f, IRBlock *block, IRReference return_value) {
 
     block->jump.type = IR_JUMP_TYPE_RET1;
     block->jump.arg = return_value;
     /* remove the block from the working block list */
     list_del(&block->link);
     list_add_tail(&block->link, &f->block_list);
-    bool err = ir_add_usage(&block->jump.arg);
-    if (err) return true;
+    int err = ir_add_usage(&block->jump.arg);
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
 void ir_halt(IRFunction *f, IRBlock *block) {
@@ -523,11 +519,11 @@ IRPhi *ir_create_phi(IRFunction *f, IRBlock *block, IRType type) {
     return phi;
 }
 
-bool ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor) {
+int ir_append_phi_arg(IRPhi *phi, IRReference value, IRBlock *predecessor) {
 
     assert(predecessor != NULL);
     IRPhiArg *phi_arg = malloc(sizeof(struct IRPhiArg));
-    if (phi_arg == NULL) return true;
+    if (phi_arg == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
     phi_arg->value = value;
     phi_arg->predecessor = predecessor;
     list_add_tail(&phi_arg->link, &phi->phi_arg_list);
@@ -619,11 +615,11 @@ void ir_free_phi(IRPhi *phi) {
  * Authors: Matthias Braun, Sebastian Buchwald, Sebastian Hack,
  * Roland Leißa, Christoph Mallon, and Andreas Zwinkau */
 
-static bool read_local_recursive(IRFunction *f, IRBlock *block,
+static int read_local_recursive(IRFunction *f, IRBlock *block,
                                  uint32_t localidx, IRReference *out);
-static bool add_phi_operands(IRFunction *f, IRPhi *phi,
+static int add_phi_operands(IRFunction *f, IRPhi *phi,
                              uint32_t localidx, IRReference *out);
-static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out);
+static int try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out);
 
 
 void ir_write_local(IRBlock *block, uint32_t localidx, IRReference value) {
@@ -633,7 +629,7 @@ void ir_write_local(IRBlock *block, uint32_t localidx, IRReference value) {
     ir_add_usage(&block->locals[localidx]);
 }
 
-bool ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out) {
+int ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference *out) {
 
     if (block->locals[localidx].type != IR_REF_TYPE_UNDEFINED) {
         if (out != NULL) *out = block->locals[localidx];
@@ -645,14 +641,15 @@ bool ir_read_local(IRFunction *f, IRBlock *block, uint32_t localidx, IRReference
     return read_local_recursive(f, block, localidx, out);
 }
 
-static bool read_local_recursive(IRFunction *f, IRBlock *block,
+static int read_local_recursive(IRFunction *f, IRBlock *block,
                                 uint32_t localidx, IRReference *out) {
-   IRReference value;
+    int err;
+    IRReference value;
     if (!block->is_sealed) {
         /* Incomplete CFG */
         WASMValtype valtype = wasm_valtype_of(f->wasm_func, localidx);
         IRPhi *phi = ir_create_phi(f, block, (IRType)valtype);
-        if (phi == NULL) return true;
+        if (phi == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         block->incomplete_phi[localidx] = phi;
         value = IR_REF_PHI(phi);
     } else if (block->pred_count == 0) {
@@ -665,8 +662,8 @@ static bool read_local_recursive(IRFunction *f, IRBlock *block,
          * it recursively for a definition. No phi needed */
         struct list_head *head = list_next(&block->pred_list);
         IRPredecessor *pred = container_of(head, IRPredecessor, link);
-        bool err = ir_read_local(f, pred->ptr, localidx, &value);
-        if (err) return true;
+        err = ir_read_local(f, pred->ptr, localidx, &value);
+        if (err) return err;
     } else {
        /* If the block has multiple predecessors we collect the
         * definitions from all predecessors and construct a phi function,
@@ -686,18 +683,18 @@ static bool read_local_recursive(IRFunction *f, IRBlock *block,
          * will end. */
         WASMValtype valtype = wasm_valtype_of(f->wasm_func, localidx);
         IRPhi *phi = ir_create_phi(f, block, (IRType)valtype);
-        if (phi == NULL) return true;
+        if (phi == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
         value = IR_REF_PHI(phi);
         ir_write_local(block, localidx, value);
-        bool err = add_phi_operands(f, phi, localidx, &value);
-        if (err) return true;
+        err = add_phi_operands(f, phi, localidx, &value);
+        if (err) return err;
     }
     ir_write_local(block, localidx, value);
     if (out != NULL) *out = value;
-    return false;
+    return WASMC_OK;
 }
 
-static bool add_phi_operands(IRFunction *f, IRPhi *phi,
+static int add_phi_operands(IRFunction *f, IRPhi *phi,
                              uint32_t localidx, IRReference *out) {
 
     /* Determine phi operands from the predecessors */
@@ -707,16 +704,16 @@ static bool add_phi_operands(IRFunction *f, IRPhi *phi,
     IRPredecessor *pred;
     list_for_each_entry(pred, &phi->block->pred_list, link) {
         err = ir_read_local(f, pred->ptr, localidx, &local);
-        if (err) return true;
+        if (err) return err;
         err = ir_append_phi_arg(phi, local, pred->ptr);
-        if (err) return true;
+        if (err) return err;
     }
     /* Recursive look-up might leave redundant
      * phi functions, try to remove them */
     err = try_remove_trivial_phi(f, phi, out);
-    if (err) return true;
+    if (err) return err;
 
-    return false;
+    return WASMC_OK;
 }
 
 /* A phi function is trivial iff it just references itself
@@ -739,7 +736,7 @@ static bool add_phi_operands(IRFunction *f, IRPhi *phi,
  * A trivial phi function can be removed and the value v is used instead.
  * As a special case, the phi function might use no other value besides
  * itself. This means that it is unreachable, We replace it by a default value. */
-static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) {
+static int try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) {
 
     IRReference same =  IR_REF_UNDEFINED;
     IRPhiArg *phi_arg;
@@ -770,7 +767,8 @@ static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) 
     IRUse *use;
     list_for_each_entry(use, &phi->use_list, link) {
         *use->ref = same;
-        ir_add_usage(use->ref);
+        int err = ir_add_usage(use->ref);
+        if (err) return err;
     }
 
     /* remove 'phi' */
@@ -782,14 +780,14 @@ static bool try_remove_trivial_phi(IRFunction *f, IRPhi *phi, IRReference *out) 
     ir_free_phi(phi);
 
     if (out != NULL) *out = same;
-    return false;
+    return WASMC_OK;
 }
 
-bool ir_seal_block(IRFunction *f, IRBlock *block) {
+int ir_seal_block(IRFunction *f, IRBlock *block) {
     for (uint32_t i = 0; i < f->ir_local_count; i++) {
         if (block->incomplete_phi[i] == NULL) continue;
-        bool err = add_phi_operands(f, block->incomplete_phi[i], i, NULL);
-        if (err) return true;
+        int err = add_phi_operands(f, block->incomplete_phi[i], i, NULL);
+        if (err) return err;
     }
     block->is_sealed = true;
     free(block->incomplete_phi);

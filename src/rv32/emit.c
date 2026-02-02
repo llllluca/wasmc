@@ -4,7 +4,9 @@
 #include "rv32im.h"
 #include "ir.h"
 #include "aot.h"
+#include "wasmc.h"
 
+#define WASMC_OK 0
 
 typedef enum JumpTargetType {
     JUMP_TO_BLOCK,
@@ -25,8 +27,6 @@ typedef struct RV32JumpPatch {
     } type;
     uint8_t *jump_instr;
 } RV32JumpPatch;
-
-#define ERR_CHECK(x) if (x) return AOT_ERR;
 
 const bool rv32_is_callee_saved[RV32_NUM_REG] = {
     [ZERO] = false,
@@ -99,12 +99,14 @@ static Location rv32_private_reg1 = {
     .as.reg = RV32_PRIVATE_REG1,
 };
 
-static AOTErr_t emit(AOTModule *m, ins_fmt ins) {
+static int emit(AOTModule *m, ins_fmt ins) {
     unsigned long size = m->buf_end - m->offset;
-    if (size < sizeof(uint32_t)) return AOT_ERR;
+    if (size < sizeof(uint32_t)) {
+        return WASMC_ERR_AOT_BUFFER_TOO_SMALL;
+    }
     *(uint32_t *)(m->offset) = ins.as.u32;
     m->offset += sizeof(uint32_t);
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 /* Instr: li
@@ -112,26 +114,31 @@ static AOTErr_t emit(AOTModule *m, ins_fmt ins) {
  * Use: li rd, imm
  * Result: rd = imm */
 //https://stackoverflow.com/questions/50742420/risc-v-build-32-bit-constants-with-lui-and-addi
-static AOTErr_t emit_li(AOTModule *m, uint32_t rd, int32_t imm) {
+static int emit_li(AOTModule *m, uint32_t rd, int32_t imm) {
+    int err;
     if (-2048 <= imm && imm <= 2047) {
-        ERR_CHECK(emit(m, RV32_ADDI(rd, ZERO, imm)));
+        err = emit(m, RV32_ADDI(rd, ZERO, imm));
+        if (err) return err;
     } else {
         uint32_t lui_imm = imm >> 12;
         uint32_t addi_imm = imm & 0xfff;
         if (imm & 0x800) {
             lui_imm += 1;
         }
-        ERR_CHECK(emit(m, RV32_LUI(rd, lui_imm)));
-        ERR_CHECK(emit(m, RV32_ADDI(rd, rd, addi_imm)));
+        err = emit(m, RV32_LUI(rd, lui_imm));
+        if (err) return err;
+        err = emit(m, RV32_ADDI(rd, rd, addi_imm));
+        if (err) return err;
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-
-static AOTErr_t fix_arg(AOTModule *m, IRReference *arg, Location *loc) {
+static int fix_arg(AOTModule *m, IRReference *arg, Location *loc) {
+    int err;
     switch (arg->type) {
     case IR_REF_TYPE_I32: {
-        ERR_CHECK(emit_li(m, loc->as.reg, arg->as.i32));
+        err = emit_li(m, loc->as.reg, arg->as.i32);
+        if (err) return err;
         arg->type = IR_REF_TYPE_LOCATION;
         arg->as.location = loc;
     } break;
@@ -150,67 +157,81 @@ static AOTErr_t fix_arg(AOTModule *m, IRReference *arg, Location *loc) {
     default:
         assert(0);
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 static inline bool imm(IRReference r, int imm_min, int imm_max) {
     return r.type == IR_REF_TYPE_I32 && imm_min <= r.as.i32 && r.as.i32 <= imm_max;
 }
 
-#define EMIT_BINOP(aotm, ins, OP)                                   \
-    do {                                                            \
-        ERR_CHECK(fix_arg(aotm, &(ins)->arg[0], &rv32_private_reg0)); \
-        ERR_CHECK(fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1)); \
-        rv32_reg rd  = (ins)->to.as.location->as.reg;                     \
-        rv32_reg rs1 = (ins)->arg[0].as.location->as.reg;                 \
-        rv32_reg rs2 = (ins)->arg[1].as.location->as.reg;                 \
-        ERR_CHECK(emit(aotm, OP(rd, rs1, rs2)));                    \
+#define EMIT_BINOP(aotm, ins, OP)                                \
+    do {                                                         \
+        err = fix_arg(aotm, &(ins)->arg[0], &rv32_private_reg0); \
+        if (err) return err;                                     \
+        err = fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1); \
+        if (err) return err;                                     \
+        rv32_reg rd  = (ins)->to.as.location->as.reg;            \
+        rv32_reg rs1 = (ins)->arg[0].as.location->as.reg;        \
+        rv32_reg rs2 = (ins)->arg[1].as.location->as.reg;        \
+        err = (emit(aotm, OP(rd, rs1, rs2)));                    \
+        if (err) return err;                                     \
     } while(0)
 
-#define EMIT_BINOP_IMM(aotm, ins, OP, OPI)                               \
-    do {                                                                 \
-        ERR_CHECK(fix_arg(aotm, &(ins)->arg[0], &rv32_private_reg0));    \
-        rv32_reg rd = (ins)->to.as.location->as.reg;                     \
-        rv32_reg rs1 = (ins)->arg[0].as.location->as.reg;                \
-        if (imm((ins)->arg[1], -2048, 2047)) {                           \
-            uint32_t imm = (ins)->arg[1].as.i32;                         \
-            ERR_CHECK(emit(aotm, OPI(rd, rs1, imm)));                    \
-        } else {                                                         \
-            ERR_CHECK(fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1)); \
-            rv32_reg rs2 = (ins)->arg[1].as.location->as.reg;                  \
-            ERR_CHECK(emit(aotm, OP(rd, rs1, rs2)));                     \
-        }                                                                \
-    } while (0)
-
-#define EMIT_MEMOP(aotm, ins, OP)                                    \
+#define EMIT_BINOP_IMM(aotm, ins, OP, OPI)                           \
     do {                                                             \
-        ERR_CHECK(fix_arg(aotm, &(ins)->to, &rv32_private_reg0));    \
-        ERR_CHECK(fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1));\
-        assert((ins)->arg[0].type == IR_REF_TYPE_I32);               \
-        rv32_reg rs2 = (ins)->to.as.location->as.reg;                \
-        int32_t imm  = (ins)->arg[0].as.i32;                         \
-        rv32_reg rs1 = (ins)->arg[1].as.location->as.reg;            \
-        if (-2048 <= imm && imm <=  2047) {                          \
-            ERR_CHECK(emit(aotm, OP(rs2, imm, rs1)));                \
-            break;                                                   \
+        err = fix_arg(aotm, &(ins)->arg[0], &rv32_private_reg0);     \
+        if (err) return err;                                         \
+        rv32_reg rd = (ins)->to.as.location->as.reg;                 \
+        rv32_reg rs1 = (ins)->arg[0].as.location->as.reg;            \
+        if (imm((ins)->arg[1], -2048, 2047)) {                       \
+            uint32_t imm = (ins)->arg[1].as.i32;                     \
+            err = emit(aotm, OPI(rd, rs1, imm));                     \
+            if (err) return err;                                     \
+        } else {                                                     \
+            err = fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1); \
+            if (err) return err;                                     \
+            rv32_reg rs2 = (ins)->arg[1].as.location->as.reg;        \
+            err = emit(aotm, OP(rd, rs1, rs2));                      \
+            if (err) return err;                                     \
         }                                                            \
-        rv32_reg tmp = rv32_private_reg0.as.reg;                     \
-        while (imm > 2047) {                                         \
-            ERR_CHECK(emit(aotm, RV32_ADDI(tmp, rs1, 2047)));        \
-            imm -= 2047;                                             \
-            rs1 = tmp;                                               \
-        }                                                            \
-        while (imm < -2048) {                                        \
-            ERR_CHECK(emit(aotm, RV32_ADDI(tmp, rs1, -2048)));       \
-            imm += 2048;                                             \
-            rs1 = tmp;                                               \
-        }                                                            \
-        ERR_CHECK(emit(aotm, OP(rs2, imm, rs1)));                    \
+    } while (0)
+
+#define EMIT_MEMOP(aotm, ins, OP)                                \
+    do {                                                         \
+        err = fix_arg(aotm, &(ins)->to, &rv32_private_reg0);     \
+        if (err) return err;                                     \
+        err = fix_arg(aotm, &(ins)->arg[1], &rv32_private_reg1); \
+        if (err) return err;                                     \
+        assert((ins)->arg[0].type == IR_REF_TYPE_I32);           \
+        rv32_reg rs2 = (ins)->to.as.location->as.reg;            \
+        int32_t imm  = (ins)->arg[0].as.i32;                     \
+        rv32_reg rs1 = (ins)->arg[1].as.location->as.reg;        \
+        if (-2048 <= imm && imm <=  2047) {                      \
+            err = emit(aotm, OP(rs2, imm, rs1));                 \
+            if (err) return err;                                 \
+            break;                                               \
+        }                                                        \
+        rv32_reg tmp = rv32_private_reg0.as.reg;                 \
+        while (imm > 2047) {                                     \
+            err = emit(aotm, RV32_ADDI(tmp, rs1, 2047));         \
+            if (err) return err;                                 \
+            imm -= 2047;                                         \
+            rs1 = tmp;                                           \
+        }                                                        \
+        while (imm < -2048) {                                    \
+            err = emit(aotm, RV32_ADDI(tmp, rs1, -2048));        \
+            if (err) return err;                                 \
+            imm += 2048;                                         \
+            rs1 = tmp;                                           \
+        }                                                        \
+        err = emit(aotm, OP(rs2, imm, rs1));                     \
+        if (err) return err;                                     \
     } while (0)
 
 
-static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
+static int emitins(AOTModule *m, IRInstr *i) {
 
+    int err;
     switch (i->op) {
 
         /* Arithmetic and Bits */
@@ -253,28 +274,38 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
 
         /* Comparisons */
         case IR_OPCODE_EQZ: {
-            ERR_CHECK(fix_arg(m, &i->arg[0], &rv32_private_reg0));
+            err = fix_arg(m, &i->arg[0], &rv32_private_reg0);
+            if (err) return err;
             rv32_reg rd = i->to.as.location->as.reg;
             rv32_reg rs1 = i->arg[0].as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_SEQZ(rd, rs1)));
+            err = emit(m, RV32_SEQZ(rd, rs1));
+            if (err) return err;
         } break;
         case IR_OPCODE_EQ: {
-            ERR_CHECK(fix_arg(m, &i->arg[0], &rv32_private_reg0));
-            ERR_CHECK(fix_arg(m, &i->arg[1], &rv32_private_reg1));
+            err = fix_arg(m, &i->arg[0], &rv32_private_reg0);
+            if (err) return err;
+            err = fix_arg(m, &i->arg[1], &rv32_private_reg1);
+            if (err) return err;
             rv32_reg rd = i->to.as.location->as.reg;
             rv32_reg rs1 = i->arg[0].as.location->as.reg;
             rv32_reg rs2 = i->arg[1].as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XOR(rd, rs1, rs2)));
-            ERR_CHECK(emit(m, RV32_SEQZ(rd, rd)));
+            err = emit(m, RV32_XOR(rd, rs1, rs2));
+            if (err) return err;
+            err = emit(m, RV32_SEQZ(rd, rd));
+            if (err) return err;
         } break;
         case IR_OPCODE_NE: {
-            ERR_CHECK(fix_arg(m, &i->arg[0], &rv32_private_reg0));
-            ERR_CHECK(fix_arg(m, &i->arg[1], &rv32_private_reg1));
+            err = fix_arg(m, &i->arg[0], &rv32_private_reg0);
+            if (err) return err;
+            err = fix_arg(m, &i->arg[1], &rv32_private_reg1);
+            if (err) return err;
             rv32_reg rd = i->to.as.location->as.reg;
             rv32_reg rs1 = i->arg[0].as.location->as.reg;
             rv32_reg rs2 = i->arg[1].as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XOR(rd, rs1, rs2)));
-            ERR_CHECK(emit(m, RV32_SNEZ(rd, rd)));
+            err = emit(m, RV32_XOR(rd, rs1, rs2));
+            if (err) return err;
+            err = emit(m, RV32_SNEZ(rd, rd));
+            if (err) return err;
         } break;
         case IR_OPCODE_SLT:
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
@@ -300,7 +331,8 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
             i->arg[1] = tmp;
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
             rv32_reg rd = i->to.as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
+            err = emit(m, RV32_XORI(rd, rd, 1));
+            if (err) return err;
         } break;
         case IR_OPCODE_ULE: {
             IRReference tmp = i->arg[0];
@@ -308,17 +340,20 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
             i->arg[1] = tmp;
             EMIT_BINOP_IMM(m, i, RV32_SLTU, RV32_SLTIU);
             rv32_reg rd = i->to.as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
+            err = emit(m, RV32_XORI(rd, rd, 1));
+            if (err) return err;
         } break;
         case IR_OPCODE_SGE: {
             EMIT_BINOP_IMM(m, i, RV32_SLT, RV32_SLTI);
             rv32_reg rd = i->to.as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
+            err = emit(m, RV32_XORI(rd, rd, 1));
+            if (err) return err;
         } break;
         case IR_OPCODE_UGE: {
             EMIT_BINOP_IMM(m, i, RV32_SLTU, RV32_SLTIU);
             rv32_reg rd = i->to.as.location->as.reg;
-            ERR_CHECK(emit(m, RV32_XORI(rd, rd, 1)));
+            err = emit(m, RV32_XORI(rd, rd, 1));
+            if (err) return err;
         } break;
 
         /* Memory */
@@ -349,7 +384,8 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
                     /* the copy source is a register */
                     if (i->to.as.location->as.reg != loc->as.reg) {
                         /* the copy destination is not equal to the copy source */
-                        ERR_CHECK(emit(m, RV32_MV(i->to.as.location->as.reg, loc->as.reg)));
+                        err = emit(m, RV32_MV(i->to.as.location->as.reg, loc->as.reg));
+                        if (err) return err;
                     }
                 }
                 else if (i->arg[0].type == IR_REF_TYPE_LOCATION &&
@@ -360,7 +396,8 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
                 }
                 else if (i->arg[0].type == IR_REF_TYPE_I32) {
                     /* the copy source is a constant */
-                    ERR_CHECK(emit_li(m, i->to.as.location->as.reg, i->arg[0].as.i32));
+                    err = emit_li(m, i->to.as.location->as.reg, i->arg[0].as.i32);
+                    if (err) return err;
                 }
                 else assert(0);
             }
@@ -374,14 +411,18 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
         case IR_OPCODE_PUSH: {
             assert(i->arg[0].type == IR_REF_TYPE_LOCATION);
             assert(i->arg[0].as.location->type == LOCATION_TYPE_REGISTER);
-            ERR_CHECK(emit(m, RV32_ADDI(SP, SP, -4)));
-            ERR_CHECK(emit(m, RV32_SW(i->arg[0].as.location->as.reg, 0, SP)));
+            err = emit(m, RV32_ADDI(SP, SP, -4));
+            if (err) return err;
+            err = emit(m, RV32_SW(i->arg[0].as.location->as.reg, 0, SP));
+            if (err) return err;
         } break;
         case IR_OPCODE_POP: {
             assert(i->to.type == IR_REF_TYPE_LOCATION);
             assert(i->to.as.location->type == LOCATION_TYPE_REGISTER);
-            ERR_CHECK(emit(m, RV32_LW(i->to.as.location->as.reg, 0, SP)));
-            ERR_CHECK(emit(m, RV32_ADDI(SP, SP, 4)));
+            err = emit(m, RV32_LW(i->to.as.location->as.reg, 0, SP));
+            if (err) return err;
+            err = emit(m, RV32_ADDI(SP, SP, 4));
+            if (err) return err;
         } break;
         case IR_OPCODE_CALL: {
             assert(i->arg[0].type == IR_REF_TYPE_FUNCTION);
@@ -391,20 +432,21 @@ static AOTErr_t emitins(AOTModule *m, IRInstr *i) {
                 imm = m->function_text_start[id] - m->offset;
             } else {
                 RV32JumpPatch *patch = malloc(sizeof(struct RV32JumpPatch));
-                if (patch == NULL) return AOT_ERR;
+                if (patch == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
                 patch->target_type = JUMP_TO_FUNCTION;
                 patch->target_id = id;
                 patch->type = JAL_PATCH_TYPE;
                 patch->jump_instr = m->offset;
                 list_add_tail(&patch->link, &m->patch_list);
             }
-            ERR_CHECK(emit(m, RV32_JAL(RA, imm)));
+            err = emit(m, RV32_JAL(RA, imm));
+            if (err) return err;
         } break;
         default:
             fprintf(stderr, "Error: opcode %d not implemented!\n", i->op);
             assert(0);
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 /*
@@ -476,36 +518,45 @@ static unsigned int get_stack_frame_size(IRFunction *fn) {
     return frame;
 }
 
-static AOTErr_t emit_ret0(AOTModule *m, IRFunction *fn, unsigned int frame) {
+static int emit_ret0(AOTModule *m, IRFunction *fn, unsigned int frame) {
 
+    int err;
     /* Restore callee-saved registers */
     for (unsigned int i = 0, off = 0; i < RV32_NUM_REG; i++) {
         if (fn->regs_to_preserve[i]) {
-            if (emit(m, RV32_LW(i, off, SP))) return AOT_ERR;
+            err = emit(m, RV32_LW(i, off, SP));
+            if (err) return err;
             off += 4;
         }
     }
 
     /* Pop of the stack frame */
     if (frame <= 2047) {
-        if (emit(m, RV32_ADDI(SP, SP, frame))) return AOT_ERR;
+        err = emit(m, RV32_ADDI(SP, SP, frame));
+        if (err) return err;
     } else {
-        if (emit_li(m, T6, frame)) return AOT_ERR;
-        if (emit(m, RV32_SUB(SP, SP, T6))) return AOT_ERR;
+        err = emit_li(m, T6, frame);
+        if (err) return err;
+        err = emit(m, RV32_SUB(SP, SP, T6));
+        if (err) return err;
     }
 
     /* Restore the saved FP */
-    if (emit(m, RV32_LW(RA, 4, FP))) return AOT_ERR;
+    err = emit(m, RV32_LW(RA, 4, FP));
+    if (err) return err;
     /* Restore the saved RA */
-    if (emit(m, RV32_LW(FP, 0, FP))) return AOT_ERR;
+    err = emit(m, RV32_LW(FP, 0, FP));
+    if (err) return err;
     /* Emit ret */
-    if (emit(m, RV32_RET)) return AOT_ERR;
+    err = emit(m, RV32_RET);
+    if (err) return err;
 
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_jmp(AOTModule *m, IRBlock *block) {
+static int emit_jmp(AOTModule *m, IRBlock *block) {
 
+    int err;
     IRBlock *block_next = NULL;
     struct list_head *next = list_next(&block->link);
     if (next != NULL) {
@@ -524,20 +575,23 @@ static AOTErr_t emit_jmp(AOTModule *m, IRBlock *block) {
             /* jump_target hasn't already been processed,
              * let's create a patch and fix it later */
             RV32JumpPatch *patch = malloc(sizeof(struct RV32JumpPatch));
-            if (patch == NULL) return AOT_ERR;
+            if (patch == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
             patch->target_type = JUMP_TO_BLOCK;
             patch->target_id = jump_target->id;
             patch->type = J_PATCH_TYPE;
             patch->jump_instr = m->offset;
             list_add_tail(&patch->link, &m->patch_list);
         }
-        if (emit(m, RV32_J(imm))) return AOT_ERR;
+        err = emit(m, RV32_J(imm));
+        if (err) return err;
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
-static AOTErr_t emit_jnz(AOTModule *m, IRBlock *block) {
-    if (fix_arg(m, &block->jump.arg, &rv32_private_reg0)) return AOT_ERR;
+static int emit_jnz(AOTModule *m, IRBlock *block) {
+    int err;
+    err = fix_arg(m, &block->jump.arg, &rv32_private_reg0);
+    if (err) return err;
     IRBlock *block_next = NULL;
     struct list_head *next = list_next(&block->link);
     if (next != NULL) {
@@ -553,14 +607,15 @@ static AOTErr_t emit_jnz(AOTModule *m, IRBlock *block) {
             imm = jump_target->text_start - m->offset;
         } else {
             RV32JumpPatch *patch = malloc(sizeof(struct RV32JumpPatch));
-            if (patch == NULL) return AOT_ERR;
+            if (patch == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
             patch->target_type = JUMP_TO_BLOCK;
             patch->target_id = jump_target->id;
             patch->type = BEQZ_PATCH_TYPE;
             patch->jump_instr = m->offset;
             list_add_tail(&patch->link, &m->patch_list);
         }
-        if (emit(m, RV32_BEQZ(rs1, imm))) return AOT_ERR;
+        err = emit(m, RV32_BEQZ(rs1, imm));
+        if (err) return err;
     } else if (block_next == block->succ[1]) {
         /* The next block to be processed is the 'else' block, so jump
          * to the 'then' block is the argument of jnz is not equal to zero */
@@ -571,20 +626,21 @@ static AOTErr_t emit_jnz(AOTModule *m, IRBlock *block) {
             imm = jump_target->text_start - m->offset;
         } else {
             RV32JumpPatch *patch = malloc(sizeof(struct RV32JumpPatch));
-            if (patch == NULL) return AOT_ERR;
+            if (patch == NULL) return WASMC_ERR_OUT_OF_HEAP_MEMORY;
             patch->target_type = JUMP_TO_BLOCK;
             patch->target_id = jump_target->id;
             patch->type = BNEZ_PATCH_TYPE;
             patch->jump_instr = m->offset;
             list_add_tail(&patch->link, &m->patch_list);
         }
-        if (emit(m, RV32_BNEZ(rs1, imm))) return AOT_ERR;
+        err = emit(m, RV32_BNEZ(rs1, imm));
+        if (err) return err;
     } else {
         /* The next block to be processed after a block ending with a jnz
          * must be a the 'else' block or the 'then' block of jnz. */
         assert(0);
     }
-    return AOT_OK;
+    return WASMC_OK;
 }
 
 static void free_patch_list(struct list_head *patch_list) {
@@ -595,31 +651,39 @@ static void free_patch_list(struct list_head *patch_list) {
     }
 }
 
-AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn) {
+int rv32_emit_text(AOTModule *m, IRFunction *fn) {
 
+    int err;
     m->function_text_start[fn->wasm_func->id] = m->offset;
     backpatch(&m->patch_list, JUMP_TO_FUNCTION, fn->wasm_func->id, m->offset);
 
     /* Push FP on the stack (saved FP) */
-    if (emit(m, RV32_SW(FP, -8, SP))) goto ERROR;
+    err = emit(m, RV32_SW(FP, -8, SP));
+    if (err) goto ERROR;
     /* Push RA on the stack (saved RA) */
-    if (emit(m, RV32_SW(RA, -4, SP))) goto ERROR;
+    err = emit(m, RV32_SW(RA, -4, SP));
+    if (err) goto ERROR;
     /* Update FP, now it point to the saved FP */
-    if (emit(m, RV32_ADDI(FP, SP, -8))) goto ERROR;
+    err = emit(m, RV32_ADDI(FP, SP, -8));
+    if (err) goto ERROR;
 
     unsigned int frame = get_stack_frame_size(fn);
     /* Allocate the remaining portion of the stack frame */
     if (frame <= 2047) {
-        if (emit(m, RV32_ADDI(SP, SP, -1 * frame))) goto ERROR;
+        err = emit(m, RV32_ADDI(SP, SP, -1 * frame));
+        if (err) goto ERROR;
     } else {
-        if (emit_li(m, T6, frame)) goto ERROR;
-        if (emit(m, RV32_SUB(SP, SP, T6))) goto ERROR;
+        err = emit_li(m, T6, frame);
+        if (err) goto ERROR;
+        err = emit(m, RV32_SUB(SP, SP, T6));
+        if (err) goto ERROR;
     }
 
     /* Store callee-saved registers used by this function on the stack frame */
     for (unsigned int i = 0, off = 0; i < RV32_NUM_REG; i++) {
         if (fn->regs_to_preserve[i]) {
-            if (emit(m, RV32_SW(i, off, SP))) goto ERROR;
+            err = emit(m, RV32_SW(i, off, SP));
+            if (err) goto ERROR;
             off += 4;
         }
     }
@@ -630,11 +694,13 @@ AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn) {
         backpatch(&m->patch_list, JUMP_TO_BLOCK, block->id, block->text_start);
         IRInstr *ins;
         list_for_each_entry(ins, &block->instr_list, link) {
-            if (emitins(m, ins)) goto ERROR;
+            err = emitins(m, ins);
+            if (err) goto ERROR;
         }
         switch (block->jump.type) {
             case IR_JUMP_TYPE_HALT:
-                if (emit(m, RV32_EBREAK)) goto ERROR;
+                err = emit(m, RV32_EBREAK);
+                if (err) goto ERROR;
                 break;
             case IR_JUMP_TYPE_RET0:
                 emit_ret0(m, fn, frame);
@@ -650,9 +716,9 @@ AOTErr_t rv32_emit_text(AOTModule *m, IRFunction *fn) {
         }
     }
 
-    return AOT_OK;
+    return WASMC_OK;
 
 ERROR:
     free_patch_list(&m->patch_list);
-    return AOT_ERR;
+    return err;
 }

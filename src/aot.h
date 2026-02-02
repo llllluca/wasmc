@@ -5,11 +5,6 @@
 #include "wasm.h"
 #include "listx.h"
 
-typedef enum AOTErr_t {
-    AOT_OK,
-    AOT_ERR,
-} AOTErr_t;
-
 typedef enum AOTSectionType {
     AOT_SECTION_TYPE_TARGET_INFO = 0,
     AOT_SECTION_TYPE_INIT_DATA   = 1,
@@ -17,7 +12,7 @@ typedef enum AOTSectionType {
     AOT_SECTION_TYPE_FUNCTION    = 3,
     AOT_SECTION_TYPE_EXPORT      = 4,
     AOT_SECTION_TYPE_RELOCATION  = 5,
-    AOT_REQUIRED_SECTION_COUNT   = 6,
+    AOT_REQUIRED_SECTION_COUNT,
     AOT_SECTION_TYPE_CUSTOM      = 100,
 } AOTSectionType;
 
@@ -107,13 +102,13 @@ typedef struct AOTModule {
     uint8_t **function_text_start;
 } AOTModule;
 
-AOTErr_t aot_module_init(AOTModule *aot_mod, uint8_t *aot_buf,
+int aot_module_init(AOTModule *aot_mod, uint8_t *aot_buf,
                          unsigned int aot_len, WASMModule *w);
-AOTErr_t emit_target_info(AOTModule *m);
-AOTErr_t emit_init_data(AOTModule *m);
-AOTErr_t emit_function(AOTModule *m);
-AOTErr_t emit_export(AOTModule *m);
-AOTErr_t emit_relocation(AOTModule *m);
+int emit_target_info(AOTModule *m);
+int emit_init_data(AOTModule *m);
+int emit_function(AOTModule *m);
+int emit_export(AOTModule *m);
+int emit_relocation(AOTModule *m);
 void aot_module_cleanup(AOTModule *m);
 
 #endif

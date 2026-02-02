@@ -4,13 +4,6 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-typedef enum WASMErr_t {
-    /* no error */
-    WASM_OK = 0,
-    /* generic error */
-    WASM_ERR,
-} WASMErr_t;
-
 #define WASM_MAGIC_NUMBER 0x6d736100
 #define WASM_VERSION 1
 
@@ -246,11 +239,11 @@ typedef enum  __attribute__ ((__packed__)) WASMBlocktype {
      (t) == WASM_BLOCKTYPE_I32 || (t) == WASM_BLOCKTYPE_I64 || \
      (t) == WASM_BLOCKTYPE_F32 || (t) == WASM_BLOCKTYPE_F64)
 
-WASMErr_t read_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
-WASMErr_t read_u8(uint8_t **buf, uint8_t *buf_end, uint8_t *out);
-WASMErr_t readULEB128_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
-WASMErr_t readILEB128_i32(uint8_t **buf, uint8_t *buf_end, int32_t *out);
-WASMErr_t wasm_decode(WASMModule *m, uint8_t *start, uint32_t len);
+int read_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
+int read_u8(uint8_t **buf, uint8_t *buf_end, uint8_t *out);
+int readULEB128_u32(uint8_t **buf, uint8_t *buf_end, uint32_t *out);
+int readILEB128_i32(uint8_t **buf, uint8_t *buf_end, int32_t *out);
+int wasm_decode(WASMModule *m, uint8_t *start, uint32_t len);
 WASMValtype wasm_valtype_of(WASMFunction *f, uint32_t localidx);
 void wasm_free(WASMModule *m);
 

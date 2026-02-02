@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     fclose(wasm_file);
 
     int len;
-    len = compile(wasm_buf, wasm_len, aot_buf, AOT_LEN);
+    len = wasmc_compile(wasm_buf, wasm_len, aot_buf, AOT_LEN);
     if (len < 0) {
         fprintf(stderr, "Error: compilation failure\n");
         return EXIT_FAILURE;
