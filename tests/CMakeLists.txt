@@ -1,7 +1,12 @@
-include_directories(../src/)
-
 # ${CMAKE_SOURCE_DIR} is the project root directory
 set(TESTS_DIR ${CMAKE_SOURCE_DIR}/tests)
+
+# Rebuild wasmc with address sanitizer
+add_executable(wasmc_asan ${CMAKE_SOURCE_DIR}/apps/wasmc.c)
+target_include_directories(wasmc_asan PRIVATE ${PROJECT_SOURCE_DIR}/include/wasmc/)
+target_link_libraries(wasmc_asan wasmc_lib)
+target_compile_options(wasmc_asan PRIVATE -fsanitize=address)
+target_link_options(wasmc_asan PRIVATE -fsanitize=address)
 
 # the working directory in which the tests
 # are executed is wasmc/build/tests/
@@ -18,8 +23,13 @@ function(test name expected_result iwasm_args)
         PROPERTY PASS_REGULAR_EXPRESSION ${expected_result})
 
     add_test(
-        NAME memcheck_${name}
+        NAME memcheck_valgrind_${name}
         COMMAND sh ${TESTS_DIR}/valgrind_test.sh ${TESTS_DIR}/wasm/${name}.wasm)
+
+    add_test(
+        NAME memcheck_asan_${name}
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/wasmc_asan ${TESTS_DIR}/wasm/${name}.wasm)
+
 endfunction()
 
 # Function to test a WASM module generated from a handwritten WAT file
