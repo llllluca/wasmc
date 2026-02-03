@@ -16,5 +16,7 @@ dependencies:
   #   public: true
   wamr:
     git: https://github.com/bytecodealliance/wasm-micro-runtime.git
-    version: WAMR-2.4.2
-
+    version: WAMR-2.4.4
+  wasmc:
+    override_path: "../../"
+    #version: "^2"

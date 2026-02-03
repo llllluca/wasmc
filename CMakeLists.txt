@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
+
+if(ESP_PLATFORM)
+  include (${COMPONENT_DIR}/src/CMakeLists.txt)
+  return()
+endif()
+
 project(wasmc LANGUAGES C)
 
 #Debug is the default build type

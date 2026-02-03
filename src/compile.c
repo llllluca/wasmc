@@ -738,6 +738,9 @@ static int compile_end(CompileCtx *ctx) {
     case CTRL_STACK_ENTRY_LOOP:
         err = compile_end_loop(ctx, top);
         break;
+    default:
+        assert(0);
+        err = WASMC_OK;
     }
 
     free_ctrl(top);

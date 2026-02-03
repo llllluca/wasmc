@@ -2,7 +2,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.4.1
+    version: 5.5.2
   wamr:
     component_hash: a90fdfb574b9a209350da2d8f26efc2438e4304a8b9d7e05281d526cc7a76090
     dependencies:
@@ -20,9 +20,16 @@ dependencies:
     - esp32p4
     - esp32c5
     version: 6450d872995e84a5febeac1254cdd80dad3b94c1
+  wasmc:
+    dependencies: []
+    source:
+      path: /home/luca/desktop/wasmc
+      type: local
+    version: '*'
 direct_dependencies:
 - idf
 - wamr
-manifest_hash: de35dd47020d2511427fc647f30b3710d1c79e9b2da2ad3c6ec16fd126bf511d
+- wasmc
+manifest_hash: 9eca687508ab39ed1737fd099aeea330c3dfb54679827c7aa5237e66afc356aa
 target: esp32c3
 version: 2.0.0

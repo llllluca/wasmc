@@ -1,27 +1,21 @@
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "wasm_export.h"
 #include "bh_platform.h"
 #include "esp_task_wdt.h"
-
-#include "compile.h"
-#include "wasm.h"
-#include "aot.h"
-
-//#include "heapsort.h"
-//#include "matrix.h"
-#include "sieve.h"
-
-uint8_t *wasm = NULL;
-uint32_t wasm_len = 0;
-
-uint8_t *aot = NULL;
-uint32_t aot_len = 0;
-
 #include "esp_log.h"
 
+#include "wasmc.h"
+#include "fib2-Os.h"
+
+#define WASM fib2_Os_wasm
+#define WASM_LEN fib2_Os_wasm_len
+
+#define AOT_MAX_LEN (16 * 1024)
+uint8_t aot[AOT_MAX_LEN];
+uint32_t aot_len;
+
 #define IWASM_MAIN_STACK_SIZE 5120
+char wamr_error_buf[128];
 
 #define LOG_TAG "wamr"
 
@@ -39,18 +33,18 @@ static void app_instance_main(wasm_module_inst_t module_inst) {
         wasm_application_execute_func(module_inst, func, argc, argv); 
         uint64_t end = esp_timer_get_time();
         if ((exception = wasm_runtime_get_exception(module_inst))) {
-            printf("%s\n", exception);
+            ESP_LOGE(LOG_TAG, "%s", exception);
         }
         uint64_t time = end - start;
         total += time;
         times[i] = time;
-        printf("%u: %f milliseconds\n", i, (double) time / 1000);
+        ESP_LOGI(LOG_TAG, "%u: %f milliseconds", i, (double) time / 1000);
         // wait 100 millisecond
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-    printf("total: %f milliseconds\n", (double) total / 1000);
+    ESP_LOGI(LOG_TAG, "total: %f milliseconds", (double) total / 1000);
     double mean = total / ITERATION;
-    printf("mean: %f milliseconds\n", mean / 1000);
+    ESP_LOGI(LOG_TAG, "mean: %f milliseconds", mean / 1000);
 
     double sum = 0;
     for (unsigned int i = 0; i < ITERATION; i++) {
@@ -58,15 +52,109 @@ static void app_instance_main(wasm_module_inst_t module_inst) {
         sum += diff * diff;
     }
     double std = sqrt(sum / ITERATION);
-    printf("std: %f milliseconds\n", std / 1000);
+    ESP_LOGI(LOG_TAG, "std: %f milliseconds", std / 1000);
 }
 
-void *iwasm_main(void *arg) {
-    (void)arg; /* unused */
-    /* setup variables for instantiating and running the wasm module */
+void wamr_wasm_interpreter(void) {
+
     wasm_module_t wasm_module = NULL;
     wasm_module_inst_t wasm_module_inst = NULL;
-    char error_buf[128];
+
+    ESP_LOGI(LOG_TAG, "Run wamr with interpreter");
+
+    /* load WASM module */
+    wasm_module = wasm_runtime_load(
+        WASM,
+        WASM_LEN,
+        wamr_error_buf,
+        sizeof(wamr_error_buf));
+
+    if (!wasm_module) {
+        ESP_LOGE(LOG_TAG, "Error in wasm_runtime_load: %s", wamr_error_buf);
+        return;
+    }
+
+    uint32_t stack_size = 1024;
+    uint32_t heap_size  = 0;
+    ESP_LOGI(LOG_TAG, "Instantiate WASM runtime");
+    wasm_module_inst = wasm_runtime_instantiate(
+        wasm_module,
+        stack_size,
+        heap_size,
+        wamr_error_buf,
+        sizeof(wamr_error_buf));
+
+    if (!wasm_module_inst) {
+        ESP_LOGE(LOG_TAG, "Error while instantiating: %s", wamr_error_buf);
+        goto UNLOAD;
+    }
+
+    ESP_LOGI(LOG_TAG, "run main() of the application");
+    app_instance_main(wasm_module_inst);
+
+    /* destroy the module instance */
+    ESP_LOGI(LOG_TAG, "Deinstantiate WASM runtime");
+    wasm_runtime_deinstantiate(wasm_module_inst);
+
+UNLOAD:
+    /* unload the module */
+    ESP_LOGI(LOG_TAG, "Unload WASM module");
+    wasm_runtime_unload(wasm_module);
+}
+
+void wamr_aot_runtime(void) {
+
+    wasm_module_t wasm_module = NULL;
+    wasm_module_inst_t wasm_module_inst = NULL;
+
+    ESP_LOGI(LOG_TAG, "Run wamr with AoT");
+
+    /* load WASM module */
+    wasm_module = wasm_runtime_load(
+            aot,
+            aot_len,
+            wamr_error_buf, 
+        sizeof(wamr_error_buf));
+
+    if (!wasm_module) {
+        ESP_LOGE(LOG_TAG, "Error in wasm_runtime_load: %s", wamr_error_buf);
+        return;
+    }
+
+    ESP_LOGI(LOG_TAG, "Instantiate WASM runtime");
+
+    uint32_t stack_size = 1024;
+    uint32_t heap_size  = 0;
+    wasm_module_inst = wasm_runtime_instantiate(
+        wasm_module,
+        stack_size,
+        heap_size,
+        wamr_error_buf,
+        sizeof(wamr_error_buf));
+
+    if (!wasm_module_inst) {
+        ESP_LOGE(LOG_TAG, "Error while instantiating: %s", wamr_error_buf);
+        goto UNLOAD;
+    }
+
+    ESP_LOGI(LOG_TAG, "run main() of the application");
+    app_instance_main(wasm_module_inst);
+
+    /* destroy the module instance */
+    ESP_LOGI(LOG_TAG, "Deinstantiate WASM runtime");
+    wasm_runtime_deinstantiate(wasm_module_inst);
+
+UNLOAD:
+    /* unload the module */
+    ESP_LOGI(LOG_TAG, "Unload WASM module");
+    wasm_runtime_unload(wasm_module);
+}
+
+
+
+void *wamr_main(void *arg) {
+    (void)arg; /* unused */
+    /* setup variables for instantiating and running the wasm module */
 
     /* configure memory allocation */
     RuntimeInitArgs init_args;
@@ -84,91 +172,11 @@ void *iwasm_main(void *arg) {
     }
 
 #if WASM_ENABLE_INTERP != 0
-    ESP_LOGI(LOG_TAG, "Run wamr with interpreter");
-
-    /* load WASM module */
-    wasm_module = wasm_runtime_load(
-        wasm,
-        wasm_len,
-        error_buf,
-        sizeof(error_buf));
-
-    if (!wasm_module) {
-        ESP_LOGE(LOG_TAG, "Error in wasm_runtime_load: %s", error_buf);
-        goto fail1interp;
-    }
-
-    ESP_LOGI(LOG_TAG, "Instantiate WASM runtime");
-    wasm_module_inst = wasm_runtime_instantiate(
-        wasm_module,
-        32 * 1024, // stack size
-        32 * 1024, // heap size
-        error_buf,
-        sizeof(error_buf));
-
-    if (!wasm_module_inst) {
-        ESP_LOGE(LOG_TAG, "Error while instantiating: %s", error_buf);
-        goto fail2interp;
-    }
-
-    ESP_LOGI(LOG_TAG, "run main() of the application");
-    app_instance_main(wasm_module_inst);
-
-    /* destroy the module instance */
-    ESP_LOGI(LOG_TAG, "Deinstantiate WASM runtime");
-    wasm_runtime_deinstantiate(wasm_module_inst);
-
-fail2interp:
-    /* unload the module */
-    ESP_LOGI(LOG_TAG, "Unload WASM module");
-    wasm_runtime_unload(wasm_module);
-
-fail1interp:
+    wamr_wasm_interpreter();
 #endif
 
 #if WASM_ENABLE_AOT != 0
-    ESP_LOGI(LOG_TAG, "Run wamr with AoT");
-
-    /* load WASM module */
-    wasm_module = wasm_runtime_load(
-            aot,
-            aot_len,
-            error_buf, 
-        sizeof(error_buf));
-
-    if (!wasm_module) {
-        ESP_LOGE(LOG_TAG, "Error in wasm_runtime_load: %s", error_buf);
-        goto fail1aot;
-    }
-
-    ESP_LOGI(LOG_TAG, "Instantiate WASM runtime");
-
-    uint32_t stack_size = 1024;
-    uint32_t heap_size  = 0;
-    wasm_module_inst = wasm_runtime_instantiate(
-        wasm_module,
-        stack_size,
-        heap_size,
-        error_buf,
-        sizeof(error_buf));
-
-    if (!wasm_module_inst) {
-        ESP_LOGE(LOG_TAG, "Error while instantiating: %s", error_buf);
-        goto fail2aot;
-    }
-
-    ESP_LOGI(LOG_TAG, "run main() of the application");
-    app_instance_main(wasm_module_inst);
-
-    /* destroy the module instance */
-    ESP_LOGI(LOG_TAG, "Deinstantiate WASM runtime");
-    wasm_runtime_deinstantiate(wasm_module_inst);
-
-fail2aot:
-    /* unload the module */
-    ESP_LOGI(LOG_TAG, "Unload WASM module");
-    wasm_runtime_unload(wasm_module);
-fail1aot:
+    wamr_aot_runtime();
 #endif
 
     /* destroy runtime environment */
@@ -177,25 +185,22 @@ fail1aot:
     return NULL;
 }
 
-extern Target rv32;
-
 void app_main(void) {
 
     ESP_ERROR_CHECK(esp_task_wdt_deinit());
 
-    //wasm = heapsort_wasm;
-    //wasm_len = heapsort_wasm_len;
-
-    //wasm = matrix_wasm;
-    //wasm_len = matrix_wasm_len;
-
-    wasm = sieve_wasm;
-    wasm_len = sieve_wasm_len;
-
-    WASMModule m;
-    load_wasm_module(&m, wasm, wasm_len);
-    compile(&m, &rv32, &aot, &aot_len);
-    free_wasm_module(&m);
+    aot_len = wasmc_compile(WASM, WASM_LEN, aot, AOT_MAX_LEN);
+    switch (aot_len) {
+    case WASMC_ERR_MALFORMED_WASM_MODULE:
+        ESP_LOGE(LOG_TAG, "Error: compilation failure, malformed WebAssembly module");
+        return;
+    case WASMC_ERR_OUT_OF_HEAP_MEMORY:
+        ESP_LOGE(LOG_TAG, "Error: compilation failure, out of heap memory");
+        return;
+    case WASMC_ERR_AOT_BUFFER_TOO_SMALL:
+        ESP_LOGE(LOG_TAG, "Error: compilation failure, the aot buffer is too small");
+        return;
+    }
 
     pthread_attr_t tattr;
     pthread_attr_init(&tattr);
@@ -204,13 +209,11 @@ void app_main(void) {
 
     pthread_t t;
     int res;
-    res = pthread_create(&t, &tattr, iwasm_main, (void *)NULL);
+    res = pthread_create(&t, &tattr, wamr_main, (void *)NULL);
     assert(res == 0);
 
     res = pthread_join(t, NULL);
     assert(res == 0);
-
-    free(aot);
 
     ESP_LOGI(LOG_TAG, "Exiting...");
 }

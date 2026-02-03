@@ -97,10 +97,10 @@ void ir_print_ref(IRReference r, FILE *f) {
         fprintf(f, "UNDEFINED");
         break;
     case IR_REF_TYPE_TMP:
-        fprintf(f, "%%t%u", r.as.tmp_id);
+        fprintf(f, "%%t%"PRIu32, r.as.tmp_id);
         break;
     case IR_REF_TYPE_PHI:
-        fprintf(f, "%%t%u", r.as.phi->id);
+        fprintf(f, "%%t%"PRIu32, r.as.phi->id);
         break;
     case IR_REF_TYPE_I32:
         printf("%"PRIi32, r.as.i32);
