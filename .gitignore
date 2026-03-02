@@ -1,4 +1,5 @@
 .ccls-cache/
+.ccls
 wasmc
 tests/a.aot
 build/

@@ -7,7 +7,7 @@
 
 #define WASMC_OK 0
 
-char *rname[] = {
+static const char *rname[] = {
     [ZERO] = "zero", [RA] = "ra",   [SP] = "sp",   [GP] = "gp", [TP] = "tp",
     [T0] = "t0",     [T1] = "t1",   [T2] = "t2",   [FP] = "fp", [S1] = "s1",
     [A0] = "a0",     [A1] = "a1",   [A2] = "a2",   [A3] = "a3", [A4] = "a4",

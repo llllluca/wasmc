@@ -1,19 +1,17 @@
-//https://en.wikipedia.org/wiki/Heapsort
-#define LENGTH 10000
-
+#define LENGTH 15000
 #define IM 139968
 #define IA 3877
 #define IC 29573
 
-static int
-gen_random()
-{
+int x[LENGTH];
+
+/* Linear Congruential Generator */
+static int gen_random() {
     static long last = 42;
     return last = (last * IA + IC) % IM;
 }
 
-static void
-my_heapsort(int n, int* ra) {
+static void heapsort(int n, int* ra) {
     int    i, j;
     int    ir = n;
     int    l = (n >> 1) + 1;
@@ -50,17 +48,10 @@ my_heapsort(int n, int* ra) {
     }
 }
 
-int ary[LENGTH];
-
-int main()
-{
-    int n = LENGTH;
-    int res;
-
-    for (int j = 0; j < n; j++) {
-        ary[j] = gen_random();
+int main() {
+    for (int j = 0; j < LENGTH; j++) {
+        x[j] = gen_random();
     }
-    my_heapsort(n, ary);
-    res = ary[n-1];
-    return res;
+    heapsort(LENGTH, x);
+    return x[LENGTH-1];
 }

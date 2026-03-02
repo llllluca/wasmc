@@ -1,4 +1,4 @@
-#define N 16384
+#define N 65536 //2^16
 
 void* memset(void* ptr, int value, unsigned long num) {
     unsigned char* p = ptr;

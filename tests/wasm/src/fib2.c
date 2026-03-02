@@ -6,7 +6,7 @@ unsigned long fib2(unsigned long n) {
 }
 
 int main() {
-    int n = 10;
+    int n = 22;
     int res = fib2(n);
     return res;
 }
