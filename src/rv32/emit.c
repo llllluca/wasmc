@@ -256,6 +256,9 @@ static int emitins(AOTModule *m, IRInstr *i) {
         case IR_OPCODE_ASHR:
             EMIT_BINOP_IMM(m, i, RV32_SRA, RV32_SRAI);
             break;
+        case IR_OPCODE_LSHR:
+            EMIT_BINOP_IMM(m, i, RV32_SRL, RV32_SRLI);
+            break;
         case IR_OPCODE_SHL:
             EMIT_BINOP_IMM(m, i, RV32_SLL, RV32_SLLI);
             break;

@@ -1201,7 +1201,7 @@ static int compile_instr(CompileCtx *ctx, uint8_t opcode) {
     case WASM_OPCODE_I32_SHR_S:
         return compile_binop(ctx, IR_OPCODE_ASHR);
     case WASM_OPCODE_I32_SHR_U:
-        return compile_binop(ctx, IR_OPCODE_ASHR);
+        return compile_binop(ctx, IR_OPCODE_LSHR);
 
     /* unknown opcode */
     default:
