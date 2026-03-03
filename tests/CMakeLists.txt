@@ -151,10 +151,24 @@ test_c(knapsack-O1 "0x1afe1:i32")
 test_c(knapsack-O2 "0x1afe1:i32")
 test_c(knapsack-O3 "0x1afe1:i32")
 test_c(knapsack-Os "0x1afe1:i32")
-
 test_c(crc32-O0 "0xe801513f:i32")
 test_c(crc32-O1 "0xe801513f:i32")
 test_c(crc32-O2 "0xe801513f:i32")
 test_c(crc32-O3 "0xe801513f:i32")
 test_c(crc32-Os "0xe801513f:i32")
+
+test_c(edit-distance-O0 "0x32:i32")
+test_c(edit-distance-O1 "0x32:i32")
+test_c(edit-distance-O2 "0x32:i32")
+test_c(edit-distance-Os "0x32:i32")
+
+test_c(floyd-warshall-O0 "0x0:i32")
+test_c(floyd-warshall-O1 "0x0:i32")
+test_c(floyd-warshall-O2 "0x0:i32")
+test_c(floyd-warshall-Os "0x0:i32")
+
+test_c(gauss-elim-O0 "0x1:i32")
+test_c(gauss-elim-O1 "0x1:i32")
+test_c(gauss-elim-O2 "0x1:i32")
+test_c(gauss-elim-Os "0x1:i32")
 

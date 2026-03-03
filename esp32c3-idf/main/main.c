@@ -6,10 +6,10 @@
 #include "esp_heap_caps.h"
 
 #include "wasmc.h"
-#include "benchmarks/crc32-Os.h"
+#include "benchmarks/fib2-Os.h"
 
-#define WASM crc32_Os_wasm
-#define WASM_LEN crc32_Os_wasm_len
+#define WASM fib2_Os_wasm
+#define WASM_LEN fib2_Os_wasm_len
 
 #define AOT_MAX_LEN (16 * 1024)
 uint8_t aot[AOT_MAX_LEN];
