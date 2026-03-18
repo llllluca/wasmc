@@ -23,22 +23,22 @@ cd ..
 
 `wasmc` usage:
 ```bash
-./build/wasmc tests/wasm/fib2.wasm
+./build/apps/wasmc -o fib2.aot tests/wasm/fib2-Os.wasm
 ```
 
 `wasmc` outputs a file in the AOT format, the deafult file name is `a.aot`.
 The AOT (Ahead Of Time) format is not a stardard file format for executables, it is used and developed for the [WAMR][WAMR] project.
 The AOT format is designed to facilitate compilation from a WASM module to machine code.
 To run an AOT file, one need to install the WAMR runtime.
-`wasmc` outputs an AOT file for the riscv32 machine architecture, the only way to execute an AOT file for such architure on a x86-64 machine is to cross compile the WAMR runtime for riscv32 and execute the AOT file with the cross compiled WAMR runtime inside QEMU.
+`wasmc` outputs an AOT file for the 32-bit RISC-V architecture, the only way to execute an AOT file for such architecture on a x86-64 machine is to cross compile the WAMR runtime for 32-bit RISC-V and execute the AOT file with the cross compiled WAMR runtime inside QEMU.
 
-In order to cross compile the WAMR runtime, install the riscv32 toolchain binaries (it may take a while):
+In order to cross compile the WAMR runtime, install the 32-bit RISC-V toolchain binaries (it may take a while):
 ```bash
 wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2025.11.27/riscv32-glibc-ubuntu-24.04-gcc.tar.xz
 sudo tar xf riscv32-glibc-ubuntu-24.04-gcc.tar.xz -C /opt/
 sudo chown root:root -R /opt/riscv/
 ```
-Otherwise compile the riscv32 toolchain from source following the instructions at [link][riscv-toolchain] (it takes long).
+Otherwise compile the 32-bit RISC-V toolchain from source following the instructions at [link][riscv-toolchain] (it takes long).
  In both cases add `/opt/riscv/bin` to the `$PATH` environment variable.
 
 Cross compile the WAMR runtime:
@@ -57,12 +57,16 @@ Then place the `iwasm-2.4.4` executable in a path in the `$PATH` environment var
 
 Execute the AOT file with the cross compiled WAMR runtime inside QEMU:
 ```bash
-./iwasm-2.4.4 -f fib2 fib2.aot 10
+iwasm-2.4.4 -f fib2 fib2.aot 10
 ```
 This example calculate the 10-th Fibonacci number using the slow recursive algorithm.
 
 ## Build from source and run on the esp32c3 microcontroller
 ```bash
+cd esp32c3-idf/
+./path/to/esp-idf/export.sh
+idf.py build
+idf.py -p <port> flash monitor
 ```
 
 ## Testing
@@ -90,7 +94,7 @@ Create a new `.wat` o `.c` test source file and place it in `tests/wasm/src/`.
 Compile the `.c` test source file using:
 ```bash
 cd tests/wasm/
-clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export-all -o <name>.wasm src/<name>.c
+clang -O<level> --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export-all -o <name>.wasm src/<name>.c
 ```
 Compile the `.wat` test source file using:
 ```bash
@@ -103,7 +107,7 @@ On Debian 13 you can install `clang` or `wat2wasm` with:
 sudo apt install wabt clang
 ```
 
-Add the new test in `tests/CMakeLists.txt`
+Add the new test entry in `tests/CMakeLists.txt`
 
 ## Useful commands
 
