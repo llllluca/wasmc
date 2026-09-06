@@ -16,3 +16,4 @@ aotfmt.tex.bak
 aspell.sh
 coverage.info
 coverage/
+compile_commands.json
