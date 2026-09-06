@@ -6,7 +6,7 @@ if(ESP_PLATFORM)
             ${COMPONENT_DIR}/src
             ${COMPONENT_DIR}/src/rv32
         INCLUDE_DIRS
-            ${COMPONENT_DIR}/include/
+            ${COMPONENT_DIR}/include/wasmc/
             ${COMPONENT_DIR}/src
     )
   return()

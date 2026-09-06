@@ -1,6 +1,6 @@
 unsigned long fib2(unsigned long n) {
     if (n < 2) {
-        return 1;
+        return n;
     }
     return fib2(n - 2) + fib2(n - 1);
 }
