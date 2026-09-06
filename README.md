@@ -16,10 +16,12 @@ Build from source:
 ```bash
 mkdir build/
 cd build/
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 cd ..
 ```
+
+Use `-DCMAKE_BUILD_TYPE=Debug` for a debug build (`-ggdb -O0`).
 
 `wasmc` usage:
 ```bash

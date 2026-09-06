@@ -5,7 +5,7 @@ if [ ! -f "$wasm_file" ]; then
 fi
 
 root_dir=$(git rev-parse --show-toplevel)
-apps_dir=${root_dir}/build/apps
+apps_dir=${root_dir}/build
 
 valgrind --error-exitcode=1 \
         --tool=memcheck \

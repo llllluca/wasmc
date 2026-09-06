@@ -4,7 +4,7 @@ set(TESTS_DIR ${CMAKE_SOURCE_DIR}/tests)
 # Rebuild wasmc with address sanitizer
 add_executable(wasmc_asan ${CMAKE_SOURCE_DIR}/apps/wasmc.c)
 target_include_directories(wasmc_asan PRIVATE ${PROJECT_SOURCE_DIR}/include/wasmc/)
-target_link_libraries(wasmc_asan wasmc_lib)
+target_link_libraries(wasmc_asan libwasmc)
 target_compile_options(wasmc_asan PRIVATE -fsanitize=address)
 target_link_options(wasmc_asan PRIVATE -fsanitize=address)
 

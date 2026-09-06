@@ -1,17 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
 
 if(ESP_PLATFORM)
-  include (${COMPONENT_DIR}/src/CMakeLists.txt)
+    idf_component_register(
+        SRC_DIRS
+            ${COMPONENT_DIR}/src
+            ${COMPONENT_DIR}/src/rv32
+        INCLUDE_DIRS
+            ${COMPONENT_DIR}/include/
+            ${COMPONENT_DIR}/src
+    )
   return()
 endif()
 
 project(wasmc LANGUAGES C)
-
-#Debug is the default build type
-if (NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Debug")
-endif()
-message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 
 #Automatic creation of compile_commands.json used by language servers
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -25,29 +26,41 @@ if(CMAKE_BUILD_TYPE STREQUAL "Coverage")
     COMMAND lcov
         --directory ${CMAKE_CURRENT_BINARY_DIR}
         --capture
-        --output-file ${CMAKE_SOURCE_DIR}/coverage.info
+        --output-file coverage.info
         &&
-        genhtml
-        -o ${CMAKE_SOURCE_DIR}/coverage
-        ${CMAKE_SOURCE_DIR}/coverage.info)
+        genhtml -o coverage coverage.info
+    )
 endif()
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/src/)
-add_subdirectory(${PROJECT_SOURCE_DIR}/apps/)
+# Build libwasmc.a
+add_library(
+    libwasmc STATIC
+    src/wasm.c
+    src/compile.c
+    src/ir.c
+    src/rega.c
+    src/aot.c
+    src/rv32/emit.c
+)
+set_property(TARGET libwasmc PROPERTY OUTPUT_NAME wasmc)
+target_include_directories(
+    libwasmc
+    PUBLIC include/wasmc
+    PRIVATE src
+)
 
-#Add 'uninstall' target
-if(NOT TARGET uninstall)
-  configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
-    IMMEDIATE @ONLY)
+#Build readaot
+add_executable(readaot apps/readaot.c)
+target_include_directories(readaot PRIVATE src)
 
-  add_custom_target(uninstall
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
-endif()
+#Build wasmc
+add_executable(wasmc apps/wasmc.c)
+target_include_directories(wasmc PRIVATE include/wasmc)
+target_link_libraries(wasmc libwasmc)
 
+# Build tests
 include(CTest)
 if(BUILD_TESTING)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/tests/)
+    add_subdirectory(tests)
 endif()
 
