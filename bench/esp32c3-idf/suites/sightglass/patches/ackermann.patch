@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/ackermann.c
++++ b/benchmarks/shootout/ackermann.c
+@@ -14,7 +14,7 @@
+ 
+     static AckermannCtx ctx;
+     ctx.M = 3;
+-    ctx.N = 10;
++    ctx.N = 5;
+ 
+     *ctx_p = (void *) &ctx;
+ }

@@ -1,6 +1,6 @@
 .ccls-cache/
 .ccls
-wasmc
+/wasmc
 tests/a.aot
 build/
 tools/readaot
@@ -18,3 +18,4 @@ aspell.sh
 coverage.info
 coverage/
 compile_commands.json
+config.mk

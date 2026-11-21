@@ -1,0 +1,16 @@
+--- a/benchmarks/shootout/memmove.c
++++ b/benchmarks/shootout/memmove.c
+@@ -6,11 +6,11 @@
+ #include <string.h>
+ 
+ #ifndef TEST_INTERPRETER
+-#define STR_SIZE 10000
++#define STR_SIZE 300
+ #else
+ #define STR_SIZE 1000
+ #endif
+-#define ITERATIONS 200
++#define ITERATIONS 5
+ 
+ typedef struct MemmoveCtx_ {
+     char * str;

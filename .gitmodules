@@ -1,0 +1,9 @@
+[submodule "bench/esp32c3-idf/suites/sightglass/upstream"]
+	path = bench/esp32c3-idf/suites/sightglass/upstream
+	url = https://github.com/wasm-micro-runtime/sightglass.git
+[submodule "bench/esp32c3-idf/suites/embench/upstream"]
+	path = bench/esp32c3-idf/suites/embench/upstream
+	url = https://github.com/embench/embench-iot.git
+[submodule "wasm-micro-runtime"]
+	path = wasm-micro-runtime
+	url = https://github.com/bytecodealliance/wasm-micro-runtime.git

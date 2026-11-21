@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/xblabla20.c
++++ b/benchmarks/shootout/xblabla20.c
+@@ -6,7 +6,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#define ITERATIONS 1000
++#define ITERATIONS 300
+ #define BUF_SIZE 1000
+ 
+ #define ROTL64(x, b) (uint64_t)(((x) << (b)) | ((x) >> (64 - (b))))

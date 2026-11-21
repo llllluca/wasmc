@@ -1,0 +1,13 @@
+--- a/benchmarks/shootout/strtok.c
++++ b/benchmarks/shootout/strtok.c
+@@ -5,8 +5,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#define STR_SIZE 100000
+-#define ITERATIONS 10000
++#define STR_SIZE 10000
++#define ITERATIONS 25
+ 
+ typedef struct StrtokCtx_ {
+     char * str;

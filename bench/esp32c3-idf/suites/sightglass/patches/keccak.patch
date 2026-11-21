@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/keccak.c
++++ b/benchmarks/shootout/keccak.c
+@@ -3,7 +3,7 @@
+ 
+ #include <stdint.h>
+ 
+-#define ITERATIONS 10000
++#define ITERATIONS 1000
+ 
+ #define keccak_BLOCKBYTES 200
+ #define ROTL64(x, b) (uint32_t)(((x) << (b)) | ((x) >> (64 - (b))))

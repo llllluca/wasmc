@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/nestedloop3.c
++++ b/benchmarks/shootout/nestedloop3.c
+@@ -4,7 +4,7 @@
+ #include <stdlib.h>
+ 
+ #ifndef TEST_INTERPRETER
+-#define LENGTH 110
++#define LENGTH 24
+ #else
+ #define LENGTH 50
+ #endif

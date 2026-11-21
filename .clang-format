@@ -1,0 +1,28 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 80
+UseTab: Never
+BreakBeforeBraces: Linux
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+InsertBraces: true
+IndentCaseLabels: false
+AlignTrailingComments: true
+AlignConsecutiveMacros: Consecutive
+SortIncludes: Never
+ForEachMacros:
+  - WDEC_FOR_EACH_TYPE
+  - WDEC_FOR_EACH_IMPORT
+  - WDEC_FOR_EACH_LOCALS
+  - WDEC_FOR_EACH_FUNC
+  - WDEC_FOR_EACH_BR_TABLE_LABEL
+  - WDEC_FOR_EACH_INSTR
+  - WDEC_FOR_EACH_TABLE
+  - WDEC_FOR_EACH_MEM
+  - WDEC_FOR_EACH_GLOBAL
+  - WDEC_FOR_EACH_EXPORT
+  - WDEC_FOR_EACH_ELEM
+  - WDEC_FOR_EACH_ELEM_FUNCIDX
+  - WDEC_FOR_EACH_DATA
+SpaceBeforeParens: ControlStatementsExceptControlMacros

@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/gimli.c
++++ b/benchmarks/shootout/gimli.c
+@@ -6,7 +6,7 @@
+ #ifdef STM32
+ #  define ITERATIONS 10000 * 1
+ #elif defined(ESP32)
+-#  define ITERATIONS 2000
++#  define ITERATIONS 800
+ #elif !defined(TEST_INTERPRETER)
+ #  define ITERATIONS 10000 * 100
+ #else

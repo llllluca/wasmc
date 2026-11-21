@@ -1,0 +1,13 @@
+--- a/benchmarks/shootout/strlen.c
++++ b/benchmarks/shootout/strlen.c
+@@ -5,8 +5,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#define STR_SIZE 500000
+-#define ITERATIONS 1000
++#define STR_SIZE 10000
++#define ITERATIONS 50
+ 
+ typedef struct StrlenCtx_ {
+     char * str;

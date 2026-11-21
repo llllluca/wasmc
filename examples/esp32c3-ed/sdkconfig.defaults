@@ -1,0 +1,25 @@
+CONFIG_IDF_TARGET="esp32c3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The serial line belongs to the editor: only warnings and errors at boot
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+
+# A long global command (g/.../s/.../) may keep the idle task from running:
+# it is not a hang, and the message would land in the middle of the text
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+
+# WAMR copies the AOT code to heap memory and runs it from there: the
+# heap must be allowed to hold executable code
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+
+# WAMR: the AOT runtime only (no interpreter, no WASI, no libc)
+CONFIG_WAMR_ENABLE_AOT=y
+CONFIG_WAMR_ENABLE_INTERP=n
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n

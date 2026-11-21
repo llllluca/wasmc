@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/matrix2.c
++++ b/benchmarks/shootout/matrix2.c
+@@ -4,7 +4,7 @@
+ #include <assert.h>
+ #include <stdlib.h>
+ 
+-#define LENGTH 300000
++#define LENGTH 25
+ #define SIZE 20
+ 
+ static char buf[102400] = { 0 };

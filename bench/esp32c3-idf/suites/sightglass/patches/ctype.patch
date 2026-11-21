@@ -1,0 +1,13 @@
+--- a/benchmarks/shootout/ctype.c
++++ b/benchmarks/shootout/ctype.c
+@@ -6,8 +6,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#define STR_SIZE 50000
+-#define ITERATIONS 1000
++#define STR_SIZE 5000
++#define ITERATIONS 10
+ 
+ typedef struct CtypeCtx_ {
+     char * str;

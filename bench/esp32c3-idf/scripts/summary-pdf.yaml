@@ -1,0 +1,17 @@
+# pandoc defaults for the PDF of summary.md, from summary.py:
+#
+#   cd results && pandoc -d ../scripts/summary-pdf.yaml summary.md -o summary.pdf
+#
+# The PDF's options live here, not in summary.md's YAML header, which
+# GitHub and GitLab show as a table at the top of the page.
+
+# summary.md's "#" title becomes the PDF's title, its "##" sections the
+# PDF's sections
+shift-heading-level-by: -1
+
+variables:
+  fontsize: 12pt
+
+# 2 cm margins for the compile chart's page only (${.}: this file's directory)
+filters:
+  - ${.}/summary.lua

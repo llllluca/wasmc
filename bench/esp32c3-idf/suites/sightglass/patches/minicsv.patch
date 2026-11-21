@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/minicsv.c
++++ b/benchmarks/shootout/minicsv.c
+@@ -7,7 +7,7 @@
+ #include <string.h>
+ 
+ #ifndef TEST_INTERPRETER
+-#define ITERATIONS 1000000
++#define ITERATIONS 500
+ #else
+ #define ITERATIONS 100000
+ #endif

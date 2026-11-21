@@ -1,0 +1,14 @@
+CONFIG_IDF_TARGET="esp32c3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# WAMR copies the AOT code to heap memory and runs it from there: the
+# heap must be allowed to hold executable code
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+
+# WAMR: the AOT runtime only (no interpreter, no WASI, no libc)
+CONFIG_WAMR_ENABLE_AOT=y
+CONFIG_WAMR_ENABLE_INTERP=n
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n

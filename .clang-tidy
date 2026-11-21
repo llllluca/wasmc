@@ -1,0 +1,50 @@
+---
+# clang-tidy configuration, used by `make tidy` and by clangd.
+#
+# Whole groups are turned on, then the few checks that do not apply to this
+# code base are turned off again, each with its reason.
+# C++-only and project-specific groups (cppcoreguidelines, modernize, hicpp,
+# altera, llvmlibc, google, ...) stay off.
+Checks:
+  # Start from nothing; only the groups below are enabled.
+  - '-*'
+
+  # --- Enabled groups ------------------------------------------------------
+
+  # Clang Static Analyzer: path-sensitive search for null dereferences,
+  # leaks, use-after-free, uninitialized reads. The strongest group.
+  - 'clang-analyzer-*'
+  # Code patterns that are often bugs: suspicious realloc, int
+  # multiplications widened to size_t, unparenthesized macro arguments, ...
+  - 'bugprone-*'
+  # SEI CERT C secure coding rules: atoi, system, rewind, ...
+  # Many are aliases of bugprone checks.
+  - 'cert-*'
+  # Assorted checks: redundant expressions, unused parameters, ...
+  - 'misc-*'
+  # Inefficient code (mostly aimed at C++, cheap to keep).
+  - 'performance-*'
+  # Non-portable code, e.g. architecture-specific intrinsics.
+  - 'portability-*'
+  # Readability: else after return, nested ?:, redundant code, ...
+  - 'readability-*'
+
+  # --- Disabled checks -----------------------------------------------------
+
+  # Suggests the C11 Annex K *_s functions (memset_s, ...) for every
+  # memset/memcpy/fprintf; glibc and most other C libraries lack them.
+  - '-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling'
+  # errno "not checked" before the next libc call; the tools never use errno.
+  - '-clang-analyzer-unix.Errno'
+  # Unchecked return values of printf, fprintf, fclose, ...
+  - '-cert-err33-c'
+
+CheckOptions:
+  # glibc declares getopt_long in its internal bits/getopt_ext.h: never ask
+  # for bits/ headers, and keep <getopt.h>, the public header for it.
+  misc-include-cleaner.IgnoreHeaders: 'bits/.*;getopt\.h'
+
+# Findings are warnings; make tidy reports them without failing.
+WarningsAsErrors: ''
+# Also report findings in the project's own headers, not in system headers.
+HeaderFilterRegex: 'src/.*\.h'

@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/seqhash.c
++++ b/benchmarks/shootout/seqhash.c
+@@ -10,7 +10,7 @@
+ #if defined(STM32)
+ #  define ARENA_SIZE ((size_t) 10000)
+ #elif defined(ESP32)
+-#  define ARENA_SIZE ((size_t) 2000)
++#  define ARENA_SIZE ((size_t) 800)
+ #else
+ #  define ARENA_SIZE ((size_t) 1000000)
+ #endif

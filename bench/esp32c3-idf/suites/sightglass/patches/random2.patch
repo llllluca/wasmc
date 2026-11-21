@@ -1,0 +1,11 @@
+--- a/benchmarks/shootout/random2.c
++++ b/benchmarks/shootout/random2.c
+@@ -3,7 +3,7 @@
+ 
+ #include <stdlib.h>
+ 
+-#define LENGTH 40000000
++#define LENGTH 400000
+ 
+ #define IA 3877
+ #define IC 29573
